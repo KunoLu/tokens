@@ -1,0 +1,8 @@
+{"file": ".trellis/tasks/00-bootstrap-guidelines/prd.md", "reason": "Bootstrap PRD and checklist"}
+{"file": ".trellis/tasks/00-bootstrap-guidelines/implement.md", "reason": "Spec reshape plan"}
+{"file": "docs/upstream_policy.md", "reason": "Fork/upstream merge policy"}
+{"file": ".trellis/spec/guides/index.md", "reason": "Shared thinking guides"}
+{"file": ".trellis/spec/tokens-cli/backend/index.md", "reason": "Rust CLI conventions under Trellis tokens-cli backend label"}
+{"file": ".trellis/spec/tokens-cli/frontend/index.md", "reason": "npm launcher conventions"}
+{"file": ".trellis/spec/tokens-cli/frontend/packaging.md", "reason": "Shared platform packaging invariant"}
+{"file": ".trellis/spec/web/frontend/index.md", "reason": "Web app conventions"}
