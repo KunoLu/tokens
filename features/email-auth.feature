@@ -71,8 +71,6 @@ Feature: 邮箱密码认证
     When 访客打开排行榜或该用户的个人页
     Then 页面不展示 verified 徽章
 
-  @todo
-  # 阻塞：需要本机 CLI credentials 与可登录的 web 会话；本切片不改 Rust CLI。
   Scenario: CLI 设备授权在邮箱登录后仍能拿到 token
     Given 用户已在网页用邮箱登录
     When 用户在终端运行 tokens login 并在设备页确认

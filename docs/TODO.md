@@ -19,7 +19,7 @@ UI 对照：`docs/demo/teamboard-demo.html`
 
 ## 当前指针
 
-**当前：T2 已提交 `5aa99c88`（未 push）。** 任务 `.trellis/tasks/09-11-t2-email-auth/`（`in_progress`）。未 start T3。T0 `02504efe`、T12 `d5cf8604`、LICENSE `f24b60d1`、T1 `6759e183`、T2 `5aa99c88` 均未 push。
+**当前：无 active 任务。** T2 已 archive `--no-commit` → `.trellis/tasks/archive/2026-09/09-11-t2-email-auth/`（`status=completed`，`commit=5aa99c88`）。未 start T3。T0 `02504efe`、T12 `d5cf8604`、LICENSE `f24b60d1`、T1 `6759e183`、T2 代码 `5aa99c88`、T2 SHA 元数据 `7669eab1` 均未 push。
 
 推荐顺序：
 
@@ -100,7 +100,7 @@ UI 对照：`docs/demo/teamboard-demo.html`
 
 ### T2 认证改造 `L`
 
-**状态**：`[x]` 实现 + check 完成（2026-09-11）；等 3.4 commit  
+**状态**：`[x]` archive `--no-commit`（2026-09-11）。路径：`.trellis/tasks/archive/2026-09/09-11-t2-email-auth/`
 **依赖**：T0（与 T1 串行：两者都改 Docs 页）
 
 - [x] 迁移 `0024_add_password_auth.sql`（password_hash、email_verified_at、github_id 可空、email 部分唯一索引、verification tokens 表）
@@ -113,7 +113,7 @@ UI 对照：`docs/demo/teamboard-demo.html`
 - [x] **保留**：`tt_session`、device flow、`social_links` 列、Profile 社交链接图标行、cron 任务本身
 - [x] secret：`RESEND_API_KEY`、`EMAIL_FROM` 注释（部署前 `wrangler secret put` 这两个值）；Rate Limiting 用 wrangler `namespace_id` 1001，已写进配置，无需单独建 CF namespace
 - [x] 验证：可注册登录；弱密码被拒；`bun run lint` / `typecheck` / `build` / `test:migrations` 过
-- [ ] `tokens login` + `tokens submit`：**未跑**（BDD `@todo`；device flow 未改。不能用「未改代码」冒充已验证）
+- [x] `tokens login` + `tokens submit`：本地隔离配置跑通（2026-09-11）。`TOKENS_API_URL=http://localhost:3000` + `TOKENS_CONFIG_DIR=/tmp/tokens-t2-cli-e2e`；生产 `~/.config/tokens/credentials.json` mtime 未变。未对生产 submit。
 
 ---
 
@@ -279,3 +279,5 @@ bun run build
 | 2026-09-11 | 按授权卸干净 Homebrew `postgresql@16` 并删除 `/opt/homebrew/var/postgresql@16`。卸载时 Homebrew **自动**卸掉依赖 `krb5`（未执行 `brew autoremove`）。本地库改为 OrbStack Compose：`/Users/lusonglin/docker-compose/tokens/`，端口 `127.0.0.1:5433`。约定写入 `docs/local-dev-database.md`。 |
 | 2026-09-11 | T2 实现 + check 通过：邮箱密码认证、删 GitHub OAuth 与 verified 徽章、resend-verification。CLI 全链路未跑。等 3.4 确认 commit，未 start T3。 |
 | 2026-09-11 | T2 已提交 `5aa99c88`（未 push）。未 start T3。 |
+| 2026-09-11 | T2 archive `--no-commit` → `.trellis/tasks/archive/2026-09/09-11-t2-email-auth/`。CLI `tokens login`+`submit` 仍为 `[ ]`。未 start T3。 |
+| 2026-09-11 | 本地隔离 `tokens login` + `tokens submit` 对 `localhost:3000` 跑通；生产 credentials 未改写。未 start T3。 |
