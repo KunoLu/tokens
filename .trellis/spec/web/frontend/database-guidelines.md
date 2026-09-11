@@ -50,6 +50,8 @@
   2026-07-24 a sync-related change double-counted usage cross-device in
   production and the repair left four backup tables behind. Read what a
   migration does to existing rows, not just to the schema.
+- **Journal tail snapshot must exist.** `check-migrations.ts` allows historical `meta/*_snapshot.json` gaps, but the newest snapshot idx must equal `_journal.json` tail. SQL merged without its snapshot (as with 0022/0023) makes the next `db:generate` re-emit already-applied DDL. Reconstruct a missing tail snapshot from the previous snapshot plus the SQL delta. **Do not** run `bun run db:generate` in the live migrations directory to "fill" them — that diffs `schema.ts` against the stale snapshot and emits a new migration.
+- **Checker required-tables must track drops.** After a drop migration (e.g. `0020_drop_group_tables.sql`), remove those tables from `scripts/check-migrations.ts` required-tables, required-indexes, and representative-insert lists. Leaving them makes `test:migrations` fail on a correct schema.
 
 ## Query conventions
 

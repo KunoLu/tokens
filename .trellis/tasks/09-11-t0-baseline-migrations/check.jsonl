@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/web/frontend/quality-guidelines.md", "reason": "核对 test:migrations 是否真跑过"}
+{"file": ".trellis/spec/web/frontend/database-guidelines.md", "reason": "核对 snapshot 编号与 journal 尾部 idx 对齐"}

@@ -192,9 +192,6 @@ try {
         'api_tokens',
         'daily_breakdown',
         'device_codes',
-        'group_invites',
-        'group_members',
-        'groups',
         'sessions',
         'submissions',
         'submitted_devices',
@@ -206,9 +203,6 @@ try {
     "api_tokens",
     "daily_breakdown",
     "device_codes",
-    "group_invites",
-    "group_members",
-    "groups",
     "sessions",
     "submissions",
     "submitted_devices",
@@ -277,8 +271,6 @@ try {
     WHERE schemaname = 'public'
       AND indexname IN (
         'idx_device_codes_user_id',
-        'idx_group_invites_invited_by',
-        'idx_group_members_invited_by',
         'idx_submissions_leaderboard',
         'users_username_lower_unique'
       )
@@ -289,8 +281,6 @@ try {
     "required indexes exist",
     [
       "idx_device_codes_user_id",
-      "idx_group_invites_invited_by",
-      "idx_group_members_invited_by",
       "idx_submissions_leaderboard",
       "users_username_lower_unique",
     ].every((indexName) => indexes.has(indexName))
@@ -358,10 +348,6 @@ try {
         "output_tokens"
       )
       VALUES (${submission.id}, ${device.id}, '2026-05-25', 42, 0.4200, 20, 22)
-    `;
-    await sql`
-      INSERT INTO "groups" ("name", "slug", "created_by")
-      VALUES ('CI Group', 'ci-group', ${user.id})
     `;
   } finally {
     await sql`ROLLBACK`;
