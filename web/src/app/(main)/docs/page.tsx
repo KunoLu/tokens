@@ -1,9 +1,5 @@
 import type { Metadata } from "next";
-import { LayoutGridIcon, LockIcon, Share2Icon } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { CommandBlock, type DocCommand } from "@/components/docs/CommandBlock";
 import { BrandGlyph } from "@/components/profile/ModelIcon";
@@ -19,16 +15,15 @@ import { cn } from "@/lib/utils";
 
 export const metadata: Metadata = {
   title: "Docs - Tokens",
-  description:
-    "Install the Tokens CLI on macOS, Linux or Windows, and get the iOS app on TestFlight.",
+  description: "Install the Tokens CLI on macOS, Linux or Windows.",
   openGraph: {
     title: "Docs — Tokens",
-    description: "Install the Tokens CLI, or get the iOS app.",
+    description: "Install the Tokens CLI.",
     url: "https://tokens.ci",
     siteName: "Tokens",
     images: [
       {
-        url: `/api/og?title=Docs&subtitle=Install+the+Tokens+CLI,+or+get+the+iOS+app.`,
+        url: `/api/og?title=Docs&subtitle=Install+the+Tokens+CLI.`,
         width: 1200,
         height: 630,
       },
@@ -36,8 +31,6 @@ export const metadata: Metadata = {
   },
   twitter: { card: "summary_large_image" },
 };
-
-const TESTFLIGHT_URL = "https://testflight.apple.com/join/NWmvqqTX";
 
 /**
  * What the Supported clients grid renders.
@@ -127,38 +120,6 @@ function Section({
   );
 }
 
-function Feature({
-  icon: Icon,
-  title,
-  children,
-}: {
-  icon: React.ComponentType<{ className?: string }>;
-  title: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="flex gap-3">
-      <Icon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
-      <div className="flex flex-col gap-1">
-        <span className="text-sm font-medium">{title}</span>
-        <span className="text-sm leading-relaxed text-muted-foreground">
-          {children}
-        </span>
-      </div>
-    </div>
-  );
-}
-
-/** Apple's mark. lucide's `AppleIcon` is the fruit, which is not the same
- *  thing and reads as a mistake next to "TestFlight". */
-function AppleMark(props: React.SVGProps<SVGSVGElement>) {
-  return (
-    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" {...props}>
-      <path d="M11.932 6.908c.95 0 2.727-1.291 4.595-1.1.782.032 2.976.316 4.388 2.38-.113.069-2.622 1.528-2.593 4.565.034 3.617 3.166 4.828 3.221 4.85-.029.086-.506 1.723-1.658 3.416-1.002 1.463-2.039 2.919-3.675 2.95-1.606.03-2.125-.955-3.96-.955s-2.409.923-3.931.984c-1.581.06-2.78-1.58-3.79-3.037-2.065-2.98-3.64-8.422-1.527-12.087 1.051-1.824 2.93-2.98 4.969-3.009 1.549-.032 3.011 1.043 3.96 1.043zM16.552 0c.153 1.407-.411 2.817-1.251 3.833-.837 1.013-2.214 1.804-3.555 1.7-.185-1.378.495-2.814 1.27-3.712C13.883.805 15.346.05 16.553 0z" />
-    </svg>
-  );
-}
-
 export default function DocsPage() {
   return (
     <main
@@ -168,7 +129,7 @@ export default function DocsPage() {
       <div className="mx-auto w-full max-w-[860px]">
       <PageHeader
         title="Docs"
-        description="Get your AI coding usage onto the leaderboard, from the terminal or from your phone."
+        description="Get your AI coding usage onto the leaderboard from the terminal."
       />
 
         <div className="flex flex-col gap-12">
@@ -223,78 +184,6 @@ export default function DocsPage() {
           </Tabs>
         </Section>
 
-        <Section
-          id="ios"
-          title="iOS app"
-          description="Your rank and usage on your phone, without opening a browser."
-        >
-          <Card>
-            {/* Stacked on phones. Forced side by side, the title is the only
-                flexible item in the row, so at 390px it was squeezed to 53px
-                and wrapped onto two lines while the badge and button kept
-                their width. */}
-            <CardHeader className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-              <div className="flex flex-wrap items-center gap-2">
-                <CardTitle className="text-base">Tokens for iOS</CardTitle>
-                <Badge variant="secondary">TestFlight beta</Badge>
-              </div>
-              {/* Base UI composes via `render`, not Radix's `asChild`.
-                  Styled the way Apple's own install buttons are — black with
-                  the mark — so it reads as "this goes to Apple". It inverts in
-                  dark mode because a black button on a black card disappears. */}
-              <Button
-                className="w-full shrink-0 border border-transparent bg-black text-white hover:bg-black/85 sm:w-auto dark:bg-white dark:text-black dark:hover:bg-white/90"
-                render={
-                  <a href={TESTFLIGHT_URL} target="_blank" rel="noopener noreferrer" />
-                }
-              >
-                <AppleMark data-icon="inline-start" />
-                Join the TestFlight
-              </Button>
-            </CardHeader>
-            <CardContent className="flex flex-col gap-5">
-              <p className="text-sm leading-relaxed text-muted-foreground">
-                The app is built around Liquid Glass, so it picks up the depth
-                and translucency of iOS itself rather than looking like a web
-                page in a shell.
-              </p>
-
-              <div className="flex flex-col gap-4">
-                <Feature icon={Share2Icon} title="Share cards">
-                  Turn a day, a month or an all-time total into a card worth
-                  posting, rendered on device.
-                </Feature>
-                <Feature icon={LayoutGridIcon} title="Home screen widgets">
-                  Today&apos;s tokens and your standing, refreshed in the
-                  background.
-                </Feature>
-                <Feature icon={LockIcon} title="Lock screen widgets">
-                  Daily usage, running total and current rank, readable at a
-                  glance without unlocking.
-                </Feature>
-              </div>
-
-              <Separator />
-
-              <ol className="flex list-decimal flex-col gap-2 pl-5 text-sm leading-relaxed text-muted-foreground">
-                <li>Install Apple&apos;s TestFlight app from the App Store.</li>
-                <li>
-                  Open the invitation link above on the same device and tap
-                  Accept.
-                </li>
-                <li>
-                  Install Tokens from TestFlight, then enter a GitHub username.
-                  There is no sign-in: every profile on Tokens is public, so the
-                  app just reads the one you name. Enter your own username or
-                  the widgets will show someone else&apos;s usage.
-                </li>
-                <li>
-                  Long-press your Home or Lock screen to add the widgets.
-                </li>
-              </ol>
-            </CardContent>
-          </Card>
-        </Section>
 
         <Section
           id="usage"
@@ -361,11 +250,7 @@ export default function DocsPage() {
                 tedious to fake at scale, which is all the badge claims. It is
                 not an identity check, and it has no effect on ranking —
                 inflated numbers are handled separately, by the submission
-                checks and the{" "}
-                <a href="/shame" className="underline underline-offset-4 hover:text-foreground">
-                  Hall of Shame
-                </a>
-                .
+                checks.
               </CardContent>
             </Card>
           </div>
@@ -408,97 +293,6 @@ export default function DocsPage() {
           </div>
         </Section>
 
-        <Section
-          id="architecture"
-          title="Architecture"
-          description="What runs where. The repository is public so this can be checked rather than taken on trust."
-        >
-          <div className="flex flex-col gap-4">
-            <Card size="sm">
-              <CardHeader>
-                <CardTitle className="text-sm">The site and the API</CardTitle>
-              </CardHeader>
-              <CardContent className="text-sm leading-relaxed text-muted-foreground">
-                Next.js, deployed to Cloudflare Workers through OpenNext — one
-                Worker serves both the pages and the API, with no origin server
-                behind it. Static assets, the share cards, and the pages a
-                signed-out reader sees are cached at the edge, so most requests
-                are answered without running any code at all.
-                <br />
-                <br />
-                <a
-                  href="https://v.ps"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="font-medium text-foreground underline underline-offset-4"
-                >
-                  V.PS
-                </a>{" "}
-                sponsor a server for this project. Readers in mainland China
-                reach Cloudflare over routes that are often slow, and the fix
-                for that is a machine close to them rather than a cleverer
-                cache — which is a thing you have to be given, not something a
-                free tier provides.
-              </CardContent>
-            </Card>
-
-            <Card size="sm">
-              <CardHeader>
-                <CardTitle className="text-sm">The database</CardTitle>
-              </CardHeader>
-              <CardContent className="text-sm leading-relaxed text-muted-foreground">
-                <a
-                  href="https://neon.com"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="font-medium text-foreground underline underline-offset-4"
-                >
-                  Neon
-                </a>{" "}
-                (Postgres), reached through Cloudflare Hyperdrive, which keeps
-                warm pooled connections beside the database so a page issuing
-                several queries does not pay a fresh handshake for each. The
-                Worker is pinned to the same region: a request crosses the ocean
-                once, and every query after that is a local hop. Schema changes
-                go through Drizzle migrations applied at build time.
-                <br />
-                <br />
-                Neon sponsor the database this site runs on. Tokens is free to
-                use and free to self-host, and the leaderboard reads every page
-                straight from Postgres rather than a cache of a cache — that is
-                only affordable because someone is paying for it, and they are.
-              </CardContent>
-            </Card>
-
-            <Card size="sm">
-              <CardHeader>
-                <CardTitle className="text-sm">The CLI</CardTitle>
-              </CardHeader>
-              <CardContent className="text-sm leading-relaxed text-muted-foreground">
-                Rust, distributed as a prebuilt binary per platform through npm.
-                It reads the session files your clients already write, totals
-                them on your machine, and sends only the totals — token counts,
-                model names, timestamps. Prompts, completions and file contents
-                never leave the machine.{" "}
-                <code className="font-mono text-[13px]">tokens submit --dry-run</code>{" "}
-                prints exactly what would be uploaded.
-              </CardContent>
-            </Card>
-
-            <Card size="sm">
-              <CardHeader>
-                <CardTitle className="text-sm">Caching and scheduled work</CardTitle>
-              </CardHeader>
-              <CardContent className="text-sm leading-relaxed text-muted-foreground">
-                Rendered pages live in R2, with Durable Objects tracking which
-                tags a submission invalidates — so your own numbers update the
-                moment you submit rather than on a timer. The daily badge
-                refresh runs as a Worker cron trigger, in-process, with no
-                external scheduler holding a key.
-              </CardContent>
-            </Card>
-          </div>
-        </Section>
 
         </div>
       </div>

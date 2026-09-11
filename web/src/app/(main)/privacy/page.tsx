@@ -130,8 +130,7 @@ export default function PrivacyPage() {
           response.
         </p>
         <p>
-          Because profiles are public, the iOS app needs no sign-in: it simply
-          reads the public profile of whichever GitHub username you enter.
+          Because profiles are public, anyone can view them without signing in.
         </p>
       </Clause>
 

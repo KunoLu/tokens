@@ -39,7 +39,7 @@ Per `docs/upstream_policy.md`:
 ## Feature components
 
 - One folder per route/domain: `components/profile/`, `components/leaderboard/`,
-  `components/shame/`, `components/docs/`, `components/legal/`.
+  `components/docs/`, `components/legal/`.
 - Large feature surfaces export a barrel (`components/profile/index.tsx`
   re-exports components + types).
 - Big client orchestrators receive server-loaded data as props:

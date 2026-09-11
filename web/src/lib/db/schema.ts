@@ -42,8 +42,8 @@ export const users = pgTable(
     /**
      * Non-null once the user is banned. Banned users cannot authenticate
      * (web session, OAuth login, or API token) and are excluded from every
-     * leaderboard, but their submitted rows are retained as evidence and
-     * listed on the Hall of Shame together with banReason.
+     * leaderboard, but their submitted rows are retained as evidence together
+     * with banReason.
      */
     bannedAt: timestamp("banned_at", { withTimezone: true }),
     banReason: text("ban_reason"),

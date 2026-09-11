@@ -1,5 +1,3 @@
-import Link from "next/link";
-
 export interface BannedProfileData {
   banned: true;
   bannedAt: string | null;
@@ -76,12 +74,6 @@ export default function BannedProfileView({ data }: { data: BannedProfileData })
             </div>
           )}
 
-          <Link
-            href="/shame"
-            className="mt-8 inline-block rounded-lg border border-border bg-background px-4 py-2 text-sm font-medium text-foreground transition hover:border-foreground/25"
-          >
-            View the Hall of Shame →
-          </Link>
         </section>
       </div>
     </main>

@@ -17,8 +17,7 @@ One function serves both the API route and the page:
 - `app/(main)/leaderboard/page.tsx` calls `getLeaderboardData`, `getSession`,
   `getUserRank` directly in an async server component with `Suspense` +
   skeleton fallback.
-- `app/(main)/shame/page.tsx` runs `db.select()` straight in the server
-  component (`force-dynamic`).
+
 
 **Why not HTTP self-fetch:** server-side fetches to our own routes break
 under deployment protection and add a pointless network hop; the profile page
@@ -39,8 +38,8 @@ third parties), not for our own pages.
   [Cloudflare Deployment](./cloudflare-deployment.md)).
 - Pages/routes also export `revalidate` (`export const revalidate = 60` on
   `u/[username]/page.tsx:10` and the users API route).
-- **`revalidate` + `searchParams` flaps on Workers** (the shame page alternated
-  200/500): pages that depend on `searchParams` use
+- **`revalidate` + `searchParams` flaps on Workers** (a former `/shame` page
+  alternated 200/500): pages that depend on `searchParams` use
   `export const dynamic = 'force-dynamic'` instead.
 
 ## Client `fetch`: mutations and session only

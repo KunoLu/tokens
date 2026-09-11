@@ -25,7 +25,7 @@ export default function TermsPage() {
         <p>
           These terms are between you and Vincent Yang, the operator of Tokens
           (<a href="https://tokens.ci">tokens.ci</a>), and cover the website, the
-          public API, the command-line tool and the iOS app. Using any of them
+          public API and the command-line tool. Using any of them
           means you accept these terms. If you do not accept them, do not use
           Tokens.
         </p>
@@ -116,7 +116,7 @@ export default function TermsPage() {
         </p>
       </Clause>
 
-      <Clause heading="Enforcement and the Hall of Shame">
+      <Clause heading="Enforcement">
         <p>
           When a submission looks fabricated we check it against the raw
           submitted data. If we conclude an account submitted fraudulent usage,
@@ -124,11 +124,9 @@ export default function TermsPage() {
           counts toward any ranking.
         </p>
         <p>
-          Banned accounts are listed publicly on the{" "}
-          <a href="/shame">Hall of Shame</a> with their username partially
-          masked, and their records are retained as evidence of the ban rather
-          than deleted. We mask the name so that a ban cannot double as
-          publicity.
+          Banned accounts remain reachable at their profile URL with statistics
+          withheld. Submitted rows are retained as evidence of the ban rather
+          than deleted.
         </p>
         <p>
           If you believe a ban was a mistake, email{" "}

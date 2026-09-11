@@ -9,8 +9,8 @@ import { cn } from "@/lib/utils";
 /**
  * Root error boundary.
  *
- * /leaderboard, /shame and /u/[username] all do live database work during
- * render, so any of them can throw. Without this, that lands on Next's default
+ * /leaderboard and /u/[username] do live database work during
+ * render, so either of them can throw. Without this, that lands on Next's default
  * error screen — no navigation, no way back into the app.
  *
  * It renders inside the root layout, so the header and footer are still there;

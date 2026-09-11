@@ -54,7 +54,7 @@ Wraps `./.open-next/worker.js` for two reasons:
    nothing else. The worker reads/writes `caches.default` for:
    - `/api/og`, `/api/embed/*/svg`, `/api/badge/*/svg` (`CACHEABLE`) — pure
      functions of their URL that cost real CPU/DB work;
-   - `/` and `/leaderboard`, `/shame` (`PAGE_CACHEABLE`) — signed-out readers
+   - `/` and `/leaderboard`, `/teamboard` (`PAGE_CACHEABLE`) — signed-out readers
      only, because these pages personalize from the session;
    - `/u/*` (`PROFILE_CACHEABLE`) — cacheable for everyone (no per-reader
      identity), with unknown query params dropped from the cache key and only
@@ -76,7 +76,7 @@ Wraps `./.open-next/worker.js` for two reasons:
 ## Gotchas already paid for
 
 - `revalidate` + `searchParams` on Workers flaps between 200/500 — use
-  `force-dynamic` (shame page).
+  `force-dynamic` (former `/shame` page).
 - `next/image` optimization is off (`images.unoptimized: true` in
   `next.config.ts`) — use static assets and plain `<img>` for avatars.
 - Don't create per-request DB pools across requests — see

@@ -12,8 +12,8 @@
 ### Root error boundary
 
 `web/src/app/error.tsx` is a client boundary rendering **inside** the root
-layout, so header/footer survive. `/leaderboard`, `/shame`, and
-`/u/[username]` all do live database work during render, so any of them can
+layout, so header/footer survive. `/leaderboard` and
+`/u/[username]` do live database work during render, so either can
 throw — without this boundary the user lands on Next's default error screen
 with no way back. It offers the two useful actions (`reset()` and a link to
 the leaderboard) and shows `error.digest` — the only support handle on a
@@ -37,7 +37,7 @@ internal messages into the JSON body.
 ### Inline and toast feedback
 
 - Recoverable page states use the shadcn `Alert` — profile resubmit banner,
-  shame page, settings load failures.
+  settings load failures.
 - Mutation results use `toast.success` / `toast.error` (react-toastify via
   `ThemedToastContainer`) — see `app/settings/SettingsClient.tsx`.
 

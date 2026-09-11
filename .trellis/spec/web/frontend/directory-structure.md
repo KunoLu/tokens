@@ -14,7 +14,7 @@ web/
 │   │   ├── layout.tsx            # Root layout: fonts, Providers, Navigation
 │   │   ├── error.tsx             # Root error boundary (client)
 │   │   ├── globals.css           # Tailwind v4 + shadcn theme tokens (@theme)
-│   │   ├── (main)/               # Leaderboard home, shame, docs, legal
+│   │   ├── (main)/               # Leaderboard home, teamboard, docs, legal
 │   │   ├── u/[username]/         # Public profile: RSC page + ProfilePageClient
 │   │   ├── settings/             # Thin RSC page → SettingsClient
 │   │   ├── device/, local/       # OAuth / device-link client flows
@@ -24,7 +24,7 @@ web/
 │   │   ├── layout/               # Navigation, Container (CONTAINER), PageHeader, footer
 │   │   ├── profile/              # Profile feature components + barrel index.tsx
 │   │   ├── leaderboard/          # Leaderboard table + skeleton
-│   │   ├── shame/, docs/, legal/ # Feature folders per route
+│   │   ├── docs/, legal/         # Feature folders per route
 │   │   └── Graph*.tsx            # Shared visualization components
 │   ├── lib/                      # Server + shared client logic
 │   │   ├── db/                   # Drizzle: schema.ts, migrations/, usernameLookup.ts, index.ts
@@ -56,7 +56,7 @@ web/
   lives in route handlers (`app/api/submit/route.ts`) plus `lib/`.
 - **`components/ui/` is vendored shadcn** — edit like shadcn code, import via
   `@/components/ui/*`. Feature components live in a folder per route/domain
-  (`profile/`, `leaderboard/`, `shame/`), with a barrel `index.tsx` where the
+  (`profile/`, `leaderboard/`), with a barrel `index.tsx` where the
   surface is large (`components/profile/index.tsx`).
 - **`lib/` holds all shared logic, including hooks.** `components.json`
   declares an `@/hooks` alias but there is **no `src/hooks/` directory** —

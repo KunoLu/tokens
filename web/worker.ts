@@ -41,7 +41,7 @@ const CACHEABLE = /^\/api\/(og|embed\/[^/]+\/svg|badge\/[^/]+\/svg)/;
  * exactly the wrong place for that. Anyone carrying a session cookie takes the
  * normal path and sees precisely what they see today.
  */
-const PAGE_CACHEABLE = /^\/(leaderboard|shame)?$/;
+const PAGE_CACHEABLE = /^\/(leaderboard|teamboard)?$/;
 
 /**
  * Public profiles, cacheable for *every* reader rather than signed-out ones.

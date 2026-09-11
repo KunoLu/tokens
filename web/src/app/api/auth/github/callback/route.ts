@@ -70,9 +70,12 @@ export async function GET(request: Request) {
 
     if (existingUser.length > 0) {
       // Banned accounts may not sign in again; every user is tied to a
-      // GitHub identity, so the ban follows the github_id.
+      // GitHub identity, so the ban follows the github_id. Send them to
+      // the banned profile view instead of signing in.
       if (existingUser[0].bannedAt) {
-        return NextResponse.redirect(`${baseUrl}/shame?error=account_banned`);
+        return NextResponse.redirect(
+          `${baseUrl}/u/${encodeURIComponent(existingUser[0].username)}`
+        );
       }
 
       // Update existing user
