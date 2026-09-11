@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/web/frontend/index.md", "reason": "Quality Check 与验证命令"}
+{"file": ".trellis/spec/web/frontend/quality-guidelines.md", "reason": "lint/typecheck/build/test:migrations 是唯一门"}
+{"file": ".trellis/spec/web/frontend/database-guidelines.md", "reason": "核对迁移是否 additive、snapshot 是否对齐 journal"}
+{"file": ".trellis/spec/web/frontend/component-guidelines.md", "reason": "核对组件来源与 token"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "跨层一致性"}

@@ -1,0 +1,11 @@
+{"file": ".trellis/spec/web/frontend/index.md", "reason": "Web 包入口、验证命令与 Pre-Development Checklist"}
+{"file": ".trellis/spec/web/frontend/directory-structure.md", "reason": "app/components/lib 归属"}
+{"file": ".trellis/spec/web/frontend/database-guidelines.md", "reason": "additive 迁移、snapshot 与 schema 约定"}
+{"file": ".trellis/spec/web/frontend/quality-guidelines.md", "reason": "web 无单测时的验证门与上游合并政策"}
+{"file": ".trellis/spec/web/frontend/data-fetching.md", "reason": "RSC 直接调 lib，禁止自 fetch /api"}
+{"file": ".trellis/spec/web/frontend/error-handling.md", "reason": "API JSON 错误与边界"}
+{"file": ".trellis/spec/web/frontend/type-safety.md", "reason": "Zod 与 Drizzle 推断"}
+{"file": ".trellis/spec/web/frontend/component-guidelines.md", "reason": "shadcn 与 feature folder 约定"}
+{"file": ".trellis/spec/web/frontend/cloudflare-deployment.md", "reason": "wrangler / Worker / cron"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "API/DB/UI 跨层数据流"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "改常量前先搜，避免漏改"}
