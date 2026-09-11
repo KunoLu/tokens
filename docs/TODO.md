@@ -19,7 +19,7 @@ UI 对照：`docs/demo/teamboard-demo.html`
 
 ## 当前指针
 
-**当前：T2 已 check + update-spec，等 3.4 确认后再 commit。** 任务 `.trellis/tasks/09-11-t2-email-auth/`（`in_progress`）。未 start T3。T0 `02504efe`、T12 `d5cf8604`、LICENSE `f24b60d1`、T1 `6759e183` 均未 push。
+**当前：T2 已提交 `5aa99c88`（未 push）。** 任务 `.trellis/tasks/09-11-t2-email-auth/`（`in_progress`）。未 start T3。T0 `02504efe`、T12 `d5cf8604`、LICENSE `f24b60d1`、T1 `6759e183`、T2 `5aa99c88` 均未 push。
 
 推荐顺序：
 
@@ -278,3 +278,4 @@ bun run build
 | 2026-09-11 | T0 实现完成：去掉 check-migrations 对已删 group 表的断言；补 0022/0023 snapshot；`test:migrations` 全绿。Homebrew postgresql@16 已 `brew services stop`，验证用 pg_ctl 起停。**未切 T12**：仍待 check / update-spec / scoped commit。 |
 | 2026-09-11 | 按授权卸干净 Homebrew `postgresql@16` 并删除 `/opt/homebrew/var/postgresql@16`。卸载时 Homebrew **自动**卸掉依赖 `krb5`（未执行 `brew autoremove`）。本地库改为 OrbStack Compose：`/Users/lusonglin/docker-compose/tokens/`，端口 `127.0.0.1:5433`。约定写入 `docs/local-dev-database.md`。 |
 | 2026-09-11 | T2 实现 + check 通过：邮箱密码认证、删 GitHub OAuth 与 verified 徽章、resend-verification。CLI 全链路未跑。等 3.4 确认 commit，未 start T3。 |
+| 2026-09-11 | T2 已提交 `5aa99c88`（未 push）。未 start T3。 |
