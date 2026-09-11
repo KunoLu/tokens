@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { CommandBlock, type DocCommand } from "@/components/docs/CommandBlock";
 import { BrandGlyph } from "@/components/profile/ModelIcon";
@@ -52,18 +51,18 @@ const CLIENT_GRID: ReadonlyArray<{ id: string; name: string; logo: string }> = [
 
 const MACOS: readonly DocCommand[] = [
   { command: BREW_INSTALL_COMMAND, note: "install" },
-  { command: "tokens login", note: "link your GitHub account" },
+  { command: "tokens login", note: "sign in" },
   { command: "brew services start tokens", note: "submit automatically" },
 ];
 
 const LINUX: readonly DocCommand[] = [
   { command: "curl -fsSL https://tokens.ci/install.sh | sh", note: "install" },
-  { command: "tokens login", note: "link your GitHub account" },
+  { command: "tokens login", note: "sign in" },
   { command: "tokens serve", note: "submit automatically" },
 ];
 
 const WINDOWS: readonly DocCommand[] = [
-  { command: "bunx tokens-cli@latest login", note: "link your GitHub account" },
+  { command: "bunx tokens-cli@latest login", note: "sign in" },
   { command: "bunx tokens-cli@latest submit", note: "submit your usage" },
 ];
 
@@ -201,60 +200,6 @@ export default function DocsPage() {
           />
         </Section>
 
-        <Section
-          id="verified"
-          title="The verified badge"
-          description="A small check next to a name on the leaderboard. It says the account is a real, findable person — nothing more."
-        >
-          <div className="flex flex-col gap-4">
-            <Card size="sm">
-              <CardHeader>
-                <CardTitle className="text-sm">How to get it</CardTitle>
-              </CardHeader>
-              <CardContent className="text-sm leading-relaxed text-muted-foreground">
-                Add at least <strong className="font-medium text-foreground">two social
-                links</strong> to your GitHub profile — the &ldquo;Social accounts&rdquo;
-                fields in{" "}
-                <a
-                  href="https://github.com/settings/profile"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="underline underline-offset-4 hover:text-foreground"
-                >
-                  GitHub profile settings
-                </a>
-                . Any two count: a personal site, X, LinkedIn, Mastodon, YouTube.
-                That is the whole rule.
-              </CardContent>
-            </Card>
-
-            <Card size="sm">
-              <CardHeader>
-                <CardTitle className="text-sm">When it appears</CardTitle>
-              </CardHeader>
-              <CardContent className="text-sm leading-relaxed text-muted-foreground">
-                Links are re-read once a day, at 03:20 UTC. Adding them now means
-                the badge appears on the next run rather than immediately —
-                signing out and back in does not speed it up. Dropping below two
-                links removes it on the same schedule.
-              </CardContent>
-            </Card>
-
-            <Card size="sm">
-              <CardHeader>
-                <CardTitle className="text-sm">Why two links</CardTitle>
-              </CardHeader>
-              <CardContent className="text-sm leading-relaxed text-muted-foreground">
-                A leaderboard attracts throwaway accounts. Filling in two social
-                fields is trivial for someone who already exists online and
-                tedious to fake at scale, which is all the badge claims. It is
-                not an identity check, and it has no effect on ranking —
-                inflated numbers are handled separately, by the submission
-                checks.
-              </CardContent>
-            </Card>
-          </div>
-        </Section>
 
         <Section
           id="clients"

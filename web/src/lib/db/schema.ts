@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import {
   pgTable,
   uuid,
@@ -25,15 +26,19 @@ export const users = pgTable(
   "users",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    githubId: integer("github_id").notNull().unique(),
+    // Nullable since 0024: email/password accounts have no GitHub identity.
+    // Postgres allows any number of NULLs under the UNIQUE constraint.
+    githubId: integer("github_id").unique(),
     username: varchar("username", { length: 39 }).notNull().unique(),
     displayName: varchar("display_name", { length: 255 }),
     avatarUrl: text("avatar_url"),
     email: varchar("email", { length: 255 }),
+    passwordHash: varchar("password_hash", { length: 255 }),
+    emailVerifiedAt: timestamp("email_verified_at", { withTimezone: true }),
     /**
      * Snapshot of the user's public GitHub social links (website + recognized
-     * social accounts), refreshed on login and on profile views. An array of
-     * {provider, url}; >= 2 entries marks the user as verified.
+     * social accounts), refreshed by the daily cron and rendered on the
+     * profile page. An array of {provider, url}.
      */
     socialLinks: jsonb("social_links"),
     socialLinksSyncedAt: timestamp("social_links_synced_at", {
@@ -41,7 +46,7 @@ export const users = pgTable(
     }),
     /**
      * Non-null once the user is banned. Banned users cannot authenticate
-     * (web session, OAuth login, or API token) and are excluded from every
+     * (web session, password login, or API token) and are excluded from every
      * leaderboard, but their submitted rows are retained as evidence together
      * with banReason.
      */
@@ -64,6 +69,45 @@ export const users = pgTable(
       usernameLowerExpression(table.username)
     ),
     index("idx_users_github_id").on(table.githubId),
+    // Login lookup is by email, case-insensitively; rows without an email
+    // (legacy OAuth accounts) stay outside the partial index.
+    uniqueIndex("users_email_lower_unique")
+      .on(sql`lower(${table.email})`)
+      .where(sql`"email" IS NOT NULL`),
+  ]
+);
+
+// ============================================================================
+// EMAIL VERIFICATION TOKENS
+// ============================================================================
+/**
+ * Single-use tokens for email verification (24h) and password reset (1h).
+ * Only the SHA-256 hash is stored; the plaintext lives solely in the emailed
+ * link. Issuing a new token for the same user+purpose consumes the old ones,
+ * so at most one is active at a time. Expired rows are swept by the daily cron.
+ */
+export const emailVerificationTokens = pgTable(
+  "email_verification_tokens",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    tokenHash: varchar("token_hash", { length: 64 }).notNull(),
+    purpose: varchar("purpose", { length: 20 }).notNull(), // 'verify_email' | 'reset_password'
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    consumedAt: timestamp("consumed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    unique("email_verification_tokens_token_hash_unique").on(table.tokenHash),
+    index("idx_email_verification_tokens_user_purpose").on(
+      table.userId,
+      table.purpose
+    ),
+    index("idx_email_verification_tokens_expires_at").on(table.expiresAt),
   ]
 );
 
@@ -447,6 +491,8 @@ export const archivedWindowTotals = pgTable(
 // ============================================================================
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
+export type EmailVerificationToken = typeof emailVerificationTokens.$inferSelect;
+export type NewEmailVerificationToken = typeof emailVerificationTokens.$inferInsert;
 export type Session = typeof sessions.$inferSelect;
 export type NewSession = typeof sessions.$inferInsert;
 export type ApiToken = typeof apiTokens.$inferSelect;

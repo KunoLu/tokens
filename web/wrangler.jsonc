@@ -93,16 +93,34 @@
       "binding": "HYPERDRIVE",
       "id": "35e35c2c7c3b4e5bb9cb590f2db79168",
       // Used by `wrangler dev` so local development talks to a local database.
-      "localConnectionString": "postgresql://tokens:tokens@localhost:5432/tokens"
+      "localConnectionString": "postgresql://tokens:tokens@127.0.0.1:5433/tokens"
     }
   ],
 
-  // Daily verified-badge refresh, replacing the GitHub Actions + SSH trigger.
-  // Runs in-process, so it needs no public endpoint, no CRON_SECRET round trip
-  // and no WAF exception for GitHub runner IPs.
+  // Daily social-links refresh plus expired email-token sweep, replacing the
+  // GitHub Actions + SSH trigger. Runs in-process, so it needs no public
+  // endpoint, no CRON_SECRET round trip and no WAF exception for GitHub
+  // runner IPs.
   "triggers": {
     "crons": ["20 3 * * *"]
   },
+
+  // Guards register / login / forgot-password / resend-verification: 10
+  // requests per 60 seconds per client IP. `namespace_id` is a stable
+  // account-unique integer defined here (Cloudflare docs use "1001"); it is
+  // not a provisioned secret and must not change per deploy — same id shares
+  // counters. Local `next dev` has no rate-limit runtime and skips the check.
+  "ratelimits": [
+    {
+      "name": "AUTH_RATE_LIMITER",
+      "namespace_id": "1001",
+      "simple": { "limit": 10, "period": 60 }
+    }
+  ],
+
+  // Secrets — set with `wrangler secret put`, never written here:
+  //   RESEND_API_KEY  - Resend API key for verification / reset emails
+  //   EMAIL_FROM      - From address, e.g. "Tokens <auth@tokens.ci>"
 
   "observability": {
     "enabled": true
@@ -147,6 +165,18 @@
       "triggers": {
         "crons": ["20 3 * * *"]
       },
+      // Duplicated from the top level: env blocks override rather than merge,
+      // so without this the production deploy would lose the auth limiter.
+      // Same namespace_id "1001" as the top level — that id is the stable
+      // account-unique counter namespace defined in this file, and sharing it
+      // keeps counters consistent whichever env serves traffic.
+      "ratelimits": [
+        {
+          "name": "AUTH_RATE_LIMITER",
+          "namespace_id": "1001",
+          "simple": { "limit": 10, "period": 60 }
+        }
+      ],
       "observability": {
         "enabled": true
       }

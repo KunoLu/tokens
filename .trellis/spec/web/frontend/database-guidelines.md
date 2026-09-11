@@ -25,7 +25,6 @@
   hot-start mechanism already there.
 
 ## Schema (`web/src/lib/db/schema.ts`)
-
 - `pgTable` definitions with section comments, explicit indexes, and `jsonb`
   for breakdowns/social links (users, sessions, submissions, dailyBreakdown,
   …).
@@ -35,6 +34,13 @@
   `getSingleUsernameMatch` with normalized cache keys
   (`lib/db/usernameLookup.ts`) — usernames are unique ignoring case, and
   ambiguous matches are an error (409), not a guess.
+- Email matching is case-insensitive via partial unique index
+  `users_email_lower_unique` (`lower(email) WHERE email IS NOT NULL`).
+  `github_id` is nullable (UNIQUE kept; several NULLs are allowed). Password
+  auth columns: `password_hash`, `email_verified_at`. Token table:
+  `email_verification_tokens` (hash only). See [Authentication](./auth.md).
+  Before applying `0024` to a database that already has emails, check
+  `SELECT lower(email), count(*) FROM users WHERE email IS NOT NULL GROUP BY 1 HAVING count(*) > 1`.
 
 ## Migrations
 
@@ -51,7 +57,11 @@
   production and the repair left four backup tables behind. Read what a
   migration does to existing rows, not just to the schema.
 - **Journal tail snapshot must exist.** `check-migrations.ts` allows historical `meta/*_snapshot.json` gaps, but the newest snapshot idx must equal `_journal.json` tail. SQL merged without its snapshot (as with 0022/0023) makes the next `db:generate` re-emit already-applied DDL. Reconstruct a missing tail snapshot from the previous snapshot plus the SQL delta. **Do not** run `bun run db:generate` in the live migrations directory to "fill" them — that diffs `schema.ts` against the stale snapshot and emits a new migration.
-- **Checker required-tables must track drops.** After a drop migration (e.g. `0020_drop_group_tables.sql`), remove those tables from `scripts/check-migrations.ts` required-tables, required-indexes, and representative-insert lists. Leaving them makes `test:migrations` fail on a correct schema.
+- **Checker required-tables must track drops and adds.** After a drop
+  migration, remove those tables from `scripts/check-migrations.ts`. After an
+  add (`email_verification_tokens` in `0024`), add the table/columns/indexes
+  to the same checker. Leaving the list stale makes `test:migrations` fail on
+  a correct schema.
 
 ## Query conventions
 

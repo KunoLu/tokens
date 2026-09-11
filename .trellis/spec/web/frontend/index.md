@@ -34,6 +34,7 @@
 | [Data Fetching](./data-fetching.md) | RSC calls lib functions directly; `unstable_cache` + tags; client fetch for mutations only |
 | [Error Handling](./error-handling.md) | `error.tsx` boundary, API JSON errors, Alert/toast, missing-`DATABASE_URL` fallback |
 | [Database Guidelines](./database-guidelines.md) | `lib/db/schema.ts`, Hyperdrive vs `DATABASE_URL`, per-request WeakMap, additive migrations |
+| [Authentication](./auth.md) | Email/password APIs, PBKDF2, Resend, session cookie unchanged, no GitHub OAuth |
 | [Cloudflare Deployment](./cloudflare-deployment.md) | wrangler, OpenNext cache topology, `worker.ts` edge cache + cron |
 | [Quality Guidelines](./quality-guidelines.md) | No web unit tests, verification commands, upstream merge policy |
 
@@ -60,7 +61,10 @@ web unit tests):
 2. Read [Data Fetching](./data-fetching.md) before adding any data load —
    RSC pages call `lib/` functions directly and never HTTP-fetch their own
    `/api` routes.
-3. If the change touches the submission contract, read
+3. If the change touches login, registration, passwords, or email delivery,
+   read [Authentication](./auth.md). Do not change `lib/auth/session.ts`
+   signatures or device-flow JSON.
+4. If the change touches the submission contract, read
    `web/src/lib/validation/submission.ts` together with the CLI side
    (`.trellis/spec/tokens-cli/backend/quality-guidelines.md`) — both must move
    together.

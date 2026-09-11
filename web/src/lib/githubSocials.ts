@@ -147,14 +147,14 @@ async function persistSocialLinks(
       .set({ socialLinks: links, socialLinksSyncedAt: new Date() })
       .where(usernameEqualsIgnoreCase(username));
   } catch {
-    // The snapshot column powers the leaderboard verified badge; failing to
+    // The snapshot powers the profile page's social-links row; failing to
     // refresh it must never break the caller.
   }
 }
 
 /**
  * Fetch the user's current social links from GitHub and persist the snapshot
- * on their users row (used by the leaderboard verified badge). Never throws.
+ * on their users row (rendered by the profile page). Never throws.
  */
 export async function syncGitHubSocialLinks(
   username: string,

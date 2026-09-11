@@ -6,6 +6,7 @@
 Trellis 父任务：`.trellis/tasks/09-10-teamboard-teams-auth/`  
 UI 对照：`docs/demo/teamboard-demo.html`  
 上游策略：`docs/upstream_policy.md`  
+本地数据库：`docs/local-dev-database.md`（OrbStack Compose，禁止 Homebrew Postgres）
 实施分支：`feature/teamboard-teams-auth`
 
 ## 维护规则
@@ -18,7 +19,7 @@ UI 对照：`docs/demo/teamboard-demo.html`
 
 ## 当前指针
 
-**当前：T0 收尾**（实现已过 `test:migrations`，尚待 trellis-check / update-spec / scoped commit；**不要**切 T12）
+**当前：T2 已 check + update-spec，等 3.4 确认后再 commit。** 任务 `.trellis/tasks/09-11-t2-email-auth/`（`in_progress`）。未 start T3。T0 `02504efe`、T12 `d5cf8604`、LICENSE `f24b60d1`、T1 `6759e183` 均未 push。
 
 推荐顺序：
 
@@ -54,7 +55,7 @@ UI 对照：`docs/demo/teamboard-demo.html`
 
 ### T0 基线修复 `S`
 
-**状态**：收尾中（实现完成，lifecycle 未关）
+**状态**：已 archive（2026-09-11，`--no-commit`；git `02504efe`）
 **依赖**：无  
 **阻塞**：T1、T2、T3、T10、T12  
 **目的**：让 `db:generate` / `test:migrations` 与现实一致，否则后续迁移会产出错误 diff。
@@ -69,15 +70,15 @@ UI 对照：`docs/demo/teamboard-demo.html`
 
 ### T12 品牌图标底色改紫 `S`（独立小改动，建议单独提交）
 
-**状态**：未开始  
+**状态**：已提交（2026-09-11，`d5cf8604`）
 **依赖**：T0  
 **文件冲突**：与 T1 / T2 同改 `Navigation.tsx`，必须在 T1 之前做完，禁止并行。
 
-- [ ] `Navigation.tsx` 的 `TokensMark`：`fill="#2F6FDB"` → `#7C3AED`，白色 T 不变
-- [ ] demo 同款品牌 tile 已是 `#7C3AED`（规划阶段已改，实施时核对）
-- [ ] **不改**：`tokens-mark.svg`（currentColor）；`tokens-favicon.svg`（文本 SVG，属标签页图标）；全部 favicon / app-icon 位图
-- [ ] **不要**全局替换 `#2F6FDB`（头像 / 团队渐变 / AVA 调色板在用）
-- [ ] 单独提交，与重构 diff 分开
+- [x] `Navigation.tsx` 的 `TokensMark`：`fill="#2F6FDB"` → `#7C3AED`，白色 T 不变（2026-09-11）
+- [x] demo 同款品牌 tile 已是 `#7C3AED`（规划阶段已改，实施时核对）
+- [x] **不改**：`tokens-mark.svg`（currentColor）；`tokens-favicon.svg`（文本 SVG，属标签页图标）；全部 favicon / app-icon 位图
+- [x] **不要**全局替换 `#2F6FDB`（头像 / 团队渐变 / AVA 调色板在用）
+- [x] 单独提交，与重构 diff 分开（`d5cf8604`）
 
 **完成判据**：页面 Tokens 前图标为紫底白 T；favicon / 安装图标仍蓝，交付说明里写明未改。
 
@@ -85,33 +86,34 @@ UI 对照：`docs/demo/teamboard-demo.html`
 
 ### T1 删除 Shame + 导航占位 `S`
 
-**状态**：未开始  
+**状态**：进行中（实现完成，等 3.4）
 **依赖**：T0、T12
 
-- [ ] 删除 `web/src/app/(main)/shame/page.tsx`、`web/src/components/shame/BannedList.tsx`
-- [ ] 改写引用：`Navigation.tsx`（NAV_LINKS）、`BannedProfileView.tsx`、Docs、Terms、`worker.ts` PAGE_CACHEABLE、`error.tsx`、`schema.ts` 注释
-- [ ] Docs 页删除 Architecture / Sponsors / iOS app 三节（verified 章节留给 T2）；`TESTFLIGHT_URL` 与 OG 里 iOS 引用一并删
-- [ ] **不动** `ServiceFooter.tsx`（页脚 Sponsors 与 Docs 页 Sponsors 是两处内容）
-- [ ] 导航第二项换成 Teamboard，先接占位页 `/teamboard`
-- [ ] 验证：`/shame` 404；`rg -i "hall of shame|/shame"` 无残留；封禁机制仍生效
+- [x] 删除 `web/src/app/(main)/shame/page.tsx`、`web/src/components/shame/BannedList.tsx`
+- [x] 改写引用：`Navigation.tsx`（NAV_LINKS）、`BannedProfileView.tsx`、Docs、Terms、`worker.ts` PAGE_CACHEABLE、`error.tsx`、`schema.ts` 注释
+- [x] Docs 页删除 Architecture / Sponsors / iOS app 三节（verified 章节留给 T2）；`TESTFLIGHT_URL` 与 OG 里 iOS 引用一并删
+- [x] **不动** `ServiceFooter.tsx`（页脚 Sponsors 与 Docs 页 Sponsors 是两处内容）
+- [x] 导航第二项换成 Teamboard，先接占位页 `/teamboard`
+- [ ] 验证：`/shame` 404；`rg -i "hall of shame|/shame"` 无残留；封禁机制仍生效（源码已无 `/shame`；404 等 3.4 后本地预览）
 
 ---
 
 ### T2 认证改造 `L`
 
-**状态**：未开始  
+**状态**：`[x]` 实现 + check 完成（2026-09-11）；等 3.4 commit  
 **依赖**：T0（与 T1 串行：两者都改 Docs 页）
 
-- [ ] 迁移 `0024_add_password_auth.sql`（password_hash、email_verified_at、github_id 可空、email 部分唯一索引、verification tokens 表）
-- [ ] `lib/auth/password.ts`：WebCrypto PBKDF2（210k 次，格式 `pbkdf2$sha256$210000$…`）
-- [ ] `lib/email/`：Resend HTTP，不引 SDK；失败走 waitUntil，不回滚业务
-- [ ] 页面与 API：`/register` `/login` `/forgot-password` `/reset-password` `/verify-email`
-- [ ] 删除 GitHub OAuth 全链路与全部 GitHub 入口
-- [ ] 头像 fallback 改为用户名首字母占位图
-- [ ] 移除 verified 徽章（D-3）：删 `socialVerification.ts`、`VerifiedBadge.tsx`，改 6 处引用；**必须改** `refreshSocialLinks.ts`、`api/cron/refresh-social-links/route.ts`、`web/worker.ts`（不在 `web/src` 下）
-- [ ] **保留**：`tt_session`、device flow、`social_links` 列、Profile 社交链接图标行、cron 任务本身
-- [ ] secret：`RESEND_API_KEY`、`EMAIL_FROM`；Rate Limiting 绑定
-- [ ] 验证：可注册登录；弱密码被拒；`tokens login` + `tokens submit` 仍通；`bun run typecheck` / `build` 过
+- [x] 迁移 `0024_add_password_auth.sql`（password_hash、email_verified_at、github_id 可空、email 部分唯一索引、verification tokens 表）
+- [x] `lib/auth/password.ts`：WebCrypto PBKDF2（210k 次，格式 `pbkdf2$sha256$210000$…`）
+- [x] `lib/email/`：Resend HTTP，不引 SDK；失败走 waitUntil，不回滚业务
+- [x] 页面与 API：`/register` `/login` `/forgot-password` `/reset-password` `/verify-email` + `POST /api/auth/resend-verification`
+- [x] 删除 GitHub OAuth 全链路与全部 GitHub 入口
+- [x] 头像 fallback 改为用户名首字母占位图
+- [x] 移除 verified 徽章（D-3）：删 `socialVerification.ts`、`VerifiedBadge.tsx`，改 6 处引用；**必须改** `refreshSocialLinks.ts`、`api/cron/refresh-social-links/route.ts`、`web/worker.ts`（不在 `web/src` 下）
+- [x] **保留**：`tt_session`、device flow、`social_links` 列、Profile 社交链接图标行、cron 任务本身
+- [x] secret：`RESEND_API_KEY`、`EMAIL_FROM` 注释（部署前 `wrangler secret put` 这两个值）；Rate Limiting 用 wrangler `namespace_id` 1001，已写进配置，无需单独建 CF namespace
+- [x] 验证：可注册登录；弱密码被拒；`bun run lint` / `typecheck` / `build` / `test:migrations` 过
+- [ ] `tokens login` + `tokens submit`：**未跑**（BDD `@todo`；device flow 未改。不能用「未改代码」冒充已验证）
 
 ---
 
@@ -254,7 +256,17 @@ bun run test:migrations
 bun run build
 ```
 
-报告型测试不要用 `rtk` 缓存当唯一证据。
+报告型测试不要用 `rtk` 缓存当唯一证据。本地 `test:migrations` 用 OrbStack 容器，见 `docs/local-dev-database.md`。
+
+---
+
+## 本地开发数据库（OrbStack）
+
+- Compose：`/Users/lusonglin/docker-compose/tokens/docker-compose.yml`
+- 容器：`tokens-postgres`（`postgres:16`），只绑 `127.0.0.1:5433`（本机 5432 已被 `keyboy-play-local-db` 占用，不抢）
+- `DATABASE_URL=postgresql://tokens:tokens@127.0.0.1:5433/tokens`
+- 禁止再 `brew install postgresql@*` / `brew services start postgresql@*`
+- 明细：`docs/local-dev-database.md`
 
 ---
 
@@ -264,3 +276,5 @@ bun run build
 |---|---|
 | 2026-09-11 | 建立本文件。顺序定为 `T0 → T12 → T1 → …`（T12 提前以避免 Navigation.tsx 三方冲突）。紫色 hex 锁定 `#7C3AED`。 |
 | 2026-09-11 | T0 实现完成：去掉 check-migrations 对已删 group 表的断言；补 0022/0023 snapshot；`test:migrations` 全绿。Homebrew postgresql@16 已 `brew services stop`，验证用 pg_ctl 起停。**未切 T12**：仍待 check / update-spec / scoped commit。 |
+| 2026-09-11 | 按授权卸干净 Homebrew `postgresql@16` 并删除 `/opt/homebrew/var/postgresql@16`。卸载时 Homebrew **自动**卸掉依赖 `krb5`（未执行 `brew autoremove`）。本地库改为 OrbStack Compose：`/Users/lusonglin/docker-compose/tokens/`，端口 `127.0.0.1:5433`。约定写入 `docs/local-dev-database.md`。 |
+| 2026-09-11 | T2 实现 + check 通过：邮箱密码认证、删 GitHub OAuth 与 verified 徽章、resend-verification。CLI 全链路未跑。等 3.4 确认 commit，未 start T3。 |

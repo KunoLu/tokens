@@ -13,22 +13,14 @@ import {
   hasDirectives,
   parseSearchDirectives,
 } from "@/lib/leaderboard/searchDirectives";
-import { SOCIAL_VERIFIED_THRESHOLD } from "@/lib/socialVerification";
 
 export type { LeaderboardData, LeaderboardUser, Period, SortBy } from "@/lib/leaderboard/types";
-
-// A user with >= SOCIAL_VERIFIED_THRESHOLD linked socials is "verified". The
-// snapshot on users.social_links is refreshed by lib/githubSocials.ts.
-function verifiedExpr() {
-  return sql<boolean>`COALESCE(jsonb_array_length(${users.socialLinks}) >= ${SOCIAL_VERIFIED_THRESHOLD}, false)`;
-}
 
 interface LeaderboardPeriodRow {
   userId: string;
   username: string;
   displayName: string | null;
   avatarUrl: string | null;
-  verified: boolean;
   tokens: number;
   cost: number;
   sourceBreakdown: Record<string, { models: Record<string, unknown> }> | null;
@@ -44,7 +36,6 @@ interface PeriodLeaderboardDbRow {
   username: string;
   displayName: string | null;
   avatarUrl: string | null;
-  verified: boolean | null;
   tokens: number | string | null;
   cost: number | string | null;
   /** Absent when the query skipped the column — see fetchPeriodLeaderboardRows. */
@@ -56,7 +47,6 @@ interface AllTimeLeaderboardDbRow {
   username: string;
   displayName: string | null;
   avatarUrl: string | null;
-  verified: boolean | null;
   totalTokens: number | string | null;
   totalCost: number | string | null;
 }
@@ -171,7 +161,6 @@ function aggregatePeriodRows(
       username: row.username,
       displayName: row.displayName,
       avatarUrl: row.avatarUrl,
-      verified: row.verified,
       totalTokens: row.tokens,
       totalCost: row.cost,
     });
@@ -347,7 +336,6 @@ async function fetchPeriodLeaderboardRows(
       username: users.username,
       displayName: users.displayName,
       avatarUrl: users.avatarUrl,
-      verified: verifiedExpr().as("verified"),
       tokens: dailyBreakdown.tokens,
       cost: dailyBreakdown.cost,
       ...(withBreakdown
@@ -370,7 +358,6 @@ async function fetchPeriodLeaderboardRows(
     username: row.username,
     displayName: row.displayName,
     avatarUrl: row.avatarUrl,
-    verified: Boolean(row.verified),
     tokens: Number(row.tokens) || 0,
     cost: Number(row.cost) || 0,
     sourceBreakdown: row.sourceBreakdown ?? null,
@@ -430,7 +417,6 @@ async function fetchLeaderboardData(
         username: users.username,
         displayName: users.displayName,
         avatarUrl: users.avatarUrl,
-        verified: verifiedExpr().as("verified"),
         totalTokens: sql<number>`SUM(${submissions.totalTokens})`.as("total_tokens"),
         totalCost: sql<number>`SUM(CAST(${submissions.totalCost} AS DECIMAL(18,4)))`.as("total_cost"),
       })
@@ -487,7 +473,6 @@ async function fetchLeaderboardData(
         username: row.username,
         displayName: row.displayName,
         avatarUrl: row.avatarUrl,
-        verified: Boolean(row.verified),
         totalTokens: Number(row.totalTokens) || 0,
         totalCost: Number(row.totalCost) || 0,
       })),
@@ -517,7 +502,6 @@ async function fetchLeaderboardData(
       username: users.username,
       displayName: users.displayName,
       avatarUrl: users.avatarUrl,
-      verified: verifiedExpr().as("verified"),
       totalTokens: sql<number>`SUM(${submissions.totalTokens})`.as("total_tokens"),
       totalCost: sql<number>`SUM(CAST(${submissions.totalCost} AS DECIMAL(18,4)))`.as("total_cost"),
     })
@@ -556,7 +540,6 @@ async function fetchLeaderboardData(
       username: row.username,
       displayName: row.displayName,
       avatarUrl: row.avatarUrl,
-      verified: Boolean(row.verified),
       totalTokens: Number(row.totalTokens) || 0,
       totalCost: Number(row.totalCost) || 0,
     })),
@@ -691,7 +674,7 @@ async function fetchAllTimeUserRank(
   sortBy: SortBy
 ): Promise<LeaderboardUser | null> {
   const userResult = await db
-    .select({ id: users.id, username: users.username, displayName: users.displayName, avatarUrl: users.avatarUrl, verified: verifiedExpr() })
+    .select({ id: users.id, username: users.username, displayName: users.displayName, avatarUrl: users.avatarUrl })
     .from(users)
     .where(and(usernameEqualsIgnoreCase(username), isNull(users.bannedAt)))
     .limit(USERNAME_LOOKUP_LIMIT);
@@ -751,7 +734,6 @@ async function fetchAllTimeUserRank(
     username: user.username,
     displayName: user.displayName,
     avatarUrl: user.avatarUrl,
-    verified: Boolean(user.verified),
     totalTokens: userTotalTokens,
     totalCost: userTotalCost,
   };

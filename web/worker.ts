@@ -1,12 +1,13 @@
 // Custom Worker entrypoint wrapping the OpenNext-generated handler.
 //
-// It exists so the Worker can own its own cron trigger: the daily verified-badge
-// refresh runs here instead of being poked over HTTP by an external scheduler.
-// That removes the CRON_SECRET round trip and the WAF exception the GitHub
-// Actions + SSH path needs today, and the job runs with the same bindings as the
-// request path.
+// It exists so the Worker can own its own cron trigger: the daily social-links
+// refresh and email-token sweep run here instead of being poked over HTTP by
+// an external scheduler. That removes the CRON_SECRET round trip and the WAF
+// exception the GitHub Actions + SSH path needs today, and the job runs with
+// the same bindings as the request path.
 import { default as handler } from "./.open-next/worker.js";
 import { refreshAllSocialLinks } from "./src/lib/cron/refreshSocialLinks";
+import { deleteExpiredEmailTokens } from "./src/lib/auth/emailTokens";
 
 /**
  * Routes whose responses are a pure function of their URL and cost real work to
@@ -243,9 +244,10 @@ export default {
     // returns its first await.
     ctx.waitUntil(
       refreshAllSocialLinks()
-        .then(({ users, verified }) => {
+        .then(async ({ users }) => {
+          const expiredTokens = await deleteExpiredEmailTokens();
           console.log(
-            `[cron] refresh-social-links: synced ${users} users, ${verified} verified`,
+            `[cron] refresh-social-links: synced ${users} users, deleted ${expiredTokens} expired email tokens`,
           );
         })
         .catch((error: unknown) => {

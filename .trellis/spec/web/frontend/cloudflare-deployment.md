@@ -32,6 +32,15 @@
 - `WORKER_SELF_REFERENCE` service binding lets the ISR queue re-invoke the
   Worker to regenerate pages; the service name must equal the worker name.
 
+- **Auth rate limit:** `ratelimits` binding `AUTH_RATE_LIMITER` (namespace
+  `1001`, 10 requests / 60s) on register, login, forgot-password, and
+  resend-verification. Local `next dev` has no binding — skip, do not invent
+  a counter table. A bound limiter whose `limit()` throws fail-closes (429);
+  do not catch that as a skip.
+- **Email secrets** (`wrangler secret put`, not in this file):
+  `RESEND_API_KEY`, `EMAIL_FROM`. Missing secrets log and skip send; they
+  must not fail register/forgot.
+
 ## Cache topology (`web/open-next.config.ts`)
 
 Every read goes through `unstable_cache` (60s revalidate) and every accepted
@@ -59,9 +68,11 @@ Wraps `./.open-next/worker.js` for two reasons:
    - `/u/*` (`PROFILE_CACHEABLE`) — cacheable for everyone (no per-reader
      identity), with unknown query params dropped from the cache key and only
      200s stored (the case-canonicalizing 308 must not be cached).
-2. **The daily cron** (`20 3 * * *`) runs `refreshAllSocialLinks` in-process
-   for the verified-badge refresh — no public endpoint, no `CRON_SECRET`
-   round trip, no WAF exception for GitHub runner IPs.
+2. **The daily cron** (`20 3 * * *`) runs `refreshAllSocialLinks` then
+   `deleteExpiredEmailTokens` in-process — no public endpoint, no
+   `CRON_SECRET` round trip. Social-link snapshots still feed Profile icons;
+   there is no verified badge. Do not sweep invitation tables here until they
+   exist.
 
 ## Commands
 

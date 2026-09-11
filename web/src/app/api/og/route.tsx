@@ -21,8 +21,9 @@ const MUTED = "#8b9099";
 /** Satori fetches `<img src>` itself, from the server, so `avatar` is an
  *  unauthenticated SSRF vector — `next.config.ts` `remotePatterns` governs
  *  next/image and never sees this request. Every avatar we render comes from
- *  the GitHub profile we stored at sign-in (`users.avatar_url`), so an exact
- *  host match over https covers the real traffic and rejects everything else.
+ *  the account's stored `users.avatar_url` (historically a GitHub profile
+ *  picture), so an exact host match over https covers the real traffic and
+ *  rejects everything else.
  *  Kept as a URL check rather than a DB read so the rendered card stays a pure
  *  function of the query string, which is what the immutable cache below
  *  depends on. */

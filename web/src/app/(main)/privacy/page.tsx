@@ -25,8 +25,8 @@ export default function PrivacyPage() {
       <Clause heading="The short version">
         <p>
           Tokens counts how many tokens you spend on AI coding tools and ranks
-          that publicly. To do it we need your GitHub identity and the usage
-          totals our CLI computes on your machine.
+          that publicly. To do it we need an account — your email address and
+          a password — and the usage totals our CLI computes on your machine.
         </p>
         <p>
           The CLI reads the session files your AI coding tools already write to
@@ -56,14 +56,13 @@ export default function PrivacyPage() {
       <Clause heading="What we collect">
         <p>
           <strong className="font-medium text-foreground">
-            From GitHub, when you sign in.
+            From you, when you register.
           </strong>{" "}
-          We use GitHub OAuth with the{" "}
-          <code className="font-mono text-[13px]">read:user user:email</code>{" "}
-          scopes and store your GitHub numeric ID, username, display name,
-          avatar URL, email address, and the public profile links GitHub exposes
-          (such as a personal site or social handles). We never receive your
-          GitHub password, and we do not request access to your repositories.
+          Your email address, a username, and a password we store only as a
+          PBKDF2 hash. We send verification and password-reset mail through
+          Resend. If you add social links to your public GitHub profile, we may
+          refresh a snapshot of them (such as a personal site or social
+          handles) to display on your Tokens profile.
         </p>
         <p>
           <strong className="font-medium text-foreground">
@@ -171,9 +170,13 @@ export default function PrivacyPage() {
               stored.
             </>,
             <>
+              <strong className="font-medium text-foreground">Resend</strong> —
+              delivers account email (verification and password resets).
+            </>,
+            <>
               <strong className="font-medium text-foreground">GitHub</strong> —
-              authentication, and the source of the profile fields and avatar
-              images we display.
+              public profile pages only: the optional source of the social
+              links and avatar images we display. Not a login provider.
             </>,
           ]}
         />
@@ -259,8 +262,8 @@ export default function PrivacyPage() {
           requiring a right to limit.
         </p>
         <p>
-          The categories we collect map to the CCPA as: identifiers (GitHub ID,
-          username, email, avatar URL); internet or network activity
+          The categories we collect map to the CCPA as: identifiers (email
+          address, username, avatar URL); internet or network activity
           (submission timestamps, session user-agent); and commercial-adjacent
           information in the form of your self-reported AI tool usage totals.
           Sources, purposes and recipients are described in the sections above.
@@ -268,8 +271,8 @@ export default function PrivacyPage() {
         <p>
           Use the controls in Settings, or email{" "}
           <a href={`mailto:${CONTACT_EMAIL}`}>{CONTACT_EMAIL}</a>. We will
-          verify a request by asking you to confirm control of the GitHub
-          account in question. We will not discriminate against you for
+          verify a request by mailing you at the account&apos;s registered
+          address. We will not discriminate against you for
           exercising any of these rights. You may use an authorised agent; we
           may ask for proof of their authority.
         </p>

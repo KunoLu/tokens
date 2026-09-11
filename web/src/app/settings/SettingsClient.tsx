@@ -6,6 +6,7 @@ import { KeyIcon } from "lucide-react";
 import { toast } from "react-toastify";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
+import { avatarUrlFor } from "@/lib/avatar";
 import { deviceDisplayLabel } from "@/lib/devices/shared";
 import { tw } from "@/lib/tw";
 import { cn, formatNumber, formatCurrency } from "@/lib/utils";
@@ -720,7 +721,7 @@ export default function SettingsClient() {
         if (cancelled) return;
 
         if (!sessionData.user) {
-          router.push("/api/auth/github?returnTo=/settings");
+          router.push("/login?returnTo=/settings");
           return;
         }
 
@@ -915,7 +916,7 @@ export default function SettingsClient() {
           </SectionTitle>
           <ProfileWrapper>
             <AvatarImg
-              src={user.avatarUrl || `https://github.com/${user.username}.png`}
+              src={avatarUrlFor(user)}
               alt={user.username}
               width={64}
               height={64}
@@ -935,7 +936,7 @@ export default function SettingsClient() {
             </div>
           </ProfileWrapper>
           <InfoBanner style={{ marginTop: 16 }}>
-            Profile information is synced from GitHub and cannot be edited here.
+            Profile information cannot be edited here.
           </InfoBanner>
         </Section>
 

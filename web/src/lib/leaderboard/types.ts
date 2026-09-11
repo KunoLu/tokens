@@ -15,8 +15,6 @@ export interface LeaderboardUser {
   avatarUrl: string | null;
   totalTokens: number;
   totalCost: number;
-  /** True when the user has enough linked social accounts on GitHub. */
-  verified: boolean;
 }
 
 export interface LeaderboardData {

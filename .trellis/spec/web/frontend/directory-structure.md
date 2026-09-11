@@ -17,7 +17,8 @@ web/
 │   │   ├── (main)/               # Leaderboard home, teamboard, docs, legal
 │   │   ├── u/[username]/         # Public profile: RSC page + ProfilePageClient
 │   │   ├── settings/             # Thin RSC page → SettingsClient
-│   │   ├── device/, local/       # OAuth / device-link client flows
+│   │   ├── login/, register/, forgot-password/, reset-password/, verify-email/
+│   │   ├── device/, local/       # Device-link / local client flows (not GitHub OAuth)
 │   │   └── api/                  # Route handlers: JSON, SVG embeds, OG images
 │   ├── components/
 │   │   ├── ui/                   # Vendored shadcn primitives (button, card, table, …)
@@ -28,7 +29,9 @@ web/
 │   │   └── Graph*.tsx            # Shared visualization components
 │   ├── lib/                      # Server + shared client logic
 │   │   ├── db/                   # Drizzle: schema.ts, migrations/, usernameLookup.ts, index.ts
-│   │   ├── auth/                 # Session, tokens, bearer
+│   │   ├── auth/                 # Session, tokens, bearer, password, emailTokens, rateLimit
+│   │   ├── email/                # Resend HTTP send helpers (no SDK)
+│   │   ├── avatar.ts             # Initials SVG fallback; never github.com png
 │   │   ├── leaderboard/          # getLeaderboard.ts, types, constants, dateRange
 │   │   ├── validation/           # Zod submission schemas (submission.ts)
 │   │   ├── embed/                # SVG embed renderers + generated logos

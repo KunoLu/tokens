@@ -31,7 +31,6 @@ import {
   type ProfileUser,
 } from "@/components/profile";
 import type { DailyContribution } from "@/lib/types";
-import { isVerifiedBySocialLinks } from "@/lib/socialVerification";
 import { toLocalDateString } from "@/lib/leaderboard/dateRange";
 import { useSettings } from "@/lib/useSettings";
 
@@ -270,7 +269,6 @@ export default function ProfilePageClient({
         models={modelRows}
         mcpServers={data.mcpServers}
         socialLinks={socialLinks}
-        verified={isVerifiedBySocialLinks(socialLinks)}
         hasBackfill={data.hasBackfill}
         period={period}
         onPeriodChange={(next) => {

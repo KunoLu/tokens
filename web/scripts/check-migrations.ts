@@ -192,6 +192,7 @@ try {
         'api_tokens',
         'daily_breakdown',
         'device_codes',
+        'email_verification_tokens',
         'sessions',
         'submissions',
         'submitted_devices',
@@ -203,12 +204,12 @@ try {
     "api_tokens",
     "daily_breakdown",
     "device_codes",
+    "email_verification_tokens",
     "sessions",
     "submissions",
     "submitted_devices",
     "users",
   ].filter((tableName) => !tableNames.has(tableName));
-
   expect(
     "required public tables exist",
     missingTables.length === 0,
@@ -229,6 +230,7 @@ try {
       AND (
         (table_name = 'submissions' AND column_name IN ('reasoning_tokens', 'schema_version', 'submit_count'))
         OR (table_name = 'daily_breakdown' AND column_name IN ('submitted_device_id', 'active_time_ms'))
+        OR (table_name = 'users' AND column_name IN ('password_hash', 'email_verified_at', 'github_id'))
       )
   `;
   const columns = new Map(
@@ -251,6 +253,16 @@ try {
       "daily_breakdown.active_time_ms",
     ].every((columnName) => columns.has(columnName))
   );
+  expect(
+    "password auth columns are present",
+    ["users.password_hash", "users.email_verified_at"].every((columnName) =>
+      columns.has(columnName)
+    )
+  );
+  expect(
+    "github_id is nullable (email accounts carry no GitHub id)",
+    columns.get("users.github_id")?.is_nullable === "YES"
+  );
 
   const removedColumns = await sql<{ count: number }[]>`
     SELECT count(*)::int AS count
@@ -272,7 +284,8 @@ try {
       AND indexname IN (
         'idx_device_codes_user_id',
         'idx_submissions_leaderboard',
-        'users_username_lower_unique'
+        'users_username_lower_unique',
+        'users_email_lower_unique'
       )
   `;
   const indexes = new Map(indexRows.map((row) => [row.indexname, row.indexdef]));
@@ -283,6 +296,7 @@ try {
       "idx_device_codes_user_id",
       "idx_submissions_leaderboard",
       "users_username_lower_unique",
+      "users_email_lower_unique",
     ].every((indexName) => indexes.has(indexName))
   );
   expect(
@@ -290,6 +304,11 @@ try {
     indexes.get("users_username_lower_unique")?.includes("UNIQUE INDEX") === true &&
       indexes.get("users_username_lower_unique")?.includes("lower((username)::text)") ===
         true
+  );
+  expect(
+    "case-insensitive email index is unique",
+    indexes.get("users_email_lower_unique")?.includes("UNIQUE INDEX") === true &&
+      indexes.get("users_email_lower_unique")?.includes("lower((email)::text)") === true
   );
 
   const extensionRows = await sql<{ count: number }[]>`

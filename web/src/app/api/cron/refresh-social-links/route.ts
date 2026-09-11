@@ -2,6 +2,7 @@ import { timingSafeEqual } from "crypto";
 import { NextResponse } from "next/server";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { countUsers, refreshAllSocialLinks } from "@/lib/cron/refreshSocialLinks";
+import { deleteExpiredEmailTokens } from "@/lib/auth/emailTokens";
 
 export const dynamic = "force-dynamic";
 
@@ -31,9 +32,10 @@ function runInBackground(work: Promise<unknown>): void {
 }
 
 /**
- * Daily refresh of every user's GitHub social-links snapshot (drives the
- * verified badge). Triggered by the Worker's cron trigger, or over HTTP for
- * manual runs; guarded by CRON_SECRET. Responds immediately and syncs in the
+ * Daily refresh of every user's GitHub social-links snapshot (the profile
+ * page's social-links row), followed by a sweep of expired email verification
+ * tokens. Triggered by the Worker's cron trigger, or over HTTP for manual
+ * runs; guarded by CRON_SECRET. Responds immediately and syncs in the
  * background so proxy timeouts can't cut the run short.
  */
 export async function POST(request: Request) {
@@ -53,11 +55,16 @@ export async function POST(request: Request) {
   const total = await countUsers();
 
   runInBackground(
-    refreshAllSocialLinks().then(({ users, verified }) => {
-      console.log(
-        `[cron] refresh-social-links: synced ${users} users, ${verified} verified`,
-      );
-    }),
+    refreshAllSocialLinks()
+      .then(async ({ users }) => {
+        const expiredTokens = await deleteExpiredEmailTokens();
+        console.log(
+          `[cron] refresh-social-links: synced ${users} users, deleted ${expiredTokens} expired email tokens`,
+        );
+      })
+      .catch((error: unknown) => {
+        console.error("[cron] refresh-social-links failed", error);
+      }),
   );
 
   return NextResponse.json({ accepted: true, users: total }, { status: 202 });

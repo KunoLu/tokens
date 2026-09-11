@@ -34,8 +34,8 @@ export default function TermsPage() {
       <Clause heading="Who may use it">
         <p>
           You must be at least 13 years old, and at least 16 where your
-          jurisdiction sets that threshold. You need a GitHub account, and you
-          must be the person that account belongs to. One person, one account.
+          jurisdiction sets that threshold. You need a Tokens account — an
+          email address and a password. One person, one account.
         </p>
         <p>
           You are responsible for what happens under your account and for
@@ -73,7 +73,7 @@ export default function TermsPage() {
           by third parties and for the ban records described below.
         </p>
         <p>
-          Do not submit usage under an account whose GitHub profile carries
+          Do not submit usage under an account whose public profile carries
           content you are not entitled to publish.
         </p>
       </Clause>

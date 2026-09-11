@@ -18,6 +18,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { CONTAINER } from "@/components/layout/Container";
+import { avatarUrlFor } from "@/lib/avatar";
 
 interface User {
   id: string;
@@ -32,6 +33,11 @@ const NAV_LINKS = [
   { href: "/docs", label: "Docs", authOnly: false, match: (p: string) => p.startsWith("/docs") },
   { href: "/profile", label: "Profile", authOnly: true, match: (p: string) => p === "/profile" || p.startsWith("/u/") },
 ] as const;
+
+// "Sign in" clicked on one of these would send returnTo right back to the
+// auth page the user was already on, looping them after a successful sign-in.
+// Those clicks land on the default /leaderboard instead.
+const AUTH_PAGES = ["/login", "/register", "/forgot-password", "/reset-password", "/verify-email"];
 
 /**
  * Brand tile beside "Tokens". Colour is a literal, not a theme token: it must
@@ -53,13 +59,6 @@ function TokensMark() {
   );
 }
 
-function GitHubIcon({ className }: { className?: string }) {
-  return (
-    <svg aria-hidden="true" viewBox="0 0 24 24" fill="currentColor" className={className}>
-      <path d="M12 0C5.374 0 0 5.373 0 12C0 17.302 3.438 21.8 8.207 23.387C8.806 23.498 9 23.126 9 22.81V20.576C5.662 21.302 4.967 19.16 4.967 19.16C4.421 17.773 3.634 17.404 3.634 17.404C2.545 16.659 3.717 16.675 3.717 16.675C4.922 16.759 5.556 17.912 5.556 17.912C6.626 19.746 8.363 19.216 9.048 18.909C9.155 18.134 9.466 17.604 9.81 17.305C7.145 17 4.343 15.971 4.343 11.374C4.343 10.063 4.812 8.993 5.579 8.153C5.455 7.85 5.044 6.629 5.696 4.977C5.696 4.977 6.704 4.655 8.997 6.207C9.954 5.941 10.98 5.808 12 5.803C13.02 5.808 14.047 5.941 15.006 6.207C17.297 4.655 18.303 4.977 18.303 4.977C18.956 6.63 18.545 7.851 18.421 8.153C19.19 8.993 19.656 10.064 19.656 11.374C19.656 15.983 16.849 16.998 14.177 17.295C14.607 17.667 15 18.397 15 19.517V22.81C15 23.129 15.192 23.504 15.801 23.386C20.566 21.797 24 17.3 24 12C24 5.373 18.627 0 12 0Z" />
-    </svg>
-  );
-}
 
 /**
  * Theme toggle. Rendering is deferred until mount because the resolved theme
@@ -94,10 +93,6 @@ function ThemeToggle() {
   );
 }
 
-function avatarFor(user: User) {
-  return user.avatarUrl || `https://github.com/${user.username}.png`;
-}
-
 function UserMenu({ user, onSignOut }: { user: User; onSignOut: () => void }) {
   return (
     <DropdownMenu>
@@ -110,7 +105,7 @@ function UserMenu({ user, onSignOut }: { user: User; onSignOut: () => void }) {
         }
       >
         <Avatar className="size-8">
-          <AvatarImage src={avatarFor(user)} alt="" />
+          <AvatarImage src={avatarUrlFor(user)} alt="" />
           <AvatarFallback className="text-[10px]">
             {user.username.slice(0, 2).toUpperCase()}
           </AvatarFallback>
@@ -151,8 +146,7 @@ export function Navigation() {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   // A failed session request is not a sign-out. Holding the skeleton keeps the
-  // header from flipping an authenticated user to a "Sign in" button — which,
-  // if clicked, would send them back through OAuth for nothing.
+  // header from flipping an authenticated user to a "Sign in" button.
   const [sessionFailed, setSessionFailed] = useState(false);
 
   // Retry rather than latch. Holding the skeleton on the first failure was
@@ -162,7 +156,7 @@ export function Navigation() {
   // sign in at all — including for signed-out visitors. A deploy takes this
   // service through roughly a minute of 502s, so that was a routine state, not
   // an edge case. After the retries are spent, fall through to the signed-out
-  // header: a wrongly-shown "Sign in" costs one OAuth round trip, while a
+  // header: a wrongly-shown "Sign in" costs one page view, while a
   // permanent skeleton costs a manual reload the user has no reason to guess.
   useEffect(() => {
     let cancelled = false;
@@ -205,10 +199,15 @@ export function Navigation() {
   };
 
   // Sign-in comes back to where it was clicked rather than dropping everyone on
-  // /leaderboard, which is what the route falls back to when returnTo is absent.
+  // /leaderboard, which is what the route falls back to when returnTo is absent —
+  // except on the auth pages themselves, where coming "back" would loop the user
+  // onto the page they just signed in from.
   // Pathname only: the query string would need useSearchParams, which forces a
   // Suspense boundary around the whole header.
-  const returnTo = pathname.startsWith("/") ? pathname : "/leaderboard";
+  const returnTo =
+    pathname.startsWith("/") && !AUTH_PAGES.includes(pathname)
+      ? pathname
+      : "/leaderboard";
 
   const links = NAV_LINKS.filter((l) => !l.authOnly || user);
   const hrefFor = (link: (typeof NAV_LINKS)[number]) =>
@@ -248,22 +247,6 @@ export function Navigation() {
         </div>
 
         <div className="ml-auto flex items-center gap-1.5">
-          <Button
-            variant="ghost"
-            size="icon"
-            className="hidden size-8 sm:inline-flex"
-            aria-label="Tokens on GitHub"
-            render={
-              <a
-                href="https://github.com/missuo/tokens"
-                target="_blank"
-                rel="noopener noreferrer"
-              />
-            }
-          >
-            <GitHubIcon className="size-4" />
-          </Button>
-
           <ThemeToggle />
 
           {isLoading || sessionFailed ? (
@@ -275,12 +258,9 @@ export function Navigation() {
               size="sm"
               className="h-8"
               render={
-                <a
-                  href={`/api/auth/github?returnTo=${encodeURIComponent(returnTo)}`}
-                />
+                <a href={`/login?returnTo=${encodeURIComponent(returnTo)}`} />
               }
             >
-              <GitHubIcon className="size-3.5" data-icon="inline-start" />
               Sign in
             </Button>
           )}

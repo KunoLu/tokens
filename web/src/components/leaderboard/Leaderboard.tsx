@@ -19,7 +19,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
-import { VerifiedBadge } from "@/components/ui/VerifiedBadge";
 import { cn } from "@/lib/utils";
 import { CONTAINER } from "@/components/layout/Container";
 import { PageHeader } from "@/components/layout/PageHeader";
@@ -30,6 +29,7 @@ import type {
 } from "@/lib/leaderboard/constants";
 import type { LeaderboardData, LeaderboardUser, Period } from "@/lib/leaderboard/types";
 import { toLocalDateString } from "@/lib/leaderboard/dateRange";
+import { avatarUrlFor } from "@/lib/avatar";
 
 interface SessionUser {
   id: string;
@@ -55,9 +55,6 @@ const PERIODS: ReadonlyArray<{ value: Period; label: string }> = [
   { value: "last-month", label: "Last month" },
 ];
 
-function avatarFor(user: { username: string; avatarUrl: string | null }) {
-  return user.avatarUrl || `https://github.com/${user.username}.png`;
-}
 
 function Stat({
   label,
@@ -136,17 +133,14 @@ function DeveloperRow({
           className="flex min-w-0 items-center gap-3"
         >
           <Avatar className="size-7 shrink-0">
-            <AvatarImage src={avatarFor(user)} alt="" loading="lazy" />
+            <AvatarImage src={avatarUrlFor(user)} alt="" loading="lazy" />
             <AvatarFallback className="text-[10px]">
               {user.username.slice(0, 2).toUpperCase()}
             </AvatarFallback>
           </Avatar>
           <span className="flex min-w-0 flex-col leading-tight">
-            <span className="flex items-center gap-1.5">
-              <span className="truncate text-sm font-medium group-hover:underline">
-                {user.displayName || user.username}
-              </span>
-              {user.verified && <VerifiedBadge size={13} />}
+            <span className="truncate text-sm font-medium group-hover:underline">
+              {user.displayName || user.username}
             </span>
             <span className="truncate text-xs text-muted-foreground">
               @{user.username}
