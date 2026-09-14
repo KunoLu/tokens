@@ -7,6 +7,7 @@
     "build": "cp ../install.sh public/install.sh && mkdir -p public/clients && cp ../.github/assets/client-* public/clients/ && next build",
     "start": "next start",
     "lint": "eslint",
+    "test:e2e": "playwright test",
     "typecheck": "wrangler types --env-interface CloudflareEnv --include-runtime=false cloudflare-env.d.ts && tsc --noEmit",
     "test:migrations": "drizzle-kit migrate && bun scripts/check-migrations.ts",
     "test:teams": "bun scripts/check-teams-invariants.ts",
@@ -47,6 +48,7 @@
     "zod": "^3.24.1"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",

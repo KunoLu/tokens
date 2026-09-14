@@ -4,7 +4,15 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useTheme } from "next-themes";
-import { LogOutIcon, MenuIcon, MoonIcon, SettingsIcon, SunIcon, UserIcon } from "lucide-react";
+import {
+  GlobeIcon,
+  LogOutIcon,
+  MenuIcon,
+  MoonIcon,
+  SettingsIcon,
+  SunIcon,
+  UserIcon,
+} from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
@@ -19,6 +27,11 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { CONTAINER } from "@/components/layout/Container";
 import { avatarUrlFor } from "@/lib/avatar";
+import {
+  localeCookieValue,
+  type Locale,
+  useI18n,
+} from "@/lib/i18n";
 
 interface User {
   id: string;
@@ -28,10 +41,10 @@ interface User {
 }
 
 const NAV_LINKS = [
-  { href: "/leaderboard", label: "Leaderboard", authOnly: false, match: (p: string) => p === "/leaderboard" },
-  { href: "/teamboard", label: "Teamboard", authOnly: false, match: (p: string) => p === "/teamboard" },
-  { href: "/docs", label: "Docs", authOnly: false, match: (p: string) => p.startsWith("/docs") },
-  { href: "/profile", label: "Profile", authOnly: true, match: (p: string) => p === "/profile" || p.startsWith("/u/") },
+  { href: "/leaderboard", key: "nav.leaderboard", authOnly: false, match: (p: string) => p === "/leaderboard" },
+  { href: "/teamboard", key: "nav.teamboard", authOnly: false, match: (p: string) => p === "/teamboard" },
+  { href: "/docs", key: "nav.docs", authOnly: false, match: (p: string) => p.startsWith("/docs") },
+  { href: "/profile", key: "nav.profile", authOnly: true, match: (p: string) => p === "/profile" || p.startsWith("/u/") },
 ] as const;
 
 // "Sign in" clicked on one of these would send returnTo right back to the
@@ -59,6 +72,46 @@ function TokensMark() {
   );
 }
 
+
+function LocaleToggle() {
+  const { locale, t } = useI18n();
+
+  function setLocale(next: Locale) {
+    document.cookie = localeCookieValue(next);
+    window.location.reload();
+  }
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        render={
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-8"
+            aria-label={t("nav.language")}
+          />
+        }
+      >
+        <GlobeIcon />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-36">
+        <DropdownMenuItem
+          onClick={() => setLocale("en")}
+          className={locale === "en" ? "font-medium" : undefined}
+        >
+          {t("nav.english")}
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onClick={() => setLocale("zh")}
+          className={locale === "zh" ? "font-medium" : undefined}
+        >
+          {t("nav.chinese")}
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
 
 /**
  * Theme toggle. Rendering is deferred until mount because the resolved theme
@@ -143,6 +196,7 @@ function UserMenu({ user, onSignOut }: { user: User; onSignOut: () => void }) {
 
 export function Navigation() {
   const pathname = usePathname();
+  const { t } = useI18n();
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   // A failed session request is not a sign-out. Holding the skeleton keeps the
@@ -240,13 +294,14 @@ export function Navigation() {
                     : "text-muted-foreground hover:text-foreground"
                 )}
               >
-                {link.label}
+                {t(link.key)}
               </Link>
             );
           })}
         </div>
 
         <div className="ml-auto flex items-center gap-1.5">
+          <LocaleToggle />
           <ThemeToggle />
 
           {isLoading || sessionFailed ? (
@@ -261,7 +316,7 @@ export function Navigation() {
                 <a href={`/login?returnTo=${encodeURIComponent(returnTo)}`} />
               }
             >
-              Sign in
+              {t("nav.signIn")}
             </Button>
           )}
 
@@ -269,7 +324,7 @@ export function Navigation() {
           <DropdownMenu>
             <DropdownMenuTrigger
               render={
-                <Button variant="ghost" size="icon" className="size-8 sm:hidden" aria-label="Open menu" />
+                <Button variant="ghost" size="icon" className="size-8 sm:hidden" aria-label={t("nav.openMenu")} />
               }
             >
               <MenuIcon />
@@ -278,7 +333,7 @@ export function Navigation() {
               <DropdownMenuGroup>
                 {links.map((link) => (
                   <DropdownMenuItem key={link.href} render={<Link href={hrefFor(link)} />}>
-                    {link.label}
+                    {t(link.key)}
                   </DropdownMenuItem>
                 ))}
               </DropdownMenuGroup>

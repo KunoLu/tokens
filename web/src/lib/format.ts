@@ -1,3 +1,5 @@
+import { intlTag, type Locale } from "@/lib/i18n/locale";
+
 export function escapeXml(value: string): string {
   return value
     .replace(/&/g, "&amp;")
@@ -11,31 +13,50 @@ function safeNumber(value: number): number {
   return Number.isFinite(value) ? value : 0;
 }
 
-export function formatCompact(value: number, kind: "number" | "currency"): string {
+function numberLocale(locale: Locale): string {
+  return intlTag(locale);
+}
+
+export function formatCompact(
+  value: number,
+  kind: "number" | "currency",
+  locale: Locale = "en"
+): string {
   const clamped = Math.max(0, safeNumber(value));
+  const tag = numberLocale(locale);
 
   if (kind === "currency") {
-    const formatted = new Intl.NumberFormat("en-US", {
+    const formatted = new Intl.NumberFormat(tag, {
       notation: "compact",
       maximumFractionDigits: clamped >= 100 ? 1 : 2,
     }).format(clamped);
     return `$${formatted}`;
   }
 
-  return new Intl.NumberFormat("en-US", {
+  return new Intl.NumberFormat(tag, {
     notation: "compact",
     maximumFractionDigits: clamped >= 100 ? 1 : 2,
   }).format(Math.round(clamped));
 }
 
-export function formatNumber(value: number, compact = false): string {
-  if (compact) return formatCompact(value, "number");
-  return new Intl.NumberFormat("en-US").format(Math.max(0, Math.round(safeNumber(value))));
+export function formatNumber(
+  value: number,
+  compact = false,
+  locale: Locale = "en"
+): string {
+  if (compact) return formatCompact(value, "number", locale);
+  return new Intl.NumberFormat(numberLocale(locale)).format(
+    Math.max(0, Math.round(safeNumber(value)))
+  );
 }
 
-export function formatCurrency(value: number, compact = false): string {
-  if (compact) return formatCompact(value, "currency");
-  return new Intl.NumberFormat("en-US", {
+export function formatCurrency(
+  value: number,
+  compact = false,
+  locale: Locale = "en"
+): string {
+  if (compact) return formatCompact(value, "currency", locale);
+  return new Intl.NumberFormat(numberLocale(locale), {
     style: "currency",
     currency: "USD",
     minimumFractionDigits: 2,

@@ -1,9 +1,11 @@
 import type { Metadata } from 'next';
+import { cookies } from 'next/headers';
 import { notFound, permanentRedirect } from 'next/navigation';
 import type { ProfileDevice } from '@/components/profile';
 import { getGitHubSocialLinks } from '@/lib/githubSocials';
 import { loadPublicProfileDevicesForPage } from '@/lib/publicProfileDevices';
 import { loadPublicProfileForPage } from '@/lib/publicProfileData';
+import { LOCALE_COOKIE, parseLocale } from '@/lib/i18n';
 import ProfilePageClient, { type ProfileData } from './ProfilePageClient';
 import BannedProfileView, { type BannedProfileData } from './BannedProfileView';
 
@@ -23,10 +25,8 @@ async function getProfileData(
   username: string,
   period: ProfilePeriod,
 ): Promise<ProfileData | BannedProfileData | null> {
-  // Calling the shared server handler keeps Vercel Deployment Protection out
-  // of the render path. A server-side HTTP self-fetch is anonymous and is
-  // redirected to Vercel's HTML login page on protected preview deployments.
-  const result = await loadPublicProfileForPage(username, period);
+  const locale = parseLocale((await cookies()).get(LOCALE_COOKIE)?.value);
+  const result = await loadPublicProfileForPage(username, period, locale);
 
   if (result.kind === "redirect") {
     if (result.location) {

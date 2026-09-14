@@ -9,6 +9,7 @@ import { default as handler } from "./.open-next/worker.js";
 import { refreshAllSocialLinks } from "./src/lib/cron/refreshSocialLinks";
 import { deleteExpiredEmailTokens } from "./src/lib/auth/emailTokens";
 import { expireInvitations } from "./src/lib/teams/service";
+import { parseLocale } from "./src/lib/i18n/locale";
 
 /**
  * Routes whose responses are a pure function of their URL and cost real work to
@@ -67,6 +68,7 @@ const PROFILE_QUERY_ALLOWLIST = new Set(["period"]);
 
 const SESSION_COOKIE = "tt_session";
 const SORT_BY_COOKIE = "leaderboard-sort-by";
+const LOCALE_COOKIE = "tt_locale";
 
 /** 60s, matching the `revalidate` on the data these pages read: the edge copy
  *  is never staler than what the origin would have served anyway. */
@@ -111,26 +113,30 @@ function withPrivateHeaders(response: Response): Response {
 
 function pageCacheKey(request: Request, url: URL): Request {
   const sort = readCookie(request, SORT_BY_COOKIE);
+  const locale = parseLocale(readCookie(request, LOCALE_COOKIE));
   const keyUrl = new URL(url.toString());
   if (sort) keyUrl.searchParams.set("__sort", sort);
+  keyUrl.searchParams.set("__locale", locale);
   return new Request(keyUrl.toString(), { method: "GET" });
 }
 
-function profileCacheKey(url: URL): Request {
+function profileCacheKey(url: URL, request: Request): Request {
   const keyUrl = new URL(url.origin + url.pathname);
   for (const [name, value] of [...url.searchParams].sort()) {
     if (PROFILE_QUERY_ALLOWLIST.has(name)) keyUrl.searchParams.set(name, value);
   }
+  const locale = parseLocale(readCookie(request, LOCALE_COOKIE));
+  keyUrl.searchParams.set("__locale", locale);
   return new Request(keyUrl.toString(), { method: "GET" });
 }
 
 /**
  * The cache key for this request, or null when it must not be shared.
  *
- * Two different rules on purpose: a profile is the same page for everyone, so
- * it is keyed on its URL alone; the leaderboard personalises, so it is cached
- * only when no session is present and its key carries the sort cookie that the
- * URL does not.
+ * Two different rules on purpose: a profile is the same page for every
+ * reader, so it is keyed on its URL plus `__locale`; the leaderboard
+ * personalises, so it is cached only when no session is present and its key
+ * carries the sort cookie and locale that the URL does not.
  */
 function sharedCacheKey(request: Request, url: URL): Request | null {
   // Next fetches the RSC payload for a client-side navigation from the same
@@ -144,7 +150,7 @@ function sharedCacheKey(request: Request, url: URL): Request | null {
   }
 
   if (PROFILE_CACHEABLE.test(url.pathname)) {
-    return profileCacheKey(url);
+    return profileCacheKey(url, request);
   }
   if (
     PAGE_CACHEABLE.test(url.pathname) &&

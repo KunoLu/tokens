@@ -692,6 +692,7 @@ export type PublicProfilePageResult =
 export async function loadPublicProfileForPage(
   username: string,
   period: PublicProfilePeriod,
+  locale: string = "en",
 ): Promise<PublicProfilePageResult> {
   const load = unstable_cache(
     async (): Promise<PublicProfilePageResult> => {
@@ -716,7 +717,7 @@ export async function loadPublicProfileForPage(
 
       return { data: await response.json(), kind: "data" };
     },
-    ["public-profile-page", username, period],
+    ["public-profile-page", username, period, locale],
     {
       revalidate: 60,
       tags: [`user:${normalizeUsernameCacheKey(username)}`],

@@ -3,53 +3,80 @@ Feature: 界面语言切换
 
   Rule: 语言切换按钮位于导航右上角主题切换的左侧
 
+    # 覆盖: tests/e2e/i18n-locale.spec.ts「按钮位置与选项」。
     Scenario: 按钮位置与选项
       When 任意访客打开任意页面
       Then 导航右上角的主题切换按钮左侧有一个语言切换按钮
       And 点击后展开下拉选项
       And 选项恰好包含 "English" 和 "中文"
 
-  Rule: 切换后全部页面文案跟随
+  Rule: 已包裹的导航文案跟随语言偏好
 
+    Scenario: 中文语言偏好打开排行榜
+      Given 访客的语言偏好为中文
+      When 访客打开排行榜
+      Then 页面的 lang 属性为 "zh-CN"
+      And 导航显示 "排行榜"、"文档"、"团队榜"
+
+    Scenario: English 语言偏好打开排行榜
+      Given 访客的语言偏好为 English
+      When 访客打开排行榜
+      Then 页面的 lang 属性为 "en"
+      And 导航显示 "Leaderboard"、"Docs"、"Teamboard"
+
+    Scenario: 无法识别的语言偏好回退为 English
+      Given 访客带有无法识别的语言偏好
+      When 访客打开排行榜
+      Then 页面按 English 渲染
+
+  Rule: 用量数字跟随当前语言的 NumberFormat
+
+    Scenario: 中文界面的用量数字按中文语言环境渲染
+      Given 访客的语言偏好为中文
+      When 访客打开排行榜
+      Then 用量数字按中文语言环境的 NumberFormat 渲染
+
+  Rule: 切换控件把选择写入偏好并刷新
+
+    # 覆盖: tests/e2e/i18n-locale.spec.ts「切换到中文」。
     Scenario: 切换到中文
       Given 当前语言为 English
       When 访客在语言切换器中选择 "中文"
-      Then 当前页面所有文案变为中文
-      And 导航、页面标题、按钮、表单标签、提示、空态、页脚均为中文
-      And 数字与日期格式按中文语言环境渲染
+      Then 当前已包裹的导航文案变为中文
+      And 用量数字按中文语言环境的 NumberFormat 渲染（紧凑如 123.5万，非紧凑货币如 US$1,234,567.89）
 
+    # 覆盖: tests/e2e/i18n-locale.spec.ts「切换到 English」。
     Scenario: 切换到 English
       Given 当前语言为中文
       When 访客在语言切换器中选择 "English"
-      Then 当前页面所有文案变为英文
+      Then 当前已包裹的导航文案变为英文
 
-    Scenario: 切换后进入其他页面仍然生效
-      Given 访客已将语言切换为 "中文"
-      When 访客导航到排行榜页
-      Then 排行榜页的文案为中文
-
-  Rule: 选择跨会话持久化
-
+    # 覆盖: tests/e2e/i18n-locale.spec.ts「关闭浏览器后重新打开」。
     Scenario: 关闭浏览器后重新打开
       Given 访客已将语言切换为 "中文"
       When 访客关闭浏览器后重新打开网站
       Then 界面仍然为中文
 
-  Rule: 页面的语言属性跟随选择
+  Rule: 其余页面文案由后续任务包裹
 
-    Scenario: HTML lang 属性
-      Given 访客已将语言切换为 "中文"
-      When 访客打开任意页面
-      Then 页面的 lang 属性为 "zh-CN"
+    @todo
+    # T11: 全站文案包裹未开始。
+    Scenario: 切换后全部页面文案跟随
+      Given 当前语言为 English
+      When 访客在语言切换器中选择 "中文"
+      Then 当前页面所有文案变为中文
+      And 导航、页面标题、按钮、表单标签、提示、空态、页脚均为中文
 
-  Rule: 隐私与条款页的中文版本标注英文为准
-
+    @todo
+    # T11: Privacy / Terms 中文版与「英文为准」标注。
     Scenario: 隐私页面
       Given 访客已将语言切换为 "中文"
       When 访客打开隐私政策页
       Then 页面为中文
       And 页面明确标注英文版本具有最终效力
 
+    @todo
+    # T11: Privacy / Terms 中文版与「英文为准」标注。
     Scenario: 条款页面
       Given 访客已将语言切换为 "中文"
       When 访客打开服务条款页

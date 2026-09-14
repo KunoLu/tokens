@@ -3,7 +3,7 @@
   "name": "t10-i18n-infra",
   "title": "T10 i18n infrastructure",
   "description": "Add locale cookie, t(), language switcher, and cache-key locale isolation.",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": "web",

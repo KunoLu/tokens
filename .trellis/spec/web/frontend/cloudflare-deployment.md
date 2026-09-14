@@ -64,10 +64,14 @@ Wraps `./.open-next/worker.js` for two reasons:
    - `/api/og`, `/api/embed/*/svg`, `/api/badge/*/svg` (`CACHEABLE`) — pure
      functions of their URL that cost real CPU/DB work;
    - `/` and `/leaderboard`, `/teamboard` (`PAGE_CACHEABLE`) — signed-out readers
-     only, because these pages personalize from the session;
+     only, because these pages personalize from the session. Synthetic cache
+     keys include `__sort` (leaderboard sort cookie) and `__locale` from
+     `parseLocale(tt_locale)` (`en` or `zh` only — raw cookies must not
+     fragment the cache);
    - `/u/*` (`PROFILE_CACHEABLE`) — cacheable for everyone (no per-reader
-     identity), with unknown query params dropped from the cache key and only
-     200s stored (the case-canonicalizing 308 must not be cached).
+     identity), with unknown query params dropped from the cache key, `__locale`
+     appended the same way, and only 200s stored (the case-canonicalizing 308
+     must not be cached).
 2. **The daily cron** (`20 3 * * *`) runs `refreshAllSocialLinks`,
    `deleteExpiredEmailTokens`, and `expireInvitations` as independent
    `waitUntil` tasks — no public endpoint, no `CRON_SECRET` round trip. A

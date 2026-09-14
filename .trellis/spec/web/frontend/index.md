@@ -43,7 +43,7 @@
 ## Verification commands
 
 From `web/package.json` — these are the only automated gates (there are no
-web unit tests):
+web unit tests; Playwright E2E is the T10 exception for browser journeys):
 
 | Command | Purpose |
 |---------|---------|
@@ -52,6 +52,7 @@ web unit tests):
 | `bun run build` | copies `install.sh`/client assets into `public/`, then `next build` |
 | `bun run test:migrations` | `drizzle-kit migrate` + `scripts/check-migrations.ts` |
 | `bun run test:teams` | T4 domain invariants (`scripts/check-teams-invariants.ts`) |
+| `bun run test:e2e` | Playwright LocaleToggle (repo-root `tests/e2e/`, config `web/playwright.config.ts`) |
 | `bun run cf:build` / `cf:preview` / `cf:deploy` | OpenNext Cloudflare bundle, local preview, `wrangler deploy` |
 
 ## Pre-Development Checklist
@@ -72,7 +73,7 @@ web unit tests):
 
 ## Quality Check
 
-- `bun run lint` and `bun run typecheck` pass. Team/group domain changes also run `bun run test:teams`.
+- `bun run lint` and `bun run typecheck` pass. Team/group domain changes also run `bun run test:teams`. LocaleToggle / user-visible nav journeys also run `bun run test:e2e`.
 - Styling uses semantic tokens (`bg-background`, `text-muted-foreground`,
   `border`) — no hardcoded hex, no manual `dark:` branches.
 - New components come from `components/ui/` (vendored shadcn) — no new

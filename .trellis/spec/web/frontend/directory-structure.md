@@ -36,14 +36,16 @@ web/
 │   │   ├── teams/                # Team/Group domain (types, visibility, service)
 │   │   ├── validation/           # Zod submission schemas (submission.ts)
 │   │   ├── embed/                # SVG embed renderers + generated logos
-│   │   ├── providers/            # ThemeProvider wrapper
+│   │   ├── providers/            # ThemeProvider + I18nProvider wrapper
+│   │   ├── i18n/                 # locale cookie, dictionaries, t(), I18nProvider, useFormat
 │   │   ├── types.ts              # SUPPORTED_CLIENT_TYPES, ClientType, TokenBreakdown
 │   │   ├── utils.ts              # Domain formatters + cn()
-│   │   ├── format.ts             # Display formatting (compact numbers, XML escape)
+│   │   ├── format.ts             # Display formatting (compact numbers, XML escape); optional locale via intlTag
 │   │   ├── tw.tsx                # tw() styled-element helper (styled-components leftover)
 │   │   └── useSettings.ts        # Cross-route client preferences hook
 │   └── types/                    # Ambient declarations (static-images.d.ts)
 ├── scripts/                      # Migration checks, codegen (excluded from tsc)
+├── playwright.config.ts          # Playwright E2E; testDir is repo-root tests/e2e
 ├── drizzle.config.ts
 ├── wrangler.jsonc                # Cloudflare Worker config (production!)
 ├── open-next.config.ts           # OpenNext cache topology

@@ -22,7 +22,7 @@ import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/u
 import { cn } from "@/lib/utils";
 import { CONTAINER } from "@/components/layout/Container";
 import { PageHeader } from "@/components/layout/PageHeader";
-import { formatCurrency, formatNumber } from "@/lib/format";
+import { useFormat } from "@/lib/i18n";
 import type {
   LeaderboardSortBy,
   LeaderboardTokenFormat,
@@ -88,7 +88,6 @@ function Stat({
     </div>
   );
 }
-
 function DeveloperRow({
   user,
   isSelf,
@@ -103,9 +102,9 @@ function DeveloperRow({
   tokenFormat: LeaderboardTokenFormat;
 }) {
   const compact = tokenFormat === "compact";
+  const { formatNumber, formatCurrency } = useFormat();
   const primary = sortBy === "cost" ? user.totalCost : user.totalTokens;
   const share = max > 0 ? Math.max(primary / max, 0.006) : 0;
-
   return (
     <TableRow
       className={cn(
@@ -274,7 +273,7 @@ export default function Leaderboard({
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-
+  const { formatNumber, formatCurrency } = useFormat();
   const [sortBy, setSortBy] = useState<LeaderboardSortBy>(initialSortBy);
   const [search, setSearch] = useState(searchParams.get("search") ?? "");
   // The query these results actually answer, as opposed to what is currently

@@ -28,9 +28,10 @@ third parties), not for our own pages.
 
 - Cacheable loaders wrap in `unstable_cache` with explicit keys and tags:
   `loadPublicProfileForPage` — `revalidate: 60`,
-  `tags: [\`user:${normalizeUsernameCacheKey(username)}\`]`
-  (`publicProfileData.ts:696-724`).
-  `getLeaderboardData` — tag `"leaderboard"`; `getUserRank` (all-time) has its
+  `tags: [\`user:${normalizeUsernameCacheKey(username)}\`]`,
+  cache key includes locale (`publicProfileData.ts`).
+  `getLeaderboardData` — tag `"leaderboard"` (numbers, not copy — locale is
+  not in this data cache); `getUserRank` (all-time) has its
   own key and `user-rank` tag (`lib/leaderboard/getLeaderboard.ts`).
 - Mutations invalidate by tag: the submit route calls `revalidateTag` after
   writes, fanning out `leaderboard` + `user:<name>` invalidations (that
