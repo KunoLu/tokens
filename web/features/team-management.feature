@@ -153,6 +153,48 @@ Feature: 团队管理
       When 受邀人连续两次提交接受
       Then 该用户只被加入团队一次
 
+
+  Rule: 邀请可指定加入后自动归入的分组
+
+    邀请时可以选择一个本团队的活跃分组。受邀人接受后自动成为该分组成员；
+    未选择分组，或接受时该分组已解散 / 已删除，则只加入团队。
+
+    Scenario: 接受邀请后自动加入指定分组
+      Given "songlin" 是 "Neon Ravens" 的 admin
+      And 存在分组 "frontend"
+      And 存在用户名为 "mikoto" 的账号
+      When "songlin" 邀请 "mikoto" 并指定加入后归入 "frontend"
+      And "mikoto" 接受该邀请
+      Then "mikoto" 属于团队 "Neon Ravens"
+      And "mikoto" 属于分组 "frontend"
+
+    Scenario: 未选择分组时接受邀请只加入团队
+      Given "songlin" 是 "Neon Ravens" 的 admin
+      And 存在用户名为 "mikoto" 的账号
+      When "songlin" 邀请 "mikoto" 且不指定分组
+      And "mikoto" 接受该邀请
+      Then "mikoto" 属于团队 "Neon Ravens"
+      And "mikoto" 不属于任何分组
+
+    Scenario: 邀请发出后分组被解散则接受后只加入团队
+      Given "songlin" 已邀请 "mikoto" 并指定加入后归入 "frontend"
+      And 该邀请仍待处理
+      When admin 解散分组 "frontend"
+      And "mikoto" 接受该邀请
+      Then "mikoto" 属于团队 "Neon Ravens"
+      And "mikoto" 不属于任何分组
+
+    Scenario: 指定其他团队的分组或无效分组时邀请被拒绝
+      Given "songlin" 是 "Neon Ravens" 的 admin
+      When "songlin" 邀请他人并指定一个无效分组
+      Then 该操作被拒绝
+
+    Scenario: 邀请对话框可选择自动归入分组
+      Given "songlin" 是 "Neon Ravens" 的 admin
+      And 存在分组 "frontend"
+      When "songlin" 打开邀请对话框
+      Then 可以看到可选的自动归入分组选择器
+
   Rule: 邮箱行与用户行指向同一个人时，保留创建时间较早的一条
 
     同一团队下理论上可能同时存在一条未关联用户的邮箱邀请，和一条指向该用户的用户邀请

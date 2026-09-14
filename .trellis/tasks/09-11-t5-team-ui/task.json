@@ -3,7 +3,7 @@
   "name": "t5-team-ui",
   "title": "T5 team management UI",
   "description": "Build /teams page and invite combobox against demo.",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": "web",

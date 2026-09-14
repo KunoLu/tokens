@@ -43,6 +43,7 @@ interface User {
 const NAV_LINKS = [
   { href: "/leaderboard", key: "nav.leaderboard", authOnly: false, match: (p: string) => p === "/leaderboard" },
   { href: "/teamboard", key: "nav.teamboard", authOnly: false, match: (p: string) => p === "/teamboard" },
+  { href: "/teams", key: "nav.teams", authOnly: true, match: (p: string) => p === "/teams" },
   { href: "/docs", key: "nav.docs", authOnly: false, match: (p: string) => p.startsWith("/docs") },
   { href: "/profile", key: "nav.profile", authOnly: true, match: (p: string) => p === "/profile" || p.startsWith("/u/") },
 ] as const;

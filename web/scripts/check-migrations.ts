@@ -267,6 +267,7 @@ try {
         OR (table_name = 'daily_breakdown' AND column_name IN ('submitted_device_id', 'active_time_ms'))
         OR (table_name = 'users' AND column_name IN ('password_hash', 'email_verified_at', 'github_id'))
         OR (table_name = 'teams' AND column_name IN ('visibility', 'status'))
+        OR (table_name = 'team_invitations' AND column_name IN ('group_id'))
       )
   `;
   const columns = new Map(
@@ -308,6 +309,10 @@ try {
     "teams.status defaults to active",
     columns.get("teams.status")?.is_nullable === "NO" &&
       (columns.get("teams.status")?.column_default ?? "").includes("active")
+  );
+  expect(
+    "team_invitations.group_id is nullable (auto-assign is optional)",
+    columns.get("team_invitations.group_id")?.is_nullable === "YES"
   );
 
   const removedColumns = await sql<{ count: number }[]>`
@@ -406,6 +411,16 @@ try {
     "INV-1 and INV-3 unique constraints exist",
     constraints.has("team_members_user_unique") &&
       constraints.has("group_members_user_unique")
+  );
+
+  const fkRows = await sql<{ confdeltype: string }[]>`
+    SELECT confdeltype
+    FROM pg_constraint
+    WHERE conname = 'team_invitations_group_id_groups_id_fk'
+  `;
+  expect(
+    "team_invitations.group_id FK is ON DELETE SET NULL",
+    fkRows[0]?.confdeltype === "n"
   );
 
   const extensionRows = await sql<{ count: number }[]>`

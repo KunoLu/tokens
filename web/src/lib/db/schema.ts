@@ -617,6 +617,9 @@ export const teamInvitations = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
+    groupId: uuid("group_id").references(() => groups.id, {
+      onDelete: "set null",
+    }),
   },
   (table) => [
     unique("team_invitations_token_hash_unique").on(table.tokenHash),

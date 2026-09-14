@@ -14,6 +14,7 @@ import {
   createTeam,
   declineInvitation,
   deleteTeam,
+  disbandGroup,
   disbandTeam,
   expireInvitations,
   getTeam,
@@ -587,6 +588,78 @@ try {
       SELECT count(*)::int AS count FROM "group_members" WHERE "user_id" = ${member.id}
     `;
     expect("leaveTeam cascades out of group", leftover[0].count === 0);
+
+    // Feature: 团队管理 / Rule: 邀请可指定加入后自动归入的分组
+    const autoGroup = await createGroup(team.id, admin.id, { name: "AutoG" });
+    const [giUser] = await sql<{ id: string }[]>`
+      INSERT INTO "users" ("username") VALUES (${`t4gi_${stamp}`}) RETURNING "id"
+    `;
+    const giInvite = await inviteMembers(team.id, admin.id, [
+      { username: `t4gi_${stamp}`, groupId: autoGroup.id },
+    ]);
+    const giInviteId = giInvite.created[0]?.id;
+    expect("invite with groupId created", Boolean(giInviteId));
+    const giStored = await sql<{ group_id: string | null }[]>`
+      SELECT "group_id" FROM "team_invitations" WHERE "id" = ${giInviteId}
+    `;
+    expect("invite persists group_id", giStored[0]?.group_id === autoGroup.id);
+    await acceptInvitation(giInviteId, giUser.id);
+    const giGroupRows = await sql<{ group_id: string }[]>`
+      SELECT "group_id" FROM "group_members" WHERE "user_id" = ${giUser.id}
+    `;
+    expect(
+      "accept auto-assigns the invitee to the group",
+      giGroupRows[0]?.group_id === autoGroup.id
+    );
+
+    await sql`
+      INSERT INTO "users" ("username") VALUES (${`t4gf_${stamp}`})
+    `;
+    await expectTeamStatus(
+      "invite with another team's groupId is 400",
+      400,
+      () =>
+        inviteMembers(team.id, admin.id, [
+          { username: `t4gf_${stamp}`, groupId: groupB.id },
+        ])
+    );
+    await expectTeamStatus(
+      "invite with a malformed groupId is 400",
+      400,
+      () =>
+        inviteMembers(team.id, admin.id, [
+          { username: `t4gf_${stamp}`, groupId: "not-a-uuid" },
+        ])
+    );
+    await expectTeamStatus(
+      "invite with a non-string groupId is 400",
+      400,
+      () =>
+        inviteMembers(team.id, admin.id, [
+          { username: `t4gf_${stamp}`, groupId: 1 },
+        ])
+    );
+
+    const goneGroup = await createGroup(team.id, admin.id, { name: "Gone" });
+    const [gdUser] = await sql<{ id: string }[]>`
+      INSERT INTO "users" ("username") VALUES (${`t4gd_${stamp}`}) RETURNING "id"
+    `;
+    const gdInvite = await inviteMembers(team.id, admin.id, [
+      { username: `t4gd_${stamp}`, groupId: goneGroup.id },
+    ]);
+    await disbandGroup(team.id, goneGroup.id, admin.id);
+    await acceptInvitation(gdInvite.created[0].id, gdUser.id);
+    const gdTeamRows = await sql<{ role: string }[]>`
+      SELECT "role" FROM "team_members"
+      WHERE "team_id" = ${team.id} AND "user_id" = ${gdUser.id}
+    `;
+    const gdGroupRows = await sql<{ count: number }[]>`
+      SELECT count(*)::int AS count FROM "group_members" WHERE "user_id" = ${gdUser.id}
+    `;
+    expect(
+      "accept after group disbanded joins team only",
+      gdTeamRows[0]?.role === "member" && gdGroupRows[0].count === 0
+    );
 
     await sql`
       INSERT INTO "submissions" (

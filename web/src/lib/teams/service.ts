@@ -16,7 +16,18 @@ import { canViewTeam, isTeamVisibility } from "./visibility";
 import type { TeamMemberRole } from "./types";
 const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SUBADMIN_CAP = 2;
+
+function inviteGroupId(value: unknown): string | null {
+  if (value == null) return null;
+  if (typeof value !== "string") {
+    throw new TeamError("Group is not available for auto-assign", 400);
+  }
+  const trimmed = value.trim();
+  return trimmed === "" ? null : trimmed;
+}
 
 function bumpLeaderboard(): void {
   try {
@@ -286,7 +297,7 @@ export async function listMembers(teamId: string, viewerId: string | null) {
     .where(eq(teamMembers.teamId, teamId));
 }
 
-type InviteInput = { username?: unknown; email?: unknown };
+type InviteInput = { username?: unknown; email?: unknown; groupId?: unknown };
 
 export async function inviteMembers(
   teamId: string,
@@ -307,7 +318,26 @@ export async function inviteMembers(
     const email =
       typeof item.email === "string" ? item.email.trim().toLowerCase() : "";
     try {
+      const groupId = inviteGroupId(item.groupId);
       const row = await db.transaction(async (tx) => {
+        if (groupId) {
+          const target = UUID_PATTERN.test(groupId)
+            ? await tx
+                .select({ id: groups.id })
+                .from(groups)
+                .where(
+                  and(
+                    eq(groups.id, groupId),
+                    eq(groups.teamId, teamId),
+                    eq(groups.status, "active")
+                  )
+                )
+                .limit(1)
+            : [];
+          if (!target[0]) {
+            throw new TeamError("Group is not available for auto-assign", 400);
+          }
+        }
         let invitedUserId: string | null = null;
         let invitedEmail: string | null = null;
         let invitedUsername: string | null = username || null;
@@ -365,6 +395,7 @@ export async function inviteMembers(
             invitedBy: actorId,
             tokenHash: hashToken(token),
             expiresAt: new Date(Date.now() + INVITE_TTL_MS),
+            groupId,
           })
           .returning();
         return { row: inserted[0], notifyEmail: invitedEmail ?? notifyEmail };
@@ -594,6 +625,7 @@ export async function disbandGroup(
       .select()
       .from(groups)
       .where(and(eq(groups.id, groupId), eq(groups.teamId, teamId)))
+      .for("update")
       .limit(1);
     if (!group[0]) throw new TeamError("Not found", 404);
     await tx.delete(groupMembers).where(eq(groupMembers.groupId, groupId));
@@ -815,6 +847,26 @@ export async function acceptInvitation(invitationId: string, userId: string) {
         throw new TeamError("Leave your current team before accepting", 409);
       }
       throw err;
+    }
+    // INV-2: the invite's auto-assign group applies only while it is still an
+    // active group on this team. A disbanded group (or a deleted row, nulled
+    // by ON DELETE SET NULL) leaves the new member team-only.
+    if (invite.groupId) {
+      const target = await tx
+        .select({ id: groups.id, status: groups.status })
+        .from(groups)
+        .where(
+          and(eq(groups.id, invite.groupId), eq(groups.teamId, invite.teamId))
+        )
+        .for("update")
+        .limit(1);
+      if (target[0]?.status === "active") {
+        await tx.delete(groupMembers).where(eq(groupMembers.userId, userId));
+        await tx.insert(groupMembers).values({
+          groupId: invite.groupId,
+          userId,
+        });
+      }
     }
   });
   bumpLeaderboard();

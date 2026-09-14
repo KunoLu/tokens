@@ -42,11 +42,13 @@
   Before applying `0024` to a database that already has emails, check
   `SELECT lower(email), count(*) FROM users WHERE email IS NOT NULL GROUP BY 1 HAVING count(*) > 1`.
   Teams/groups from `0025`: `teams`, `team_members`, `groups`,
-  `group_members`, `team_invitations`. `teams.visibility` defaults to
-  `private`. INV-1 / INV-3 are UNIQUE on `user_id`. Pending invitation
-  uniques are partial and mutually exclusive (`invited_user_id IS NOT NULL`
-  vs `IS NULL`). Rollback is `DROP TABLE`. Domain unions live in
-  `lib/teams/types.ts`; row types are `$inferSelect` on the tables.
+  `group_members`, `team_invitations`. `0026` adds nullable
+  `team_invitations.group_id` FK `groups(id)` ON DELETE SET NULL (invite
+  auto-assign). `teams.visibility` defaults to `private`. INV-1 / INV-3 are
+  UNIQUE on `user_id`. Pending invitation uniques are partial and mutually
+  exclusive (`invited_user_id IS NOT NULL` vs `IS NULL`). Rollback is
+  `DROP TABLE` for 0025; `DROP COLUMN group_id` for 0026. Domain unions live
+  in `lib/teams/types.ts`; row types are `$inferSelect` on the tables.
 
 ## Migrations
 
@@ -65,9 +67,10 @@
 - **Journal tail snapshot must exist.** `check-migrations.ts` allows historical `meta/*_snapshot.json` gaps, but the newest snapshot idx must equal `_journal.json` tail. SQL merged without its snapshot (as with 0022/0023) makes the next `db:generate` re-emit already-applied DDL. Reconstruct a missing tail snapshot from the previous snapshot plus the SQL delta. **Do not** run `bun run db:generate` in the live migrations directory to "fill" them — that diffs `schema.ts` against the stale snapshot and emits a new migration.
 - **Checker required-tables must track drops and adds.** After a drop
   migration, remove those tables from `scripts/check-migrations.ts`. After an
-  add (`email_verification_tokens` in `0024`, teams/groups tables in `0025`),
-  add the table/columns/indexes to the same checker. Leaving the list stale
-  makes `test:migrations` fail on a correct schema.
+  add (`email_verification_tokens` in `0024`, teams/groups tables in `0025`,
+  `team_invitations.group_id` in `0026`), add the table/columns/indexes/FKs
+  to the same checker. Leaving the list stale makes `test:migrations` fail
+  on a correct schema.
 
 ## Query conventions
 
@@ -153,3 +156,59 @@ Put `DROP TABLE` in `0025` as “rollback SQL”. Run `bun run db:generate` agai
 
 #### Correct
 Forward migration is CREATE / INDEX / FK / CHECK only. Commit `0025_snapshot.json` with journal idx 25. INV-2 stays in T4 domain code. Cron sweep waits for T4; tables exist as of 0025.
+
+## Scenario: 0026 invitation auto-assign group_id
+
+### 1. Scope / Trigger
+
+- Trigger: additive schema/migration (`0026_invitation_group_id.sql`) plus
+  invite/accept applying optional auto-assign.
+- In: nullable `team_invitations.group_id`, Drizzle column, invite persist,
+  accept INV-2 insert, checker column + FK.
+- Out: Teamboard (T7), Profile membership (T8).
+
+### 2. Signatures
+
+| Object | Contract |
+|--------|----------|
+| Column | `team_invitations.group_id uuid NULL REFERENCES groups(id) ON DELETE SET NULL` |
+| Invite input | optional `groupId?: string` on each `InviteInput` item |
+| Accept | after `team_members` insert in the same txn, if the locked group row is still `active` on that team, insert `group_members` |
+
+### 3. Contracts
+
+- Omit / `null` / `""` `groupId` → store NULL (no auto-assign).
+- Present non-string `groupId`, non-UUID, wrong team, or non-active group → `TeamError` 400 `"Group is not available for auto-assign"`.
+- Accept: `SELECT … FOR UPDATE` the group by id+team (not filtered by status). Insert `group_members` only when `status='active'`. Disbanded or deleted (`ON DELETE SET NULL`) → team member only.
+- INV-2 stays application-layer. Do not add a DB FK from `group_members` to `team_members`.
+- Rollback: `DROP COLUMN group_id`. No backfill; existing pending invites stay NULL.
+
+### 4. Validation & Error Matrix
+
+| Condition | Result |
+|-----------|--------|
+| Valid active group on this team | persist `group_id`; accept inserts `group_members` |
+| Non-string / malformed / other-team / disbanded group at invite | 400 |
+| Group disbanded after invite, before accept | accept 200, no `group_members` row |
+| Group row deleted | `group_id` SET NULL; accept team-only |
+| Missing FK `ON DELETE SET NULL` | `test:migrations` fails (`confdeltype !== 'n'`) |
+
+### 5. Good / Base / Bad Cases
+
+- Good: invite with this team's active group → accept → one `group_members` row.
+- Base: invite with no `groupId` → accept → team member only.
+- Bad: `groupId: 1` (non-string) silently stored as NULL; accept inserting into a group without `FOR UPDATE` while `disbandGroup` runs.
+
+### 6. Tests Required
+
+`bun run test:migrations` must assert nullable `team_invitations.group_id` and FK `ON DELETE SET NULL`. Journal tail snapshot is `0026_snapshot.json`.
+
+`bun run test:teams` must assert: invite+accept with valid group → `group_members`; bad/non-string groupId → 400; accept after disband → team member only.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+Treat a supplied non-string `groupId` as “no group”. `SELECT` the auto-assign group without `FOR UPDATE` (accept can insert after `disbandGroup` deleted members). Encode INV-2 as a DB FK. Run `bun run db:generate` against a stale 0025 snapshot to “fill” 0026.
+
+#### Correct
+Reject a present non-string `groupId` with 400. Lock the group row on accept (and on `disbandGroup`) so auto-assign cannot land on a disbanded group. Hand-write `0026` SQL + `0026_snapshot.json`. INV-2 stays in `acceptInvitation`.

@@ -19,7 +19,7 @@ UI 对照：`docs/demo/teamboard-demo.html`
 
 ## 当前指针
 
-**当前：T5 Team 管理页。** T10 已 archive（`cc2191c`）。不合 main。
+**当前：T5 待本地 commit。** lint / typecheck / test:migrations / test:teams / test:e2e 6/6 绿。不合 main。
 
 推荐顺序：
 
@@ -143,14 +143,14 @@ UI 对照：`docs/demo/teamboard-demo.html`
 
 ### T5 Team 管理页面 `L`
 
-**状态**：未开始  
-**依赖**：T4（建议等 T10，新页面直接写字典 key）
+**状态**：实现完成，待本地 commit（2026-09-14）
+**依赖**：T4、T10
 
-- [ ] `/teams` + `components/teams/`；对照 demo Teams 页
-- [ ] 补 shadcn：select / dialog / checkbox / popover / form / label / textarea
-- [ ] 邀请：可搜索下拉多选（勾选 + 计数 + 未注册邮箱路径）
-- [ ] 建团强制选可见性；危险操作名称二次确认
-- [ ] 验证：全部 Team / Group 操作可走通
+- [x] `/teams` + `components/teams/`；对照 demo Teams 页
+- [x] 补 shadcn：select / dialog / checkbox / popover / label / textarea（`form` 不在 base-nova）
+- [x] 邀请：可搜索下拉多选（勾选 + 计数 + 未注册邮箱路径）+ 可选自动归组（0026 `group_id`）
+- [x] 建团强制选可见性；危险操作名称二次确认
+- [x] 验证：lint / typecheck / test:migrations / test:teams / native test:e2e 6/6（含登录态创建/邀请/解散）
 
 ---
 
