@@ -19,11 +19,12 @@ import {
   escapeLikePattern,
   hasDirectives,
   parseSearchDirectives,
+  type ParsedSearchDirectives,
 } from "@/lib/leaderboard/searchDirectives";
 
 export type { LeaderboardData, LeaderboardUser, Period, SortBy } from "@/lib/leaderboard/types";
 
-interface LeaderboardPeriodRow {
+export interface LeaderboardPeriodRow {
   userId: string;
   username: string;
   displayName: string | null;
@@ -108,7 +109,7 @@ function toUtcDateString(date: Date): string {
   return date.toISOString().slice(0, 10);
 }
 
-function getPeriodDateRange(
+export function getPeriodDateRange(
   period: Period,
   now: Date = new Date(),
   customFrom?: string,
@@ -166,7 +167,7 @@ function getPeriodDateRange(
   };
 }
 
-function compareLeaderboardUsers(
+export function compareLeaderboardUsers(
   left: Omit<LeaderboardUser, "rank">,
   right: Omit<LeaderboardUser, "rank">,
   sortBy: SortBy
@@ -190,7 +191,7 @@ function compareLeaderboardUsers(
   return left.username.localeCompare(right.username);
 }
 
-function aggregatePeriodRows(
+export function aggregatePeriodRows(
   rows: LeaderboardPeriodRow[],
   sortBy: SortBy
 ): Array<Omit<LeaderboardUser, "rank">> {
@@ -239,6 +240,39 @@ function matchesLeaderboardSearch(
   return false;
 }
 
+/**
+ * A daily row matches a `client:`/`model:` search when its source breakdown
+ * names a matching client or model. Exported so the Teamboard answers the
+ * same directives the same way.
+ */
+export function rowMatchesSearchDirectives(
+  sourceBreakdown: Record<string, { models: Record<string, unknown> }> | null | undefined,
+  parsed: ParsedSearchDirectives
+): boolean {
+  if (!sourceBreakdown) return false;
+
+  const clientKeys = Object.keys(sourceBreakdown).map((k) => k.toLowerCase());
+  const modelKeys = Object.values(sourceBreakdown).flatMap((client) =>
+    client.models ? Object.keys(client.models).map((m) => m.toLowerCase()) : []
+  );
+
+  if (parsed.clients.length > 0) {
+    const hasMatchingClient = parsed.clients.some((c) =>
+      clientKeys.some((k) => k.includes(c))
+    );
+    if (!hasMatchingClient) return false;
+  }
+
+  if (parsed.models.length > 0) {
+    const hasMatchingModel = parsed.models.some((m) =>
+      modelKeys.some((k) => k.includes(m))
+    );
+    if (!hasMatchingModel) return false;
+  }
+
+  return true;
+}
+
 function buildPeriodLeaderboardData(
   rows: LeaderboardPeriodRow[],
   page: number,
@@ -251,30 +285,9 @@ function buildPeriodLeaderboardData(
 
   let filteredRows = rows;
   if (hasDirectives(parsed)) {
-    filteredRows = rows.filter((row) => {
-      if (!row.sourceBreakdown) return false;
-
-      const clientKeys = Object.keys(row.sourceBreakdown).map((k) => k.toLowerCase());
-      const modelKeys = Object.values(row.sourceBreakdown).flatMap((client) =>
-        client.models ? Object.keys(client.models).map((m) => m.toLowerCase()) : []
-      );
-
-      if (parsed.clients.length > 0) {
-        const hasMatchingClient = parsed.clients.some((c) =>
-          clientKeys.some((k) => k.includes(c))
-        );
-        if (!hasMatchingClient) return false;
-      }
-
-      if (parsed.models.length > 0) {
-        const hasMatchingModel = parsed.models.some((m) =>
-          modelKeys.some((k) => k.includes(m))
-        );
-        if (!hasMatchingModel) return false;
-      }
-
-      return true;
-    });
+    filteredRows = rows.filter((row) =>
+      rowMatchesSearchDirectives(row.sourceBreakdown, parsed)
+    );
   }
 
   return pageRanking(
@@ -294,7 +307,7 @@ function buildPeriodLeaderboardData(
  * being baked into a per-page cache entry of its own. Ranks are assigned before
  * the text filter so a search shows each user's real position on the board.
  */
-function pageRanking(
+export function pageRanking(
   aggregatedUsers: Array<Omit<LeaderboardUser, "rank">>,
   page: number,
   limit: number,
@@ -661,10 +674,10 @@ async function fetchLeaderboardData(
 // A username is at most 39 chars and the `client:`/`model:` directives add a
 // short prefix, so 120 is well past any real query; 500 pages of 100 is well
 // past the end of the board.
-const MAX_SEARCH_LENGTH = 120;
-const MAX_PAGE = 500;
+export const MAX_SEARCH_LENGTH = 120;
+export const MAX_PAGE = 500;
 
-function periodCacheKey(
+export function periodCacheKey(
   period: Exclude<Period, "all">,
   customFrom?: string,
   customTo?: string

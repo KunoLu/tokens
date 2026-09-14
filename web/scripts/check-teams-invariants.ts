@@ -3,6 +3,8 @@
  * cases from web/features/team-management.feature.
  */
 import postgres from "postgres";
+import { mock } from "bun:test";
+
 import { TeamError } from "../src/lib/teams/errors";
 import { canViewTeam } from "../src/lib/teams/visibility";
 import { issueEmailToken } from "../src/lib/auth/emailTokens";
@@ -26,6 +28,18 @@ import {
   removeGroupMember,
   searchUsers,
 } from "../src/lib/teams/service";
+
+// getTeamboard wraps its reads in next/cache unstable_cache, which has no
+// incremental cache outside the Next server ("invariant: incrementalCache
+// missing in unstable_cache"). Mock it to a call-through before the loader is
+// imported in the FR-2 section below, so each call re-reads fresh fixtures
+// with no cross-call staleness. Modules already evaluated above keep the real
+// bindings, so existing cases are unaffected.
+mock.module("next/cache", () => ({
+  unstable_cache: (fn: (...args: unknown[]) => unknown) => fn,
+  revalidatePath: () => {},
+  revalidateTag: () => {},
+}));
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) {
@@ -718,6 +732,111 @@ try {
     expect("created_by can delete a disbanded empty team", true);
   } finally {
     await sql`DELETE FROM "users" WHERE "username" LIKE ${`t4%${stamp}`}`;
+  }
+
+  // Feature: 团队榜单 / FR-2: TEAMBOARD_PAGE_SIZE is 50, and groupIds is a
+  // multi-value union filter. Seed 51 members straight through SQL (ponytail:
+  // no 51 HTTP registrations) plus two groups on disjoint rosters.
+  const tbStamp = `t7tb_${Date.now().toString(36)}`;
+  try {
+    const [tbCreator] = await sql<{ id: string }[]>`
+      INSERT INTO "users" ("username") VALUES (${`${tbStamp}_creator`}) RETURNING "id"
+    `;
+    const [tbTeam] = await sql<{ id: string }[]>`
+      INSERT INTO "teams" ("name", "slug", "created_by", "visibility")
+      VALUES (${`T7 Board ${tbStamp}`}, ${tbStamp}, ${tbCreator.id}, 'public')
+      RETURNING "id"
+    `;
+    const memberUsernames = Array.from(
+      { length: 51 },
+      (_, index) => `${tbStamp}_u${String(index).padStart(2, "0")}`
+    );
+    const memberRows = await sql<{ id: string; username: string }[]>`
+      INSERT INTO "users" ${sql(memberUsernames.map((username) => ({ username })))}
+      RETURNING "id", "username"
+    `;
+    const memberIdByUsername = new Map(memberRows.map((row) => [row.username, row.id]));
+    const memberIds = memberUsernames.map((username) => {
+      const id = memberIdByUsername.get(username);
+      if (!id) throw new Error(`fixture insert missing ${username}`);
+      return id;
+    });
+    await sql`
+      INSERT INTO "team_members" ${sql(
+        memberIds.map((userId) => ({ team_id: tbTeam.id, user_id: userId, role: "member" }))
+      )}
+    `;
+    const [groupA] = await sql<{ id: string }[]>`
+      INSERT INTO "groups" ("team_id", "name", "created_by")
+      VALUES (${tbTeam.id}, ${`${tbStamp} Alpha`}, ${tbCreator.id})
+      RETURNING "id"
+    `;
+    const [groupB] = await sql<{ id: string }[]>`
+      INSERT INTO "groups" ("team_id", "name", "created_by")
+      VALUES (${tbTeam.id}, ${`${tbStamp} Beta`}, ${tbCreator.id})
+      RETURNING "id"
+    `;
+    // Disjoint rosters: A holds u00-u24, B holds u25-u49; u50 has no group.
+    const groupAUsernames = memberUsernames.slice(0, 25);
+    const groupBUsernames = memberUsernames.slice(25, 50);
+    await sql`
+      INSERT INTO "group_members" ${sql([
+        ...memberIds.slice(0, 25).map((userId) => ({ group_id: groupA.id, user_id: userId })),
+        ...memberIds.slice(25, 50).map((userId) => ({ group_id: groupB.id, user_id: userId })),
+      ])}
+    `;
+
+    // Dynamic import on purpose: ESM hoists static imports above the
+    // mock.module call at the top of this file, which would bind the real
+    // next/cache unstable_cache and throw outside the Next server.
+    const { getTeamboard } = await import("../src/lib/teamboard/getTeamboard");
+
+    const page1 = await getTeamboard(tbTeam.id, [], null, { page: 1 });
+    expect(
+      "FR-2 teamboard page 1 holds a full page of 50",
+      page1.members.length === 50 &&
+        page1.pagination.totalUsers === 51 &&
+        page1.pagination.totalPages >= 2 &&
+        page1.pagination.hasNext
+    );
+    const page2 = await getTeamboard(tbTeam.id, [], null, { page: 2 });
+    expect(
+      "FR-2 teamboard page 2 holds the remainder",
+      page2.members.length === 1 &&
+        page2.pagination.page === 2 &&
+        page2.pagination.hasPrev &&
+        !page2.pagination.hasNext
+    );
+    const pagedUsernames = new Set([
+      ...page1.members.map((member) => member.username),
+      ...page2.members.map((member) => member.username),
+    ]);
+    expect(
+      "FR-2 pages tile the whole roster without overlap",
+      pagedUsernames.size === 51 && memberUsernames.every((name) => pagedUsernames.has(name))
+    );
+
+    const unionBoard = await getTeamboard(tbTeam.id, [groupA.id, groupB.id], null);
+    const unionUsernames = new Set(unionBoard.members.map((member) => member.username));
+    expect(
+      "FR-2 groupIds=[A,B] returns the union of both groups",
+      unionBoard.members.length === 50 &&
+        unionBoard.selectedGroupIds.length === 2 &&
+        unionBoard.members.every(
+          (member) => member.group !== null && [groupA.id, groupB.id].includes(member.group.id)
+        ) &&
+        groupAUsernames.every((name) => unionUsernames.has(name)) &&
+        groupBUsernames.every((name) => unionUsernames.has(name))
+    );
+    const onlyA = await getTeamboard(tbTeam.id, [groupA.id], null);
+    expect(
+      "FR-2 groupIds=[A] returns only group A",
+      onlyA.members.length === 25 &&
+        onlyA.members.every((member) => member.group?.id === groupA.id) &&
+        onlyA.members.every((member) => !groupBUsernames.includes(member.username))
+    );
+  } finally {
+    await sql`DELETE FROM "users" WHERE "username" LIKE ${`${tbStamp}%`}`;
   }
 } finally {
   await sql.end();

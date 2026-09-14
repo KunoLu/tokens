@@ -146,6 +146,47 @@ Feature: 排行榜与团队榜
       When 不属于该团队的 "rin" 打开该链接
       Then "rin" 看不到该团队的成员数据
 
+  Rule: Teamboard 保留 Leaderboard 的 Period、Sort by、搜索与分页
+
+    Scenario: Period 五选一
+      Given 访客在团队榜页选中公开团队 "Neon Ravens"
+      Then 页面提供 "All time"、"Today"、"Week"、"Month"、"Last month" 五个 Period 选项
+      And 默认选中 "All time"
+
+    Scenario: 切换 Period 后按该周期重新统计
+      Given 访客正在查看团队 "Neon Ravens"
+      When 访客把 Period 切换为 "Week"
+      Then 列表只统计该团队最近 7 天的用量
+      And 名次按该周期用量重新从 1 开始编号
+
+    Scenario: 按 Cost 排序
+      Given 访客正在查看团队 "Neon Ravens"
+      When 访客把 Sort by 切换为 "Cost"
+      Then 列表按 Cost 从高到低重新排列
+
+    Scenario: 搜索团队成员
+      Given 访客正在查看团队 "Neon Ravens"
+      When 访客搜索 "songlin"
+      Then 列表只展示用户名或显示名匹配 "songlin" 的成员
+      And 成员保留其在当前筛选下的真实名次
+
+    Scenario: 分页浏览
+      Given 团队 "Neon Ravens" 的当前筛选结果超过一页
+      When 访客在团队榜页点击 "Next"
+      Then 列表展示下一页成员
+      And URL 中的 page 参数随之更新
+
+    Scenario: Period、Sort by、搜索与分页条件可以通过链接分享
+      Given "songlin" 在公开团队 "Neon Ravens" 上切换了 Period 和 Sort by 并输入了搜索词
+      When 任意访客打开该链接
+      Then 访客看到相同的 Period、Sort by 与搜索结果
+
+    Scenario: 团队榜 API 遵循 §9.3 参数命名
+      When 访客用 "teamId"、"groupIds"、"period"、"sortBy"、"page"、"search" 参数请求 "/api/teamboard"
+      Then 返回该团队的成员榜单而不是团队列表
+      When 访客请求 "/api/teamboard" 且不带 "teamId"
+      Then 返回筛选器可用的团队列表
+
   Rule: 封禁用户不出现在任何榜单
 
     Scenario: 被封禁的团队成员

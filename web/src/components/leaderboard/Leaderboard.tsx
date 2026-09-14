@@ -52,7 +52,7 @@ interface LeaderboardProps {
 
 // All time leads because it is the standing everyone compares against; Today
 // stays the landing selection, which the server resolves.
-const PERIODS: ReadonlyArray<{ value: Period; label: string }> = [
+export const PERIODS: ReadonlyArray<{ value: Period; label: string }> = [
   { value: "all", label: "All time" },
   { value: "today", label: "Today" },
   { value: "week", label: "Week" },
@@ -88,18 +88,22 @@ function Stat({
     </div>
   );
 }
-function DeveloperRow({
+// Exported for the Teamboard, which renders the same rows minus the Team
+// column (`hideTeam`) — one row implementation, two column sets.
+export function DeveloperRow({
   user,
   isSelf,
   max,
   sortBy,
   tokenFormat,
+  hideTeam = false,
 }: {
   user: LeaderboardUser;
   isSelf: boolean;
   max: number;
   sortBy: LeaderboardSortBy;
   tokenFormat: LeaderboardTokenFormat;
+  hideTeam?: boolean;
 }) {
   const compact = tokenFormat === "compact";
   const { formatNumber, formatCurrency } = useFormat();
@@ -149,12 +153,12 @@ function DeveloperRow({
             <span className="truncate text-xs text-muted-foreground">
               @{user.username}
             </span>
-            <MembershipBadges team={user.team} group={user.group} />
+            <MembershipBadges team={hideTeam ? null : user.team} group={user.group} />
           </span>
         </Link>
       </TableCell>
 
-      <MembershipCells team={user.team} group={user.group} />
+      <MembershipCells team={user.team} group={user.group} includeTeam={!hideTeam} />
 
       {/* Phones get one stacked cell; the split columns need the width.
           Always abbreviated here, regardless of the stored preference: the
@@ -236,23 +240,32 @@ function DeveloperRow({
  * on a pointer. The title spells out what the click will do, in the direction
  * it will do it.
  */
-function FormatToggle({
+export function FormatToggle({
   label,
   compact,
   onToggle,
+  titles,
 }: {
   label: string;
   compact: boolean;
   onToggle: () => void;
+  /** Localized variants of the default English title/aria strings. */
+  titles?: { showExact: string; abbreviate: string };
 }) {
   return (
     <button
       type="button"
       onClick={onToggle}
       aria-label={
-        compact ? `${label}: show exact numbers` : `${label}: abbreviate numbers`
+        compact
+          ? `${label}: ${titles?.showExact ?? "show exact numbers"}`
+          : `${label}: ${titles?.abbreviate ?? "abbreviate numbers"}`
       }
-      title={compact ? "Show exact numbers" : "Abbreviate numbers"}
+      title={
+        compact
+          ? (titles?.showExact ?? "Show exact numbers")
+          : (titles?.abbreviate ?? "Abbreviate numbers")
+      }
       className="flex h-full w-full items-center justify-end gap-1.5 px-2 py-2 transition-colors hover:text-foreground"
     >
       {label}

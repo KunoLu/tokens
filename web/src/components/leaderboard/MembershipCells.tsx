@@ -31,15 +31,19 @@ export function MembershipBadges({
 
 export function MembershipColumnHeaders({
   includeTeam = true,
+  teamLabel = "Team",
+  groupLabel = "Group",
 }: {
   includeTeam?: boolean;
+  teamLabel?: string;
+  groupLabel?: string;
 }) {
   return (
     <>
       {includeTeam ? (
-        <TableHead className="hidden max-w-[9rem] sm:table-cell">Team</TableHead>
+        <TableHead className="hidden max-w-[9rem] sm:table-cell">{teamLabel}</TableHead>
       ) : null}
-      <TableHead className="hidden max-w-[9rem] sm:table-cell">Group</TableHead>
+      <TableHead className="hidden max-w-[9rem] sm:table-cell">{groupLabel}</TableHead>
     </>
   );
 }
