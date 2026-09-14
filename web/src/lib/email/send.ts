@@ -82,3 +82,20 @@ export function sendPasswordResetEmail(to: string, link: string): void {
     )
   );
 }
+
+export function sendTeamInviteEmail(to: string, teamName: string, link: string): void {
+  sendInBackground(
+    sendEmail(
+      to,
+      `You're invited to ${teamName} on Tokens`,
+      [
+        `You've been invited to join ${teamName} on Tokens.`,
+        "",
+        "Sign in or register with this email, then open:",
+        link,
+        "",
+        "The invitation expires in 7 days. If you were not expecting this, ignore it.",
+      ].join("\n")
+    )
+  );
+}

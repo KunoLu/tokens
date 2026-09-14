@@ -19,7 +19,7 @@ UI 对照：`docs/demo/teamboard-demo.html`
 
 ## 当前指针
 
-**当前：T3 实现完成，待 3.4 commit。** 任务 `09-11-t3-team-schema` `in_progress`。本地 `test:migrations` + `typecheck` 已绿。`bun run build` **skipped**（T3 范围是 schema/migration；不是绿）。未 archive。
+**当前：T4 代码已齐，待本地 commit。** 任务 `09-11-t4-team-api` `in_progress`。`lint` / `typecheck` / `test:teams` / `bun run build` 绿。`cf:preview` 未跑，release-readiness blocked。未 archive。未 start T6。
 
 推荐顺序：
 
@@ -131,13 +131,13 @@ UI 对照：`docs/demo/teamboard-demo.html`
 
 ### T4 Team/Group 领域服务与 API `L`
 
-**状态**：未开始  
+**状态**：实现完成，待本地 commit（2026-09-14）。release-readiness blocked（无 `cf:preview`）。未 archive。
 **依赖**：T2、T3
 
-- [ ] `web/src/lib/teams/` 领域服务；API 见 PRD §9.2
-- [ ] `GET /api/users/search`：仅 admin/subadmin；不回显 email；完整邮箱才精确匹配
-- [ ] 落实 INV-1..INV-10；并发按 design.md §6；可见性 `canViewTeam` 一处 helper
-- [ ] 验证：权限矩阵、解散/删除前置、subadmin 上限、邀请去重与过期、退出 Team 级联退出 Group
+- [x] `web/src/lib/teams/` 领域服务；API 见 PRD §9.2
+- [x] `GET /api/users/search`：仅 admin/subadmin；不回显 email；完整邮箱才精确匹配
+- [x] 落实 INV-1..INV-10；并发按 design.md §6；可见性 `canViewTeam` 一处 helper
+- [x] 验证：权限矩阵、解散/删除前置、subadmin 上限、邀请去重与过期、退出 Team 级联退出 Group、邮箱邀请归属、跨团队 group 删除、verify-email 回填（含 replay 重试）。`lint` / `typecheck` / `test:teams` / `bun run build` 绿。`cf:preview` 未跑。
 
 ---
 
@@ -282,3 +282,4 @@ bun run build
 | 2026-09-11 | T2 archive `--no-commit` → `.trellis/tasks/archive/2026-09/09-11-t2-email-auth/`。CLI `tokens login`+`submit` 仍为 `[ ]`。未 start T3。 |
 | 2026-09-11 | 本地隔离 `tokens login` + `tokens submit` 对 `localhost:3000` 跑通；生产 credentials 未改写。未 start T3。 |
 | 2026-09-14 | T3 实现完成：`0025_add_teams_and_groups.sql` + schema + `lib/teams/types.ts`；checker 覆盖 5 表 / 部分索引 / CHECK / INV-1。`test:migrations` + `typecheck` 绿。`bun run build` skipped。待 3.4 commit。 |
+| 2026-09-14 | T4 实现完成：Team/Group API、`canViewTeam`、邀请发信链到 `/login` 或 `/register`（T5 负责接受 UI）、verify-email 回填（含 consumed-token replay 重试）、cron `expireInvitations` 独立 `waitUntil`、`test:teams` 覆盖权限/解散删除/subadmin 上限/邀请去重过期/退出级联/邮箱归属/跨团队 group。`lint`/`typecheck`/`test:teams`/`bun run build` 绿。`cf:preview` 未跑，release-readiness blocked。未 archive。 |

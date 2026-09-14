@@ -8,6 +8,7 @@
 import { default as handler } from "./.open-next/worker.js";
 import { refreshAllSocialLinks } from "./src/lib/cron/refreshSocialLinks";
 import { deleteExpiredEmailTokens } from "./src/lib/auth/emailTokens";
+import { expireInvitations } from "./src/lib/teams/service";
 
 /**
  * Routes whose responses are a pure function of their URL and cost real work to
@@ -244,14 +245,29 @@ export default {
     // returns its first await.
     ctx.waitUntil(
       refreshAllSocialLinks()
-        .then(async ({ users }) => {
-          const expiredTokens = await deleteExpiredEmailTokens();
-          console.log(
-            `[cron] refresh-social-links: synced ${users} users, deleted ${expiredTokens} expired email tokens`,
-          );
+        .then(({ users }) => {
+          console.log(`[cron] refresh-social-links: synced ${users} users`);
         })
         .catch((error: unknown) => {
           console.error("[cron] refresh-social-links failed", error);
+        }),
+    );
+    ctx.waitUntil(
+      deleteExpiredEmailTokens()
+        .then((expiredTokens) => {
+          console.log(`[cron] deleted ${expiredTokens} expired email tokens`);
+        })
+        .catch((error: unknown) => {
+          console.error("[cron] deleteExpiredEmailTokens failed", error);
+        }),
+    );
+    ctx.waitUntil(
+      expireInvitations()
+        .then((expiredInvites) => {
+          console.log(`[cron] expired ${expiredInvites} invitations`);
+        })
+        .catch((error: unknown) => {
+          console.error("[cron] expireInvitations failed", error);
         }),
     );
   },

@@ -14,10 +14,11 @@
 | `bun run typecheck` | `wrangler types` → `cloudflare-env.d.ts` + `tsc --noEmit` |
 | `bun run build` | asset copies + `next build` |
 | `bun run test:migrations` | `drizzle-kit migrate` + `scripts/check-migrations.ts` |
+| `bun run test:teams` | T4 domain invariants (`scripts/check-teams-invariants.ts`); parent implement.md authorized this minimal runner |
 
-Do not add a unit-test setup without a team decision — the upstream tests were
-deliberately removed (`docs/upstream_policy.md`), and the current safety net
-is the four commands above plus code review. Small testability affordances
+Do not add a general unit-test framework without a team decision — the upstream tests were
+deliberately removed (`docs/upstream_policy.md`). `test:teams` is the T4-only exception
+for INV/permission checks. Small testability affordances
 exist (e.g. `formatRelativeTime` takes an injectable `now`,
 `scripts/migrate-retry.ts` is extracted for testability), but no `*.test.ts`
 files exist under `web/`.

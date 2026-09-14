@@ -51,6 +51,7 @@ web unit tests):
 | `bun run typecheck` | `wrangler types` → `cloudflare-env.d.ts`, then `tsc --noEmit` |
 | `bun run build` | copies `install.sh`/client assets into `public/`, then `next build` |
 | `bun run test:migrations` | `drizzle-kit migrate` + `scripts/check-migrations.ts` |
+| `bun run test:teams` | T4 domain invariants (`scripts/check-teams-invariants.ts`) |
 | `bun run cf:build` / `cf:preview` / `cf:deploy` | OpenNext Cloudflare bundle, local preview, `wrangler deploy` |
 
 ## Pre-Development Checklist
@@ -71,7 +72,7 @@ web unit tests):
 
 ## Quality Check
 
-- `bun run lint` and `bun run typecheck` pass.
+- `bun run lint` and `bun run typecheck` pass. Team/group domain changes also run `bun run test:teams`.
 - Styling uses semantic tokens (`bg-background`, `text-muted-foreground`,
   `border`) — no hardcoded hex, no manual `dark:` branches.
 - New components come from `components/ui/` (vendored shadcn) — no new

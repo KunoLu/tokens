@@ -3,7 +3,7 @@
   "name": "t4-team-api",
   "title": "T4 team and group domain API",
   "description": "Implement team/group domain services, APIs, and INV-1..INV-10.",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": "web",
