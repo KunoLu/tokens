@@ -20,6 +20,11 @@ One function serves both the API route and the page:
 - `app/(main)/teamboard/page.tsx` calls `getTeamboard` + `getSession` the same
   way; `app/api/teamboard/route.ts` is the external JSON surface. Do not
   HTTP-self-fetch.
+- `app/u/[username]/page.tsx` loads `loadProfileMembershipForPage` in the same
+  `Promise.all` as profile/devices/social. Page-only (D-4): do not add
+  Team/Group to `getPublicProfileResponse` / `GET /api/users/[username]`.
+  Leave buttons are client `GET /api/auth/session` vs profile username because
+  `/u/*` is PROFILE_CACHEABLE for everyone.
 
 
 **Why not HTTP self-fetch:** server-side fetches to our own routes break
@@ -55,16 +60,24 @@ Client components fetch when the user acts, not to render:
 
 - `app/settings/SettingsClient.tsx` — `DELETE /api/settings/submitted-data`,
   token CRUD, device rename; `toast.success/error` on result.
-- `components/layout/Navigation.tsx`, `app/device/DeviceClient.tsx` —
-  `GET /api/auth/session` for auth state; DeviceClient distinguishes load
-  failure from signed-out.
+- `components/layout/Navigation.tsx`, `app/device/DeviceClient.tsx`,
+  `components/profile/ProfileMembership.tsx` — `GET /api/auth/session` for
+  auth state. ProfileMembership compares session username to the profile
+  username at render (leave buttons must not be baked into PROFILE_CACHEABLE
+  `/u/*` HTML). DeviceClient distinguishes load failure from signed-out.
 
 ## Parallelism
 
 Independent queries in one page go in one `Promise.all` — e.g. the profile
-page loads profile, devices, and GitHub social links together, and
+page loads profile, devices, GitHub social links, and membership together, and
 `publicProfileData.ts` batches stats queries the same way. Non-critical
-sections degrade individually (devices wrapped in try/catch → `[]`).
+sections degrade individually (devices → `[]`, membership → no block).
+
+Leave mutations (`leaveTeam` / `leaveGroup`) call `bumpLeaderboard()` and look
+up `users.username` by `userId` (never a client username) then
+`revalidateTag('user:' + normalizeUsernameCacheKey(username))`.
+`listMyInvitations` filters expiry with SQL `now()`, not a JS `Date` in raw
+`sql`.
 
 ## Scenario: GET /api/teamboard
 

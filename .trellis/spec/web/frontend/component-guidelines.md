@@ -44,8 +44,11 @@ Per `docs/upstream_policy.md`:
   re-exports components + types).
 - Big client orchestrators receive server-loaded data as props:
   `app/u/[username]/ProfilePageClient.tsx` takes `initialData` from the RSC
-  page; `components/leaderboard/Leaderboard.tsx` and
-  `components/teamboard/Teamboard.tsx` sync filters to the URL via
+  page; `components/profile/ProfileMembership.tsx` renders Team/Group names
+  from that data and computes leave-button ownership at render from
+  `GET /api/auth/session` vs the profile username (PROFILE_CACHEABLE `/u/*`
+  must not bake `isOwner` into HTML). `components/leaderboard/Leaderboard.tsx`
+  and `components/teamboard/Teamboard.tsx` sync filters to the URL via
   `useRouter` + `useSearchParams`. Displayed Teamboard sort follows the URL
   `sortBy` param even if a pending RSC has not landed.
 - Client components start with `"use client"` and stay as far down the tree

@@ -19,7 +19,7 @@ UI 对照：`docs/demo/teamboard-demo.html`
 
 ## 当前指针
 
-**当前：无 active 任务。** T7 已提交 `21a84933` 并 archive `--no-commit` → `.trellis/tasks/archive/2026-09/09-11-t7-teamboard-page/`。下一步 `task.py start 09-11-t8-profile-membership`。不合 main。
+**当前：T8 Profile 团队区块（待 Phase 3.4 提交确认）。** T7 已 archive（`21a84933`）。不合 main。
 
 推荐顺序：
 
@@ -182,13 +182,13 @@ UI 对照：`docs/demo/teamboard-demo.html`
 
 ### T8 Profile 团队区块 `M`
 
-**状态**：未开始  
+**状态**：已完成（2026-09-15，待 3.4 提交）  
 **依赖**：T4
 
-- [ ] Profile 加 Team / Group；无归属不渲染
-- [ ] 仅本人可见退出；admin 退出被阻断（须先移交或解散）
-- [ ] 退出 Team 级联退出 Group
-- [ ] 验证：他人 / 未登录看不到退出按钮
+- [x] Profile 加 Team / Group；无归属不渲染
+- [x] 仅本人可见退出；admin 退出被阻断（须先移交或解散）
+- [x] 退出 Team 级联退出 Group
+- [x] 验证：他人 / 未登录看不到退出按钮
 
 ---
 
@@ -286,3 +286,4 @@ bun run build
 | 2026-09-14 | T5 已提交 `4587591` 并 archive `--no-commit` → `.trellis/tasks/archive/2026-09/09-11-t5-team-ui/`。未合 main。未 start T7。 |
 | 2026-09-14 | T7 Teamboard 真页面：Team 单选 + Group 多选、FR-2 Period/Sort/search/pagination、`GET /api/teamboard` 用 `teamId`/`groupIds`、他人 private 404。`test:teams` 覆盖 51 人分页与多选 `groupIds`；Playwright 8/8。待 Phase 3.4 提交确认。不合 main。 |
 | 2026-09-14 | T7 已提交 `21a84933`（feat）+ `87a456b`（contracts）并 archive `--no-commit` → `.trellis/tasks/archive/2026-09/09-11-t7-teamboard-page/`。未合 main。未 start T8。 |
+| 2026-09-15 | T8 Profile 团队区块：page-only membership、客户端 session 判断 isOwner、复用 T4 退出 API、`listMyInvitations` 用 SQL `now()`。`test:teams` + Playwright 9/9 + `bun run build` 过。待 Phase 3.4 提交确认。不合 main。 |

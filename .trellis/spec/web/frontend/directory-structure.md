@@ -35,7 +35,7 @@ web/
 │   │   ├── avatar.ts             # Initials SVG fallback; never github.com png
 │   │   ├── leaderboard/          # getLeaderboard.ts, types, constants, dateRange
 │   │   ├── teamboard/            # getTeamboard.ts (reuses leaderboard ranking helpers)
-│   │   ├── teams/                # Team/Group domain (types, visibility, service)
+│   │   ├── teams/                # Team/Group domain (types, visibility, service, profileMembership page-only)
 │   │   ├── validation/           # Zod submission schemas (submission.ts)
 │   │   ├── embed/                # SVG embed renderers + generated logos
 │   │   ├── providers/            # ThemeProvider + I18nProvider wrapper

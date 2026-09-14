@@ -50,7 +50,9 @@ internal messages into the JSON body.
   empty list; it returns 500 `{ error }`. Private/unknown teams are 404 via
   `notFound()` / `teamErrorResponse`, never 403.
 - **Non-critical sections fail soft**: the profile's devices fetch is wrapped
-  in try/catch and falls back to `[]` (`app/u/[username]/page.tsx`).
+  in try/catch and falls back to `[]`; membership uses the same
+  `isMissingDatabaseUrl` path and hides the Team/Group block
+  (`app/u/[username]/page.tsx`).
 
 ## Rules
 
