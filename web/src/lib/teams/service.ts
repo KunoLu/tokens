@@ -572,6 +572,7 @@ export async function patchGroup(
       .where(and(eq(groups.id, groupId), eq(groups.teamId, teamId)))
       .returning();
     if (!rows[0]) throw new TeamError("Not found", 404);
+    bumpLeaderboard();
     return rows[0];
   } catch (err) {
     if (err instanceof TeamError) throw err;
