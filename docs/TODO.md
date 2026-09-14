@@ -19,7 +19,7 @@ UI 对照：`docs/demo/teamboard-demo.html`
 
 ## 当前指针
 
-**当前：T4 已本地 commit `253c1e99`，`cf:preview` 冒烟过，待 archive。** 未 start T6。不合 main。
+**当前：T6 Leaderboard 加两列。** T4 已 archive（`253c1e99`）。不合 main。
 
 推荐顺序：
 
@@ -131,7 +131,7 @@ UI 对照：`docs/demo/teamboard-demo.html`
 
 ### T4 Team/Group 领域服务与 API `L`
 
-**状态**：已本地 commit `253c1e99`（2026-09-14）。`cf:preview` 冒烟过。release-readiness passed。待 archive。
+**状态**：已 archive（2026-09-14）→ `.trellis/tasks/archive/2026-09/09-11-t4-team-api/`。commit `253c1e99`。
 **依赖**：T2、T3
 
 - [x] `web/src/lib/teams/` 领域服务；API 见 PRD §9.2
@@ -156,7 +156,7 @@ UI 对照：`docs/demo/teamboard-demo.html`
 
 ### T6 Leaderboard 加两列 `M`
 
-**状态**：未开始  
+**状态**：进行中（2026-09-14）
 **依赖**：T3
 
 - [ ] types → getLeaderboard 两组 LEFT JOIN + 缓存 key → Leaderboard.tsx → Skeleton → API
@@ -282,4 +282,4 @@ bun run build
 | 2026-09-11 | T2 archive `--no-commit` → `.trellis/tasks/archive/2026-09/09-11-t2-email-auth/`。CLI `tokens login`+`submit` 仍为 `[ ]`。未 start T3。 |
 | 2026-09-11 | 本地隔离 `tokens login` + `tokens submit` 对 `localhost:3000` 跑通；生产 credentials 未改写。未 start T3。 |
 | 2026-09-14 | T3 实现完成：`0025_add_teams_and_groups.sql` + schema + `lib/teams/types.ts`；checker 覆盖 5 表 / 部分索引 / CHECK / INV-1。`test:migrations` + `typecheck` 绿。`bun run build` skipped。待 3.4 commit。 |
-| 2026-09-14 | T4 已本地 commit `253c1e99`。Team/Group API、`canViewTeam`、邀请邮件链 `/login` 或 `/register`、verify-email 回填（含 replay）、cron `expireInvitations` 独立 `waitUntil`。`lint`/`typecheck`/`test:teams`/`bun run build`/`cf:build` 绿。`cf:preview` GET `/api/teams` 200、`/api/users/search` 401、`/api/me/invitations` 401。release-readiness passed。待 archive。不合 main。 |
+| 2026-09-14 | T4 archive `--no-commit` → `.trellis/tasks/archive/2026-09/09-11-t4-team-api/`。代码 commit `253c1e99`，preview 记录 `539c3617`。未 start T6。不合 main。 |
