@@ -7,10 +7,10 @@ Parent implement.md T7, D-2, `web/features/leaderboard-and-teamboard.feature`, a
 | Skill | Trigger | Phase | State |
 |---|---|---|---|
 | book-ddd-distilled-modeling | on-demand | — | not-required |
-| book-ddia-data-design | getTeamboard loader, API 404 vs 403, cache | before implement | confirmed |
+| book-ddia-data-design | getTeamboard loader, API 404 vs 403, cache | before implement | passed |
 | book-legacy-change-safety | existing teamboard placeholder | before first existing-file edit | passed |
 | book-refactoring-pass | teamboard page + reuse Leaderboard columns | before those edits | passed |
-| book-release-readiness | `/api/teamboard` + PAGE_CACHEABLE HTML | after validation | ready |
+| book-release-readiness | `/api/teamboard` + PAGE_CACHEABLE HTML | after validation | passed |
 
 grill-with-docs: skipped. D-2 locked.
 
@@ -35,7 +35,7 @@ Filter list = `public` AND `status=active` ∪ viewer's membership (including pr
 
 ## DDIA Data Design Review
 
-Status: confirmed
+Status: passed
 
 Data owner and source of truth: existing `teams` / `groups` / `team_members` / submissions. No new tables.
 
@@ -176,7 +176,7 @@ Revalidation required: no (lint, typecheck, `test:teams`, and native e2e already
 
 ## Release Readiness Review
 
-Status: ready
+Status: passed
 
 Production path and affected users / systems: signed-out HTML `/teamboard` (PAGE_CACHEABLE) and `GET /api/teamboard` for guests and members ranking usage inside one team.
 
@@ -190,4 +190,12 @@ Rollout / migration / rollback / cleanup: no schema. Rollback = revert page, cli
 
 Required validation and result: lint 0 errors; typecheck pass; native `test:teams` including FR-2 page1=50 / page2 remainder / `groupIds=[A,B]` union vs `[A]`; native Playwright 8/8 including FR-2 chrome, Back search/sortBy URL sync, settled `sortBy=cost` → tokens URL Tokens pressed, §9.3 `teamId` vs `{teams}`, single-group `groupIds` A-hit / B-empty, and 404 for private others.
 
-Optional checks, accountable owner acceptance, and residual risk: `bun run build` / `cf:build` not run this check (assignment did not require them; owner 640). Dirty worktree evidence is local-only. Immediate Cost-click → Back race not asserted (flaky); settled-URL navigation covers the URL-derived control. E2E still uses a one-member team so Previous/Next stay hidden; the 51-member page slice and multi-value union are proven by `test:teams`, not left unexercised.
+Optional checks, accountable owner acceptance, and residual risk: `bun run build` passed at close-out (`/teamboard` in the Next route table). `cf:build` skipped. Dirty worktree evidence was local-only at check time; work is now `21a84933` / `87a456b1` / `31fcf9d1`. Immediate Cost-click → Back race not asserted (flaky); settled-URL navigation covers the URL-derived control. E2E still uses a one-member team so Previous/Next stay hidden; the 51-member page slice and multi-value union are proven by `test:teams`, not left unexercised.
+
+## Close-out (2026-09-14)
+
+Book Gate Plan states use the required enum: DDIA `passed`, release-readiness `passed` (not `confirmed` / `ready`).
+
+`cd web && bun run build` passed after the last check; `/teamboard` is in the route table. `cf:build` remains skipped. `test:migrations` remains skipped (no schema change).
+
+Work commits: `21a84933` feat, `87a456b1` contracts, `31fcf9d1` archive. This close-out note is a follow-up docs correction (no amend).
