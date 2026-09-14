@@ -33,6 +33,7 @@ web/
 │   │   ├── email/                # Resend HTTP send helpers (no SDK)
 │   │   ├── avatar.ts             # Initials SVG fallback; never github.com png
 │   │   ├── leaderboard/          # getLeaderboard.ts, types, constants, dateRange
+│   │   ├── teams/                # Team/Group domain unions (visibility, role, status)
 │   │   ├── validation/           # Zod submission schemas (submission.ts)
 │   │   ├── embed/                # SVG embed renderers + generated logos
 │   │   ├── providers/            # ThemeProvider wrapper

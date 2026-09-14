@@ -3,7 +3,7 @@
   "name": "t3-team-schema",
   "title": "T3 teams and groups data model",
   "description": "Add additive migration 0025 for teams/groups tables and Drizzle schema.",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": "web",

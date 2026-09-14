@@ -176,6 +176,13 @@
       "when": 1789114086314,
       "tag": "0024_add_password_auth",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1789356018243,
+      "tag": "0025_add_teams_and_groups",
+      "breakpoints": true
     }
   ]
 }

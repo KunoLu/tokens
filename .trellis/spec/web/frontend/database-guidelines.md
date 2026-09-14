@@ -41,6 +41,12 @@
   `email_verification_tokens` (hash only). See [Authentication](./auth.md).
   Before applying `0024` to a database that already has emails, check
   `SELECT lower(email), count(*) FROM users WHERE email IS NOT NULL GROUP BY 1 HAVING count(*) > 1`.
+  Teams/groups from `0025`: `teams`, `team_members`, `groups`,
+  `group_members`, `team_invitations`. `teams.visibility` defaults to
+  `private`. INV-1 / INV-3 are UNIQUE on `user_id`. Pending invitation
+  uniques are partial and mutually exclusive (`invited_user_id IS NOT NULL`
+  vs `IS NULL`). Rollback is `DROP TABLE`. Domain unions live in
+  `lib/teams/types.ts`; row types are `$inferSelect` on the tables.
 
 ## Migrations
 
@@ -59,9 +65,9 @@
 - **Journal tail snapshot must exist.** `check-migrations.ts` allows historical `meta/*_snapshot.json` gaps, but the newest snapshot idx must equal `_journal.json` tail. SQL merged without its snapshot (as with 0022/0023) makes the next `db:generate` re-emit already-applied DDL. Reconstruct a missing tail snapshot from the previous snapshot plus the SQL delta. **Do not** run `bun run db:generate` in the live migrations directory to "fill" them — that diffs `schema.ts` against the stale snapshot and emits a new migration.
 - **Checker required-tables must track drops and adds.** After a drop
   migration, remove those tables from `scripts/check-migrations.ts`. After an
-  add (`email_verification_tokens` in `0024`), add the table/columns/indexes
-  to the same checker. Leaving the list stale makes `test:migrations` fail on
-  a correct schema.
+  add (`email_verification_tokens` in `0024`, teams/groups tables in `0025`),
+  add the table/columns/indexes to the same checker. Leaving the list stale
+  makes `test:migrations` fail on a correct schema.
 
 ## Query conventions
 
@@ -72,3 +78,78 @@
   (`publicProfileData.ts`).
 - Cacheable reads are wrapped in `unstable_cache` with tags — see
   [Data Fetching](./data-fetching.md).
+
+## Scenario: 0025 teams and groups
+
+### 1. Scope / Trigger
+
+- Trigger: additive schema/migration (`0025_add_teams_and_groups.sql`).
+- In: five new tables + Drizzle defs + `lib/teams/types.ts` unions + checker.
+- Out: Team/Group APIs, UI, invitation cron sweep (T4+).
+
+### 2. Signatures
+
+| Table | PK | Notable columns |
+|-------|----|-----------------|
+| `teams` | `id uuid` | `name varchar(100)`, `slug varchar(100)` UNIQUE, `visibility varchar(10)` DEFAULT `'private'`, `status varchar(10)` DEFAULT `'active'`, `created_by uuid` FK users CASCADE, `disbanded_at timestamptz` |
+| `team_members` | `id uuid` | `team_id` FK teams CASCADE, `user_id` FK users CASCADE UNIQUE (INV-1), `role varchar(10)` DEFAULT `'member'`, `invited_by` FK users SET NULL |
+| `groups` | `id uuid` | `team_id` FK teams CASCADE, `name varchar(100)`, UNIQUE(`team_id`,`name`), `status` DEFAULT `'active'`, `created_by` FK users CASCADE |
+| `group_members` | `id uuid` | `group_id` FK groups CASCADE, `user_id` FK users CASCADE UNIQUE (INV-3) |
+| `team_invitations` | `id uuid` | `team_id` FK teams CASCADE, `invited_email varchar(255)`, `invited_username varchar(39)`, `invited_user_id` FK users CASCADE, `invited_by` FK users CASCADE NOT NULL, `status` DEFAULT `'pending'`, `token_hash varchar(64)` UNIQUE, `expires_at timestamptz` NOT NULL |
+
+Indexes: `teams_public_active_idx` on `name` WHERE `visibility='public' AND status='active'`; `team_invitations_pending_user_unique` (`team_id`,`invited_user_id`) WHERE pending AND `invited_user_id IS NOT NULL`; `team_invitations_pending_email_unique` (`team_id`, `lower(invited_email)`) WHERE pending AND `invited_user_id IS NULL`.
+
+CHECK `team_invitations_target_present`: `invited_user_id IS NOT NULL OR invited_email IS NOT NULL`.
+
+Row types: `$inferSelect` / `$inferInsert` on the tables. Domain unions: `lib/teams/types.ts`.
+
+### 3. Contracts
+
+- DB default `visibility='private'` (fail-safe). Form-layer required choice is T5.
+- INV-1 / INV-3: one user, one team, one group — UNIQUE on `user_id`, not `(team_id, user_id)`.
+- Pending invitation uniques are mutually exclusive; both firing for the same person is a no-op unique.
+- `teams.created_by` survives disband; delete auth reads this column, not `team_members.role`.
+- INV-2 (group member must already be a team member) is application-layer (T4), not a DB constraint.
+- Operational rollback: `DROP TABLE` the five tables. Forward SQL is CREATE only — do not put DROP in `0025`.
+- Env: none new. Apply with existing `DATABASE_URL` / Hyperdrive.
+
+### 4. Validation & Error Matrix
+
+| Condition | SQLSTATE / checker |
+|-----------|-------------------|
+| Second `team_members` row for same `user_id` | `23505` (INV-1) |
+| Invitation with both `invited_user_id` and `invited_email` NULL | `23514` (CHECK) |
+| Two pending invites same team + same `invited_user_id` | `23505` (`pending_user_unique`) |
+| Two pending email-only invites same team + same `lower(email)` | `23505` (`pending_email_unique`) |
+| Journal tail snapshot missing | `test:migrations` fails before apply |
+| Checker required-tables omit the five names | `test:migrations` fails on a correct schema |
+
+Negative INSERTs inside the checker transaction MUST use `SAVEPOINT` / `ROLLBACK TO SAVEPOINT`; a failed statement otherwise aborts the outer txn.
+
+### 5. Good / Base / Bad Cases
+
+- Good: `INSERT INTO teams (name, slug, created_by)` with no visibility → `visibility='private'`, `status='active'`.
+- Base: one team + admin `team_members` + one group + `group_members` + invitation with email only (user_id NULL).
+- Bad: two `team_members` for the same user; invitation with neither target; `DROP TABLE` inside the forward migration.
+
+### 6. Tests Required
+
+`bun run test:migrations` (native, not `rtk` cache) must assert:
+
+- journal idx 25 / tag `0025_add_teams_and_groups` / `0025_snapshot.json` tail
+- five tables exist
+- `teams.visibility` NOT NULL default contains `private`
+- partial `teams_public_active_idx` and the two pending uniques
+- CHECK `team_invitations_target_present`
+- UNIQUE `team_members_user_unique` and `group_members_user_unique`
+- representative inserts + INV-1 `23505` and CHECK `23514` via savepoints
+
+`bun run typecheck` after schema exports. `bun run build` is out of T3 complete criteria; record skip if not run.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+Put `DROP TABLE` in `0025` as “rollback SQL”. Run `bun run db:generate` against a stale snapshot to “fill” 0025. Encode INV-2 as a DB FK. Sweep `team_invitations` from `worker.ts` cron in T3.
+
+#### Correct
+Forward migration is CREATE / INDEX / FK / CHECK only. Commit `0025_snapshot.json` with journal idx 25. INV-2 stays in T4 domain code. Cron sweep waits for T4; tables exist as of 0025.

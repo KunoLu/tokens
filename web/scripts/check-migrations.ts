@@ -18,6 +18,31 @@ function expect(name: string, condition: boolean, detail?: string) {
   console.log(`ok - ${name}`);
 }
 
+function postgresErrorCode(err: unknown): string | undefined {
+  if (err && typeof err === "object" && "code" in err && typeof err.code === "string") {
+    return err.code;
+  }
+  return undefined;
+}
+
+async function expectSqlstate(
+  name: string,
+  code: string,
+  run: () => Promise<unknown>
+) {
+  await sql`SAVEPOINT expect_sqlstate`;
+  try {
+    await run();
+  } catch (err) {
+    await sql`ROLLBACK TO SAVEPOINT expect_sqlstate`;
+    if (postgresErrorCode(err) !== code) throw err;
+    console.log(`ok - ${name}`);
+    return;
+  }
+  await sql`ROLLBACK TO SAVEPOINT expect_sqlstate`;
+  throw new Error(`${name} failed: expected SQLSTATE ${code}`);
+}
+
 const journalPath = resolve(
   import.meta.dir,
   "../src/lib/db/migrations/meta/_journal.json"
@@ -193,9 +218,14 @@ try {
         'daily_breakdown',
         'device_codes',
         'email_verification_tokens',
+        'group_members',
+        'groups',
         'sessions',
         'submissions',
         'submitted_devices',
+        'team_invitations',
+        'team_members',
+        'teams',
         'users'
       )
   `;
@@ -205,9 +235,14 @@ try {
     "daily_breakdown",
     "device_codes",
     "email_verification_tokens",
+    "group_members",
+    "groups",
     "sessions",
     "submissions",
     "submitted_devices",
+    "team_invitations",
+    "team_members",
+    "teams",
     "users",
   ].filter((tableName) => !tableNames.has(tableName));
   expect(
@@ -231,6 +266,7 @@ try {
         (table_name = 'submissions' AND column_name IN ('reasoning_tokens', 'schema_version', 'submit_count'))
         OR (table_name = 'daily_breakdown' AND column_name IN ('submitted_device_id', 'active_time_ms'))
         OR (table_name = 'users' AND column_name IN ('password_hash', 'email_verified_at', 'github_id'))
+        OR (table_name = 'teams' AND column_name IN ('visibility', 'status'))
       )
   `;
   const columns = new Map(
@@ -263,6 +299,16 @@ try {
     "github_id is nullable (email accounts carry no GitHub id)",
     columns.get("users.github_id")?.is_nullable === "YES"
   );
+  expect(
+    "teams.visibility defaults to private",
+    columns.get("teams.visibility")?.is_nullable === "NO" &&
+      (columns.get("teams.visibility")?.column_default ?? "").includes("private")
+  );
+  expect(
+    "teams.status defaults to active",
+    columns.get("teams.status")?.is_nullable === "NO" &&
+      (columns.get("teams.status")?.column_default ?? "").includes("active")
+  );
 
   const removedColumns = await sql<{ count: number }[]>`
     SELECT count(*)::int AS count
@@ -285,7 +331,12 @@ try {
         'idx_device_codes_user_id',
         'idx_submissions_leaderboard',
         'users_username_lower_unique',
-        'users_email_lower_unique'
+        'users_email_lower_unique',
+        'teams_public_active_idx',
+        'team_invitations_pending_user_unique',
+        'team_invitations_pending_email_unique',
+        'team_members_user_unique',
+        'group_members_user_unique'
       )
   `;
   const indexes = new Map(indexRows.map((row) => [row.indexname, row.indexdef]));
@@ -297,6 +348,11 @@ try {
       "idx_submissions_leaderboard",
       "users_username_lower_unique",
       "users_email_lower_unique",
+      "teams_public_active_idx",
+      "team_invitations_pending_user_unique",
+      "team_invitations_pending_email_unique",
+      "team_members_user_unique",
+      "group_members_user_unique",
     ].every((indexName) => indexes.has(indexName))
   );
   expect(
@@ -309,6 +365,47 @@ try {
     "case-insensitive email index is unique",
     indexes.get("users_email_lower_unique")?.includes("UNIQUE INDEX") === true &&
       indexes.get("users_email_lower_unique")?.includes("lower((email)::text)") === true
+  );
+  expect(
+    "public-active teams index is partial",
+    indexes.get("teams_public_active_idx")?.includes("WHERE") === true &&
+      indexes.get("teams_public_active_idx")?.includes("public") === true &&
+      indexes.get("teams_public_active_idx")?.includes("active") === true
+  );
+  expect(
+    "pending invitation user unique is partial",
+    indexes.get("team_invitations_pending_user_unique")?.includes("UNIQUE INDEX") ===
+      true &&
+      indexes.get("team_invitations_pending_user_unique")?.includes("pending") === true
+  );
+  expect(
+    "pending invitation email unique is case-insensitive",
+    indexes.get("team_invitations_pending_email_unique")?.includes("UNIQUE INDEX") ===
+      true &&
+      indexes.get("team_invitations_pending_email_unique")?.includes("lower") === true &&
+      indexes.get("team_invitations_pending_email_unique")?.includes(
+        "invited_user_id IS NULL"
+      ) === true
+  );
+
+  const constraintRows = await sql<{ conname: string }[]>`
+    SELECT conname
+    FROM pg_constraint
+    WHERE conname IN (
+      'team_invitations_target_present',
+      'team_members_user_unique',
+      'group_members_user_unique'
+    )
+  `;
+  const constraints = new Set(constraintRows.map((row) => row.conname));
+  expect(
+    "team invitation target CHECK exists",
+    constraints.has("team_invitations_target_present")
+  );
+  expect(
+    "INV-1 and INV-3 unique constraints exist",
+    constraints.has("team_members_user_unique") &&
+      constraints.has("group_members_user_unique")
   );
 
   const extensionRows = await sql<{ count: number }[]>`
@@ -368,6 +465,70 @@ try {
       )
       VALUES (${submission.id}, ${device.id}, '2026-05-25', 42, 0.4200, 20, 22)
     `;
+    const [team] = await sql<{ id: string; visibility: string; status: string }[]>`
+      INSERT INTO "teams" ("name", "slug", "created_by")
+      VALUES ('CI Team', 'ci-team', ${user.id})
+      RETURNING "id", "visibility", "status"
+    `;
+    if (team.visibility !== "private" || team.status !== "active") {
+      throw new Error(
+        `teams defaults: visibility=${team.visibility} status=${team.status}`
+      );
+    }
+    await sql`
+      INSERT INTO "team_members" ("team_id", "user_id", "role")
+      VALUES (${team.id}, ${user.id}, 'admin')
+    `;
+    await expectSqlstate("INV-1 rejects a second team for the same user", "23505", () =>
+      sql`
+        INSERT INTO "team_members" ("team_id", "user_id", "role")
+        VALUES (${team.id}, ${user.id}, 'member')
+      `
+    );
+    const [group] = await sql<{ id: string }[]>`
+      INSERT INTO "groups" ("team_id", "name", "created_by")
+      VALUES (${team.id}, 'CI Group', ${user.id})
+      RETURNING "id"
+    `;
+    await sql`
+      INSERT INTO "group_members" ("group_id", "user_id")
+      VALUES (${group.id}, ${user.id})
+    `;
+    await sql`
+      INSERT INTO "team_invitations" (
+        "team_id",
+        "invited_email",
+        "invited_by",
+        "token_hash",
+        "expires_at"
+      )
+      VALUES (
+        ${team.id},
+        'ci-invite@example.com',
+        ${user.id},
+        ${"a".repeat(64)},
+        now() + interval '1 day'
+      )
+    `;
+    await expectSqlstate(
+      "invitation requires a user or email target",
+      "23514",
+      () =>
+        sql`
+          INSERT INTO "team_invitations" (
+            "team_id",
+            "invited_by",
+            "token_hash",
+            "expires_at"
+          )
+          VALUES (
+            ${team.id},
+            ${user.id},
+            ${"b".repeat(64)},
+            now() + interval '1 day'
+          )
+        `
+    );
   } finally {
     await sql`ROLLBACK`;
   }

@@ -13,6 +13,7 @@ import {
   index,
   unique,
   uniqueIndex,
+  check,
 } from "drizzle-orm/pg-core";
 import {
   USERS_USERNAME_LOWER_UNIQUE_INDEX,
@@ -487,6 +488,157 @@ export const archivedWindowTotals = pgTable(
 );
 
 // ============================================================================
+// TEAMS / GROUPS
+// ============================================================================
+/**
+ * Organization unit. INV-1 is enforced by team_members.user_id UNIQUE.
+ * `created_by` survives disband; delete auth reads this column, not admin
+ * membership, because disband clears every team_members row (INV-7).
+ */
+export const teams = pgTable(
+  "teams",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    name: varchar("name", { length: 100 }).notNull(),
+    slug: varchar("slug", { length: 100 }).notNull(),
+    avatarUrl: text("avatar_url"),
+    visibility: varchar("visibility", { length: 10 })
+      .notNull()
+      .default("private"),
+    status: varchar("status", { length: 10 }).notNull().default("active"),
+    createdBy: uuid("created_by")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    disbandedAt: timestamp("disbanded_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    unique("teams_slug_unique").on(table.slug),
+    index("teams_public_active_idx")
+      .on(table.name)
+      .where(sql`"visibility" = 'public' AND "status" = 'active'`),
+  ]
+);
+
+export const teamMembers = pgTable(
+  "team_members",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    teamId: uuid("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    role: varchar("role", { length: 10 }).notNull().default("member"),
+    invitedBy: uuid("invited_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    joinedAt: timestamp("joined_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    unique("team_members_user_unique").on(table.userId),
+    index("idx_team_members_team_role").on(table.teamId, table.role),
+  ]
+);
+
+export const groups = pgTable(
+  "groups",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    teamId: uuid("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "cascade" }),
+    name: varchar("name", { length: 100 }).notNull(),
+    status: varchar("status", { length: 10 }).notNull().default("active"),
+    createdBy: uuid("created_by")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    disbandedAt: timestamp("disbanded_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    unique("groups_team_name_unique").on(table.teamId, table.name),
+    index("idx_groups_team_status").on(table.teamId, table.status),
+  ]
+);
+
+export const groupMembers = pgTable(
+  "group_members",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    groupId: uuid("group_id")
+      .notNull()
+      .references(() => groups.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    joinedAt: timestamp("joined_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    unique("group_members_user_unique").on(table.userId),
+    index("idx_group_members_group_id").on(table.groupId),
+  ]
+);
+
+export const teamInvitations = pgTable(
+  "team_invitations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    teamId: uuid("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "cascade" }),
+    invitedEmail: varchar("invited_email", { length: 255 }),
+    invitedUsername: varchar("invited_username", { length: 39 }),
+    invitedUserId: uuid("invited_user_id").references(() => users.id, {
+      onDelete: "cascade",
+    }),
+    invitedBy: uuid("invited_by")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    status: varchar("status", { length: 10 }).notNull().default("pending"),
+    tokenHash: varchar("token_hash", { length: 64 }).notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    respondedAt: timestamp("responded_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    unique("team_invitations_token_hash_unique").on(table.tokenHash),
+    check(
+      "team_invitations_target_present",
+      sql`${table.invitedUserId} IS NOT NULL OR ${table.invitedEmail} IS NOT NULL`
+    ),
+    uniqueIndex("team_invitations_pending_user_unique")
+      .on(table.teamId, table.invitedUserId)
+      .where(sql`"status" = 'pending' AND "invited_user_id" IS NOT NULL`),
+    uniqueIndex("team_invitations_pending_email_unique")
+      .on(table.teamId, sql`lower(${table.invitedEmail})`)
+      .where(sql`"status" = 'pending' AND "invited_user_id" IS NULL`),
+    index("idx_team_invitations_invited_user_status").on(
+      table.invitedUserId,
+      table.status
+    ),
+    index("idx_team_invitations_expires_at").on(table.expiresAt),
+  ]
+);
+
+// ============================================================================
 // TYPE EXPORTS
 // ============================================================================
 export type User = typeof users.$inferSelect;
@@ -505,3 +657,13 @@ export type SubmittedDevice = typeof submittedDevices.$inferSelect;
 export type NewSubmittedDevice = typeof submittedDevices.$inferInsert;
 export type DailyBreakdown = typeof dailyBreakdown.$inferSelect;
 export type NewDailyBreakdown = typeof dailyBreakdown.$inferInsert;
+export type Team = typeof teams.$inferSelect;
+export type NewTeam = typeof teams.$inferInsert;
+export type TeamMember = typeof teamMembers.$inferSelect;
+export type NewTeamMember = typeof teamMembers.$inferInsert;
+export type Group = typeof groups.$inferSelect;
+export type NewGroup = typeof groups.$inferInsert;
+export type GroupMember = typeof groupMembers.$inferSelect;
+export type NewGroupMember = typeof groupMembers.$inferInsert;
+export type TeamInvitation = typeof teamInvitations.$inferSelect;
+export type NewTeamInvitation = typeof teamInvitations.$inferInsert;

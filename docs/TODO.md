@@ -19,7 +19,7 @@ UI 对照：`docs/demo/teamboard-demo.html`
 
 ## 当前指针
 
-**当前：无 active 任务。** T2 已 archive `--no-commit` → `.trellis/tasks/archive/2026-09/09-11-t2-email-auth/`（`status=completed`，`commit=5aa99c88`）。未 start T3。T0 `02504efe`、T12 `d5cf8604`、LICENSE `f24b60d1`、T1 `6759e183`、T2 代码 `5aa99c88`、T2 SHA 元数据 `7669eab1` 均未 push。
+**当前：T3 实现完成，待 3.4 commit。** 任务 `09-11-t3-team-schema` `in_progress`。本地 `test:migrations` + `typecheck` 已绿。`bun run build` **skipped**（T3 范围是 schema/migration；不是绿）。未 archive。
 
 推荐顺序：
 
@@ -119,13 +119,13 @@ UI 对照：`docs/demo/teamboard-demo.html`
 
 ### T3 团队数据模型 `M`
 
-**状态**：未开始  
+**状态**：实现完成，待 3.4 commit（2026-09-14）
 **依赖**：T0
 
-- [ ] 迁移 `0025_add_teams_and_groups.sql`（teams / team_members / groups / group_members / team_invitations）
-- [ ] `teams.visibility` 默认 `private`；部分索引 `teams_public_active_idx`
-- [ ] Drizzle `schema.ts` + `lib/teams/types.ts`
-- [ ] 验证：迁移正向成功；`typecheck` + `test:migrations` 通过
+- [x] 迁移 `0025_add_teams_and_groups.sql`（teams / team_members / groups / group_members / team_invitations）
+- [x] `teams.visibility` 默认 `private`；部分索引 `teams_public_active_idx`
+- [x] Drizzle `schema.ts` + `lib/teams/types.ts`
+- [x] 验证：迁移正向成功；`typecheck` + `test:migrations` 通过。`bun run build` skipped（未跑，不是绿）
 
 ---
 
@@ -281,3 +281,4 @@ bun run build
 | 2026-09-11 | T2 已提交 `5aa99c88`（未 push）。未 start T3。 |
 | 2026-09-11 | T2 archive `--no-commit` → `.trellis/tasks/archive/2026-09/09-11-t2-email-auth/`。CLI `tokens login`+`submit` 仍为 `[ ]`。未 start T3。 |
 | 2026-09-11 | 本地隔离 `tokens login` + `tokens submit` 对 `localhost:3000` 跑通；生产 credentials 未改写。未 start T3。 |
+| 2026-09-14 | T3 实现完成：`0025_add_teams_and_groups.sql` + schema + `lib/teams/types.ts`；checker 覆盖 5 表 / 部分索引 / CHECK / INV-1。`test:migrations` + `typecheck` 绿。`bun run build` skipped。待 3.4 commit。 |

@@ -71,8 +71,8 @@ Wraps `./.open-next/worker.js` for two reasons:
 2. **The daily cron** (`20 3 * * *`) runs `refreshAllSocialLinks` then
    `deleteExpiredEmailTokens` in-process — no public endpoint, no
    `CRON_SECRET` round trip. Social-link snapshots still feed Profile icons;
-   there is no verified badge. Do not sweep invitation tables here until they
-   exist.
+   there is no verified badge. `team_invitations` exists as of `0025`; do
+   not sweep it here until T4 owns expiry.
 
 ## Commands
 
