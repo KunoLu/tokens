@@ -19,7 +19,7 @@ UI 对照：`docs/demo/teamboard-demo.html`
 
 ## 当前指针
 
-**当前：T6 待本地 commit。** lint / typecheck / test:teams / TrellisCheckT6 / `bun run build` / `cf:build` / post-T6 preview 冒烟绿。不合 main。
+**当前：T10 i18n 基础设施。** T6 已 archive（`c76238ee`）。不合 main。
 
 推荐顺序：
 
@@ -156,7 +156,7 @@ UI 对照：`docs/demo/teamboard-demo.html`
 
 ### T6 Leaderboard 加两列 `M`
 
-**状态**：实现完成，待本地 commit（2026-09-14）
+**状态**：已 archive（2026-09-14）→ `.trellis/tasks/archive/2026-09/09-11-t6-leaderboard-columns/`。commit `c76238ee`。
 **依赖**：T3
 
 - [x] types → getLeaderboard 两组 LEFT JOIN + 缓存 key → Leaderboard.tsx → Skeleton → API
@@ -282,4 +282,4 @@ bun run build
 | 2026-09-11 | T2 archive `--no-commit` → `.trellis/tasks/archive/2026-09/09-11-t2-email-auth/`。CLI `tokens login`+`submit` 仍为 `[ ]`。未 start T3。 |
 | 2026-09-11 | 本地隔离 `tokens login` + `tokens submit` 对 `localhost:3000` 跑通；生产 credentials 未改写。未 start T3。 |
 | 2026-09-14 | T3 实现完成：`0025_add_teams_and_groups.sql` + schema + `lib/teams/types.ts`；checker 覆盖 5 表 / 部分索引 / CHECK / INV-1。`test:migrations` + `typecheck` 绿。`bun run build` skipped。待 3.4 commit。 |
-| 2026-09-14 | T6 Leaderboard Team/Group 列：`LeaderboardUser.team/group` 对象、LEFT JOIN、桌面列 + 移动端徽章。搜索子查询须给 membership 列唯一别名，否则 500。post-T6 preview 冒烟 200。待本地 commit。不合 main。 |
+| 2026-09-14 | T6 archive `--no-commit` → `.trellis/tasks/archive/2026-09/09-11-t6-leaderboard-columns/`。代码 commit `c76238ee`。未 start T10。不合 main。 |
