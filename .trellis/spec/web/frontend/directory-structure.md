@@ -25,6 +25,7 @@ web/
 │   │   ├── layout/               # Navigation, Container (CONTAINER), PageHeader, footer
 │   │   ├── profile/              # Profile feature components + barrel index.tsx
 │   │   ├── leaderboard/          # Leaderboard table + skeleton
+│   │   ├── teamboard/            # Teamboard table + URL filters (no Team column)
 │   │   ├── docs/, legal/         # Feature folders per route
 │   │   └── Graph*.tsx            # Shared visualization components
 │   ├── lib/                      # Server + shared client logic
@@ -33,6 +34,7 @@ web/
 │   │   ├── email/                # Resend HTTP send helpers (no SDK)
 │   │   ├── avatar.ts             # Initials SVG fallback; never github.com png
 │   │   ├── leaderboard/          # getLeaderboard.ts, types, constants, dateRange
+│   │   ├── teamboard/            # getTeamboard.ts (reuses leaderboard ranking helpers)
 │   │   ├── teams/                # Team/Group domain (types, visibility, service)
 │   │   ├── validation/           # Zod submission schemas (submission.ts)
 │   │   ├── embed/                # SVG embed renderers + generated logos
@@ -62,7 +64,7 @@ web/
   lives in route handlers (`app/api/submit/route.ts`) plus `lib/`.
 - **`components/ui/` is vendored shadcn** — edit like shadcn code, import via
   `@/components/ui/*`. Feature components live in a folder per route/domain
-  (`profile/`, `leaderboard/`), with a barrel `index.tsx` where the
+  (`profile/`, `leaderboard/`, `teamboard/`), with a barrel `index.tsx` where the
   surface is large (`components/profile/index.tsx`).
 - **`lib/` holds all shared logic, including hooks.** `components.json`
   declares an `@/hooks` alias but there is **no `src/hooks/` directory** —

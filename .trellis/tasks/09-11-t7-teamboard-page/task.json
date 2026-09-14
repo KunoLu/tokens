@@ -3,7 +3,7 @@
   "name": "t7-teamboard-page",
   "title": "T7 Teamboard page",
   "description": "Replace placeholder with Teamboard page, team single-select and group multi-select.",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": "web",

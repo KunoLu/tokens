@@ -19,7 +19,7 @@ UI 对照：`docs/demo/teamboard-demo.html`
 
 ## 当前指针
 
-**当前：T7 Teamboard 页面。** T5 已 archive（`4587591`）。不合 main。
+**当前：T7 Teamboard 页面（待 Phase 3.4 提交确认）。** T5 已 archive（`4587591`）。不合 main。
 
 推荐顺序：
 
@@ -169,14 +169,14 @@ UI 对照：`docs/demo/teamboard-demo.html`
 
 ### T7 Teamboard 页面 `L`
 
-**状态**：未开始  
+**状态**：已完成（2026-09-14，待 3.4 提交）  
 **依赖**：T3、T6（共用列渲染）
 
-- [ ] `/teamboard` 真页面替换 T1 占位；筛选走 URL searchParams
-- [ ] 列序 `# / Developer / Group / Tokens / Cost`（无 Team 列）
-- [ ] 筛选器 = 公开未解散 ∪ 本人所属；他人 private → 404
-- [ ] 未选团队显示引导空态
-- [ ] 验证：单选 Team + 多选 Group 组合正确
+- [x] `/teamboard` 真页面替换 T1 占位；筛选走 URL searchParams
+- [x] 列序 `# / Developer / Group / Tokens / Cost`（无 Team 列）
+- [x] 筛选器 = 公开未解散 ∪ 本人所属；他人 private → 404
+- [x] 未选团队显示引导空态
+- [x] 验证：单选 Team + 多选 Group 组合正确
 
 ---
 
@@ -284,3 +284,4 @@ bun run build
 | 2026-09-14 | T3 实现完成：`0025_add_teams_and_groups.sql` + schema + `lib/teams/types.ts`；checker 覆盖 5 表 / 部分索引 / CHECK / INV-1。`test:migrations` + `typecheck` 绿。`bun run build` skipped。待 3.4 commit。 |
 | 2026-09-14 | T10 i18n 基础设施：`tt_locale`、`t()`、导航地球切换、html lang、worker `__locale` 经 `parseLocale`、profile cache key 含 locale。NumberFormat 经 `intlTag(locale)`（zh compact `123.5万`）。T6 catch-up：`patchGroup` 后 `bumpLeaderboard`。不合 main，不标记 complete（缺 Playwright）。 |
 | 2026-09-14 | T5 已提交 `4587591` 并 archive `--no-commit` → `.trellis/tasks/archive/2026-09/09-11-t5-team-ui/`。未合 main。未 start T7。 |
+| 2026-09-14 | T7 Teamboard 真页面：Team 单选 + Group 多选、FR-2 Period/Sort/search/pagination、`GET /api/teamboard` 用 `teamId`/`groupIds`、他人 private 404。`test:teams` 覆盖 51 人分页与多选 `groupIds`；Playwright 8/8。待 Phase 3.4 提交确认。不合 main。 |

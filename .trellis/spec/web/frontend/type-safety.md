@@ -14,6 +14,7 @@
   contribution shapes.
 - **Feature types**: colocated with the feature —
   `lib/leaderboard/types.ts` (`LeaderboardData`, `Period`, `SortBy`),
+  `lib/teamboard/` reuses those `Period`/`SortBy` unions (do not fork a second pair),
   `lib/teams/types.ts` (`TeamVisibility`, `TeamMemberRole`, invitation status),
   `components/profile/types.ts` (`ProfileUser`, `ModelUsage`).
 - **Page-local interfaces**: fine when a shape is only a page's contract with

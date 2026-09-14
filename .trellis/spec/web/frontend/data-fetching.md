@@ -17,6 +17,9 @@ One function serves both the API route and the page:
 - `app/(main)/leaderboard/page.tsx` calls `getLeaderboardData`, `getSession`,
   `getUserRank` directly in an async server component with `Suspense` +
   skeleton fallback.
+- `app/(main)/teamboard/page.tsx` calls `getTeamboard` + `getSession` the same
+  way; `app/api/teamboard/route.ts` is the external JSON surface. Do not
+  HTTP-self-fetch.
 
 
 **Why not HTTP self-fetch:** server-side fetches to our own routes break
@@ -33,6 +36,9 @@ third parties), not for our own pages.
   `getLeaderboardData` — tag `"leaderboard"` (numbers, not copy — locale is
   not in this data cache); `getUserRank` (all-time) has its
   own key and `user-rank` tag (`lib/leaderboard/getLeaderboard.ts`).
+  `getTeamboard` — tag `"leaderboard"` (membership/submit already invalidate
+  it); cache key includes teamId + sorted groupIds + period(+from/to) +
+  sortBy + page + search (`lib/teamboard/getTeamboard.ts`).
 - Mutations invalidate by tag: the submit route calls `revalidateTag` after
   writes, fanning out `leaderboard` + `user:<name>` invalidations (that
   write-heaviness is why the tag cache is a *sharded* Durable Object — see
@@ -59,3 +65,52 @@ Independent queries in one page go in one `Promise.all` — e.g. the profile
 page loads profile, devices, and GitHub social links together, and
 `publicProfileData.ts` batches stats queries the same way. Non-critical
 sections degrade individually (devices wrapped in try/catch → `[]`).
+
+## Scenario: GET /api/teamboard
+
+### 1. Scope / Trigger
+
+- Trigger: new JSON API + RSC loader for Teamboard (T7).
+- In: `getTeamboard`, `app/api/teamboard/route.ts`, teamboard page/client.
+- Out: T8 Profile membership.
+
+### 2. Signatures
+
+- `getTeamboard(teamId, groupIds, viewerId, { period, sortBy, page, search, customFrom, customTo })`
+- `GET /api/teamboard?teamId=&groupIds=&period=&sortBy=&page=&search=`
+
+### 3. Contracts
+
+- Missing `teamId` → `{ teams }` list, not a board.
+- Present `teamId` → ranked board. Private/unknown/invalid UUID → 404, never 403.
+- Repeatable `groupIds` is the union of IDs that exist on this team. Unknown IDs are dropped. If every supplied ID is invalid, `selectedGroupIds` is empty and the loader returns the unfiltered board (same as omitting `groupIds`). PAGE_SIZE is 50.
+- Canonical API names are `teamId` / `groupIds`; page URL may still use `team` / `group` aliases.
+- RSC never HTTP-self-fetches. Cache tag `"leaderboard"`; key includes teamId + sorted groupIds + period + sortBy + page + search.
+
+### 4. Validation & Error Matrix
+
+| Condition | Result |
+|-----------|--------|
+| Missing `DATABASE_URL` | Page: `isMissingDatabaseUrl` → empty data. API: 500 `{ error }` — not a fake 200 list |
+| Private / unknown / garbage UUID | 404 |
+| Missing `teamId` | 200 `{ teams }` |
+| Unknown `groupIds` (not on this team) | Dropped. Remaining valid IDs filter to their union. If none remain, `selectedGroupIds=[]` and the loader returns the unfiltered board — not an empty member list |
+
+### 5. Good / Base / Bad Cases
+
+- Good: `teamId` + `groupIds=A&groupIds=B` returns the union of A and B.
+- Base: missing `teamId` returns the filter list. All-invalid `groupIds` on a valid `teamId` returns the unfiltered board.
+- Bad: swallow missing `DATABASE_URL` inside the loader; parse only `team`/`group`; 403 for private others; treat all-invalid `groupIds` as an empty member list.
+
+### 6. Tests Required
+
+- `bun run test:teams`: 51 members → page 1 length 50, page 2 remainder; `groupIds=[A,B]` union vs `[A]` only A.
+- `bun run test:e2e` (`tests/e2e/teamboard.spec.ts`): empty state, FR-2 chrome, `teamId` board, private 404, `groupIds` A vs B, settled `sortBy` URL.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+Catch missing `DATABASE_URL` inside `getTeamboard` and return `{ teams: [] }`. Honor only `team`/`group` query names. Return 403 for a private team the viewer cannot see. Treat unknown `groupIds` as empty membership.
+
+#### Correct
+`getDb()` throws; the RSC page catches `isMissingDatabaseUrl` like Leaderboard; the API returns 500 `{ error }`. Parse `teamId`/`groupIds` (aliases optional). Private others are 404. Drop unknown `groupIds`; if none remain, return the unfiltered board.

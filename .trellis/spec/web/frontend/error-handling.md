@@ -45,7 +45,10 @@ internal messages into the JSON body.
 
 - **Missing `DATABASE_URL`** (local dev without a database): pages check
   `isMissingDatabaseUrl` and render empty data instead of throwing — e.g. the
-  leaderboard renders an empty table (`app/(main)/leaderboard/page.tsx`).
+  leaderboard and teamboard pages (`app/(main)/leaderboard/page.tsx`,
+  `app/(main)/teamboard/page.tsx`). The Teamboard API does not invent a 200
+  empty list; it returns 500 `{ error }`. Private/unknown teams are 404 via
+  `notFound()` / `teamErrorResponse`, never 403.
 - **Non-critical sections fail soft**: the profile's devices fetch is wrapped
   in try/catch and falls back to `[]` (`app/u/[username]/page.tsx`).
 

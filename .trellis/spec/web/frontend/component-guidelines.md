@@ -39,13 +39,15 @@ Per `docs/upstream_policy.md`:
 ## Feature components
 
 - One folder per route/domain: `components/profile/`, `components/leaderboard/`,
-  `components/docs/`, `components/legal/`.
+  `components/teamboard/`, `components/docs/`, `components/legal/`.
 - Large feature surfaces export a barrel (`components/profile/index.tsx`
   re-exports components + types).
 - Big client orchestrators receive server-loaded data as props:
   `app/u/[username]/ProfilePageClient.tsx` takes `initialData` from the RSC
-  page; `components/leaderboard/Leaderboard.tsx` syncs filters to the URL via
-  `useRouter` + `useSearchParams`.
+  page; `components/leaderboard/Leaderboard.tsx` and
+  `components/teamboard/Teamboard.tsx` sync filters to the URL via
+  `useRouter` + `useSearchParams`. Displayed Teamboard sort follows the URL
+  `sortBy` param even if a pending RSC has not landed.
 - Client components start with `"use client"` and stay as far down the tree
   as possible.
 

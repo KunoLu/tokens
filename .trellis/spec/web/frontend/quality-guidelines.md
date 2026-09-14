@@ -14,12 +14,13 @@
 | `bun run typecheck` | `wrangler types` → `cloudflare-env.d.ts` + `tsc --noEmit` |
 | `bun run build` | asset copies + `next build` |
 | `bun run test:migrations` | `drizzle-kit migrate` + `scripts/check-migrations.ts` |
-| `bun run test:teams` | T4 domain invariants (`scripts/check-teams-invariants.ts`); parent implement.md authorized this minimal runner |
-| `bun run test:e2e` | Playwright LocaleToggle (and later UI journeys). Specs live at repo-root `tests/e2e/`; config is `web/playwright.config.ts`. Owner approved 2026-09-14. |
+| `bun run test:teams` | T4 domain invariants + T7 FR-2 Teamboard pagination / multi-value `groupIds` (`scripts/check-teams-invariants.ts`); parent implement.md authorized this minimal runner |
+| `bun run test:e2e` | Playwright LocaleToggle and Teamboard journeys. Specs live at repo-root `tests/e2e/`; config is `web/playwright.config.ts`. Owner approved 2026-09-14. |
 
 Do not add a general **unit-test** framework without a team decision — the upstream tests were
-deliberately removed (`docs/upstream_policy.md`). `test:teams` is the T4-only exception
-for INV/permission checks. Playwright E2E is the T10 exception for user-visible
+deliberately removed (`docs/upstream_policy.md`). `test:teams` is the T4 exception
+for INV/permission checks and the T7 exception for Teamboard loader regressions
+(51-member pagination, multi-value `groupIds`). Playwright E2E is the T10 exception for user-visible
 browser journeys; do not add `*.test.ts` under `web/`. Reports under
 `tests/e2e/reports/` are gitignored runner output.
 
