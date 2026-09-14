@@ -19,7 +19,7 @@ UI 对照：`docs/demo/teamboard-demo.html`
 
 ## 当前指针
 
-**当前：T5 待本地 commit。** lint / typecheck / test:migrations / test:teams / test:e2e 6/6 绿。不合 main。
+**当前：T7 Teamboard 页面。** T5 已 archive（`4587591`）。不合 main。
 
 推荐顺序：
 
@@ -143,14 +143,14 @@ UI 对照：`docs/demo/teamboard-demo.html`
 
 ### T5 Team 管理页面 `L`
 
-**状态**：实现完成，待本地 commit（2026-09-14）
+**状态**：已完成并 archive（2026-09-14，`4587591`）
 **依赖**：T4、T10
 
 - [x] `/teams` + `components/teams/`；对照 demo Teams 页
 - [x] 补 shadcn：select / dialog / checkbox / popover / label / textarea（`form` 不在 base-nova）
 - [x] 邀请：可搜索下拉多选（勾选 + 计数 + 未注册邮箱路径）+ 可选自动归组（0026 `group_id`）
 - [x] 建团强制选可见性；危险操作名称二次确认
-- [x] 验证：lint / typecheck / test:migrations / test:teams / native test:e2e 6/6（含登录态创建/邀请/解散）
+- [x] 验证：lint / typecheck / test:migrations / test:teams / native test:e2e 6/6（含登录态创建/邀请/解散 + 自动归组选择器）
 
 ---
 
@@ -283,4 +283,4 @@ bun run build
 | 2026-09-11 | 本地隔离 `tokens login` + `tokens submit` 对 `localhost:3000` 跑通；生产 credentials 未改写。未 start T3。 |
 | 2026-09-14 | T3 实现完成：`0025_add_teams_and_groups.sql` + schema + `lib/teams/types.ts`；checker 覆盖 5 表 / 部分索引 / CHECK / INV-1。`test:migrations` + `typecheck` 绿。`bun run build` skipped。待 3.4 commit。 |
 | 2026-09-14 | T10 i18n 基础设施：`tt_locale`、`t()`、导航地球切换、html lang、worker `__locale` 经 `parseLocale`、profile cache key 含 locale。NumberFormat 经 `intlTag(locale)`（zh compact `123.5万`）。T6 catch-up：`patchGroup` 后 `bumpLeaderboard`。不合 main，不标记 complete（缺 Playwright）。 |
-| 2026-09-14 | T10 已提交 `cc2191c` 并 archive `--no-commit` → `.trellis/tasks/archive/2026-09/09-11-t10-i18n-infra/`。T6 catch-up `cd3e85c`。未合 main。未 start T5。 |
+| 2026-09-14 | T5 已提交 `4587591` 并 archive `--no-commit` → `.trellis/tasks/archive/2026-09/09-11-t5-team-ui/`。未合 main。未 start T7。 |
