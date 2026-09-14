@@ -3,7 +3,7 @@
   "name": "t6-leaderboard-columns",
   "title": "T6 leaderboard Team and Group columns",
   "description": "Add Team/Group columns via LEFT JOIN without changing Tokens/Cost header semantics.",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": "web",

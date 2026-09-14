@@ -30,6 +30,11 @@ import type {
 import type { LeaderboardData, LeaderboardUser, Period } from "@/lib/leaderboard/types";
 import { toLocalDateString } from "@/lib/leaderboard/dateRange";
 import { avatarUrlFor } from "@/lib/avatar";
+import {
+  MembershipBadges,
+  MembershipCells,
+  MembershipColumnHeaders,
+} from "@/components/leaderboard/MembershipCells";
 
 interface SessionUser {
   id: string;
@@ -145,9 +150,12 @@ function DeveloperRow({
             <span className="truncate text-xs text-muted-foreground">
               @{user.username}
             </span>
+            <MembershipBadges team={user.team} group={user.group} />
           </span>
         </Link>
       </TableCell>
+
+      <MembershipCells team={user.team} group={user.group} />
 
       {/* Phones get one stacked cell; the split columns need the width.
           Always abbreviated here, regardless of the stored preference: the
@@ -500,6 +508,7 @@ export default function Leaderboard({
             <TableRow className="hover:bg-transparent">
               <TableHead className="w-12 pl-4 sm:pl-6">#</TableHead>
               <TableHead>Developer</TableHead>
+              <MembershipColumnHeaders />
               <TableHead className="pr-4 text-right sm:hidden">Usage</TableHead>
               {/* Both numeric headers toggle abbreviated figures (1.2B) for
                   exact ones — a toggle contributed upstream by Fai Chou that

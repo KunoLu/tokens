@@ -1,5 +1,5 @@
 import { unstable_cache } from "next/cache";
-import { db, users, submissions, dailyBreakdown } from "@/lib/db";
+import { db, users, submissions, dailyBreakdown, teams, teamMembers, groups, groupMembers } from "@/lib/db";
 import {
   USERNAME_LOOKUP_LIMIT,
   getSingleUsernameMatch,
@@ -7,7 +7,14 @@ import {
   usernameEqualsIgnoreCase,
 } from "@/lib/db/usernameLookup";
 import { eq, desc, sql, and, or, gte, lte, isNull } from "drizzle-orm";
-import type { LeaderboardData, LeaderboardUser, Period, SortBy } from "@/lib/leaderboard/types";
+import type {
+  LeaderboardData,
+  LeaderboardGroupRef,
+  LeaderboardTeamRef,
+  LeaderboardUser,
+  Period,
+  SortBy,
+} from "@/lib/leaderboard/types";
 import {
   escapeLikePattern,
   hasDirectives,
@@ -24,6 +31,11 @@ interface LeaderboardPeriodRow {
   tokens: number;
   cost: number;
   sourceBreakdown: Record<string, { models: Record<string, unknown> }> | null;
+  teamId: string | null;
+  teamName: string | null;
+  teamSlug: string | null;
+  groupId: string | null;
+  groupName: string | null;
 }
 
 interface PeriodDateRange {
@@ -40,6 +52,11 @@ interface PeriodLeaderboardDbRow {
   cost: number | string | null;
   /** Absent when the query skipped the column — see fetchPeriodLeaderboardRows. */
   sourceBreakdown?: Record<string, { models: Record<string, unknown> }> | null;
+  teamId: string | null;
+  teamName: string | null;
+  teamSlug: string | null;
+  groupId: string | null;
+  groupName: string | null;
 }
 
 interface AllTimeLeaderboardDbRow {
@@ -49,11 +66,43 @@ interface AllTimeLeaderboardDbRow {
   avatarUrl: string | null;
   totalTokens: number | string | null;
   totalCost: number | string | null;
+  teamId: string | null;
+  teamName: string | null;
+  teamSlug: string | null;
+  groupId: string | null;
+  groupName: string | null;
 }
 
 interface RankedLeaderboardDbRow extends AllTimeLeaderboardDbRow {
   rank: number | string | null;
 }
+
+function packMembership(row: {
+  teamId?: string | null;
+  teamName?: string | null;
+  teamSlug?: string | null;
+  groupId?: string | null;
+  groupName?: string | null;
+}): { team: LeaderboardTeamRef | null; group: LeaderboardGroupRef | null } {
+  return {
+    team:
+      row.teamId && row.teamName && row.teamSlug
+        ? { id: row.teamId, name: row.teamName, slug: row.teamSlug }
+        : null,
+    group:
+      row.groupId && row.groupName
+        ? { id: row.groupId, name: row.groupName }
+        : null,
+  };
+}
+
+const membershipJoins = {
+  teamId: sql<string | null>`${teams.id}`.as("team_id"),
+  teamName: sql<string | null>`${teams.name}`.as("team_name"),
+  teamSlug: sql<string | null>`${teams.slug}`.as("team_slug"),
+  groupId: sql<string | null>`${groups.id}`.as("group_id"),
+  groupName: sql<string | null>`${groups.name}`.as("group_name"),
+};
 
 function toUtcDateString(date: Date): string {
   return date.toISOString().slice(0, 10);
@@ -161,6 +210,7 @@ function aggregatePeriodRows(
       username: row.username,
       displayName: row.displayName,
       avatarUrl: row.avatarUrl,
+      ...packMembership(row),
       totalTokens: row.tokens,
       totalCost: row.cost,
     });
@@ -341,10 +391,15 @@ async function fetchPeriodLeaderboardRows(
       ...(withBreakdown
         ? { sourceBreakdown: dailyBreakdown.sourceBreakdown }
         : {}),
+      ...membershipJoins,
     })
     .from(dailyBreakdown)
     .innerJoin(submissions, eq(dailyBreakdown.submissionId, submissions.id))
     .innerJoin(users, eq(submissions.userId, users.id))
+    .leftJoin(teamMembers, eq(teamMembers.userId, users.id))
+    .leftJoin(teams, and(eq(teams.id, teamMembers.teamId), eq(teams.status, "active")))
+    .leftJoin(groupMembers, eq(groupMembers.userId, users.id))
+    .leftJoin(groups, and(eq(groups.id, groupMembers.groupId), eq(groups.status, "active")))
     .where(
       and(
         gte(dailyBreakdown.date, dateRange.start),
@@ -361,6 +416,11 @@ async function fetchPeriodLeaderboardRows(
     tokens: Number(row.tokens) || 0,
     cost: Number(row.cost) || 0,
     sourceBreakdown: row.sourceBreakdown ?? null,
+    teamId: row.teamId ?? null,
+    teamName: row.teamName ?? null,
+    teamSlug: row.teamSlug ?? null,
+    groupId: row.groupId ?? null,
+    groupName: row.groupName ?? null,
   }));
 }
 
@@ -419,11 +479,26 @@ async function fetchLeaderboardData(
         avatarUrl: users.avatarUrl,
         totalTokens: sql<number>`SUM(${submissions.totalTokens})`.as("total_tokens"),
         totalCost: sql<number>`SUM(CAST(${submissions.totalCost} AS DECIMAL(18,4)))`.as("total_cost"),
+        ...membershipJoins,
       })
       .from(submissions)
       .innerJoin(users, eq(submissions.userId, users.id))
+      .leftJoin(teamMembers, eq(teamMembers.userId, users.id))
+      .leftJoin(teams, and(eq(teams.id, teamMembers.teamId), eq(teams.status, "active")))
+      .leftJoin(groupMembers, eq(groupMembers.userId, users.id))
+      .leftJoin(groups, and(eq(groups.id, groupMembers.groupId), eq(groups.status, "active")))
       .where(and(isNull(users.bannedAt), ...directiveConditions))
-      .groupBy(users.id, users.username, users.displayName, users.avatarUrl)
+      .groupBy(
+        users.id,
+        users.username,
+        users.displayName,
+        users.avatarUrl,
+        teams.id,
+        teams.name,
+        teams.slug,
+        groups.id,
+        groups.name
+      )
       .as("ranked");
     const rankedSecondaryOrderByColumn = sortBy === "cost"
       ? rankedSubquery.totalTokens
@@ -473,6 +548,7 @@ async function fetchLeaderboardData(
         username: row.username,
         displayName: row.displayName,
         avatarUrl: row.avatarUrl,
+        ...packMembership(row),
         totalTokens: Number(row.totalTokens) || 0,
         totalCost: Number(row.totalCost) || 0,
       })),
@@ -504,11 +580,26 @@ async function fetchLeaderboardData(
       avatarUrl: users.avatarUrl,
       totalTokens: sql<number>`SUM(${submissions.totalTokens})`.as("total_tokens"),
       totalCost: sql<number>`SUM(CAST(${submissions.totalCost} AS DECIMAL(18,4)))`.as("total_cost"),
+      ...membershipJoins,
     })
     .from(submissions)
     .innerJoin(users, eq(submissions.userId, users.id))
+    .leftJoin(teamMembers, eq(teamMembers.userId, users.id))
+    .leftJoin(teams, and(eq(teams.id, teamMembers.teamId), eq(teams.status, "active")))
+    .leftJoin(groupMembers, eq(groupMembers.userId, users.id))
+    .leftJoin(groups, and(eq(groups.id, groupMembers.groupId), eq(groups.status, "active")))
     .where(isNull(users.bannedAt))
-    .groupBy(users.id, users.username, users.displayName, users.avatarUrl)
+    .groupBy(
+      users.id,
+      users.username,
+      users.displayName,
+      users.avatarUrl,
+      teams.id,
+      teams.name,
+      teams.slug,
+      groups.id,
+      groups.name
+    )
     .orderBy(
       desc(orderByColumn),
       desc(secondaryOrderByColumn),
@@ -540,6 +631,7 @@ async function fetchLeaderboardData(
       username: row.username,
       displayName: row.displayName,
       avatarUrl: row.avatarUrl,
+      ...packMembership(row),
       totalTokens: Number(row.totalTokens) || 0,
       totalCost: Number(row.totalCost) || 0,
     })),
@@ -674,7 +766,12 @@ async function fetchAllTimeUserRank(
   sortBy: SortBy
 ): Promise<LeaderboardUser | null> {
   const userResult = await db
-    .select({ id: users.id, username: users.username, displayName: users.displayName, avatarUrl: users.avatarUrl })
+    .select({
+      id: users.id,
+      username: users.username,
+      displayName: users.displayName,
+      avatarUrl: users.avatarUrl,
+    })
     .from(users)
     .where(and(usernameEqualsIgnoreCase(username), isNull(users.bannedAt)))
     .limit(USERNAME_LOOKUP_LIMIT);
@@ -701,30 +798,52 @@ async function fetchAllTimeUserRank(
   const userTotalTokens = Number(userStats.totalTokens);
   const userTotalCost = userStats.totalCost != null ? Number(userStats.totalCost) : 0;
 
-  const userCompareValue = sortBy === "cost"
-    ? userTotalCost
-    : userTotalTokens;
-  const compareColumn = sortBy === "cost"
-    ? sql`SUM(CAST(${submissions.totalCost} AS DECIMAL(18,4)))`
-    : sql`SUM(${submissions.totalTokens})`;
+  const userCompareValue = sortBy === "cost" ? userTotalCost : userTotalTokens;
+  const compareColumn =
+    sortBy === "cost"
+      ? sql`SUM(CAST(${submissions.totalCost} AS DECIMAL(18,4)))`
+      : sql`SUM(${submissions.totalTokens})`;
 
-  const higherRankedResult = await db
-    .select({
-      count: sql<number>`COUNT(*)`.as("count"),
-    })
-    .from(
-      db
-        .select({
-          userId: submissions.userId,
-          total: compareColumn.as("total"),
-        })
-        .from(submissions)
-        .innerJoin(users, eq(submissions.userId, users.id))
-        .where(isNull(users.bannedAt))
-        .groupBy(submissions.userId)
-        .having(sql`${compareColumn} > ${userCompareValue}`)
-        .as("higher_ranked")
-    );
+  const [higherRankedResult, membership] = await Promise.all([
+    db
+      .select({
+        count: sql<number>`COUNT(*)`.as("count"),
+      })
+      .from(
+        db
+          .select({
+            userId: submissions.userId,
+            total: compareColumn.as("total"),
+          })
+          .from(submissions)
+          .innerJoin(users, eq(submissions.userId, users.id))
+          .where(isNull(users.bannedAt))
+          .groupBy(submissions.userId)
+          .having(sql`${compareColumn} > ${userCompareValue}`)
+          .as("higher_ranked")
+      ),
+    db
+      .select({
+        teamId: teams.id,
+        teamName: teams.name,
+        teamSlug: teams.slug,
+        groupId: groups.id,
+        groupName: groups.name,
+      })
+      .from(users)
+      .leftJoin(teamMembers, eq(teamMembers.userId, users.id))
+      .leftJoin(
+        teams,
+        and(eq(teams.id, teamMembers.teamId), eq(teams.status, "active"))
+      )
+      .leftJoin(groupMembers, eq(groupMembers.userId, users.id))
+      .leftJoin(
+        groups,
+        and(eq(groups.id, groupMembers.groupId), eq(groups.status, "active"))
+      )
+      .where(eq(users.id, user.id))
+      .limit(1),
+  ]);
 
   const rank = Number(higherRankedResult[0]?.count || 0) + 1;
 
@@ -734,6 +853,7 @@ async function fetchAllTimeUserRank(
     username: user.username,
     displayName: user.displayName,
     avatarUrl: user.avatarUrl,
+    ...packMembership(membership[0] ?? {}),
     totalTokens: userTotalTokens,
     totalCost: userTotalCost,
   };

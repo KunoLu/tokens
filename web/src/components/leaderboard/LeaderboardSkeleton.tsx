@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 import { CONTAINER } from "@/components/layout/Container";
+import { MembershipColumnHeaders } from "@/components/leaderboard/MembershipCells";
 
 /**
  * The Suspense fallback for /leaderboard.
@@ -49,8 +50,22 @@ function SkeletonRow() {
             <span className="flex h-[15px] items-center">
               <Skeleton className="h-3 w-20" />
             </span>
+            <span className="mt-0.5 flex h-[15px] items-center gap-1 sm:hidden">
+              <Skeleton className="h-3 w-12" />
+              <Skeleton className="h-3 w-10" />
+            </span>
           </div>
         </div>
+      </TableCell>
+      <TableCell className="hidden max-w-[9rem] sm:table-cell">
+        <span className="flex h-5 items-center">
+          <Skeleton className="h-3.5 w-16" />
+        </span>
+      </TableCell>
+      <TableCell className="hidden max-w-[9rem] sm:table-cell">
+        <span className="flex h-5 items-center">
+          <Skeleton className="h-3.5 w-14" />
+        </span>
       </TableCell>
 
       <TableCell className="py-3 pr-4 sm:hidden">
@@ -163,6 +178,7 @@ export function LeaderboardSkeleton({
             <TableRow className="hover:bg-transparent">
               <TableHead className="w-12 pl-4 sm:pl-6">#</TableHead>
               <TableHead>Developer</TableHead>
+              <MembershipColumnHeaders />
               <TableHead className="pr-4 text-right sm:hidden">Usage</TableHead>
               <TableHead className="hidden w-44 px-2 py-2 text-right sm:table-cell">
                 Tokens

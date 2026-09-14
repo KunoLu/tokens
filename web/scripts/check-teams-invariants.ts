@@ -588,6 +588,49 @@ try {
     `;
     expect("leaveTeam cascades out of group", leftover[0].count === 0);
 
+    await sql`
+      INSERT INTO "submissions" (
+        "user_id", "total_tokens", "total_cost", "input_tokens", "output_tokens",
+        "date_start", "date_end", "sources_used", "models_used"
+      ) VALUES (
+        ${admin.id}, 1, '0.01', 1, 0,
+        '2026-01-01', '2026-01-02', ARRAY['claude-code'], ARRAY['claude-opus']
+      )
+    `;
+    const ranked = await sql<{
+      team_id: string | null;
+      team_name: string | null;
+      team_slug: string | null;
+      group_id: string | null;
+      group_name: string | null;
+    }[]>`
+      SELECT ranked.team_id, ranked.team_name, ranked.team_slug,
+             ranked.group_id, ranked.group_name
+      FROM (
+        SELECT
+          u.id AS user_id,
+          u.username,
+          t.id AS team_id,
+          t.name AS team_name,
+          t.slug AS team_slug,
+          g.id AS group_id,
+          g.name AS group_name
+        FROM submissions s
+        INNER JOIN users u ON s.user_id = u.id
+        LEFT JOIN team_members tm ON tm.user_id = u.id
+        LEFT JOIN teams t ON t.id = tm.team_id AND t.status = 'active'
+        LEFT JOIN group_members gm ON gm.user_id = u.id
+        LEFT JOIN groups g ON g.id = gm.group_id AND g.status = 'active'
+        WHERE u.banned_at IS NULL
+        GROUP BY u.id, u.username, u.display_name, u.avatar_url,
+                 t.id, t.name, t.slug, g.id, g.name
+      ) ranked
+      WHERE ranked.user_id = ${admin.id}
+    `;
+    expect(
+      "leaderboard search subquery exposes unique team/group columns",
+      ranked[0]?.team_id === team.id && Boolean(ranked[0]?.team_name)
+    );
     await expectTeamStatus(
       "active team cannot be deleted",
       409,

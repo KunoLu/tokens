@@ -30,6 +30,17 @@ Feature: 排行榜与团队榜
       When 任意访客打开排行榜页
       Then "songlin" 所在行的 Team 列为空
 
+    Scenario: 私有团队名对所有访客可见
+      Given 开发者 "lena" 属于可见性为 "private" 的团队 "Atlas Guild"
+      When 任意访客打开排行榜页
+      Then "lena" 所在行的 Team 列显示 "Atlas Guild"
+
+    Scenario: 移动端在用户名下方展示徽章而非独立列
+      Given 开发者 "songlin" 属于团队 "Neon Ravens" 和分组 "frontend"
+      When 访客在窄屏打开排行榜页
+      Then 表格不出现独立的 Team 列和 Group 列
+      And "songlin" 的 "@songlin" 下方显示 "Neon Ravens" 与 "frontend" 徽章
+
   Rule: 新增列不改变既有的排序与数字格式行为
 
     Scenario: 按 Cost 排序仍然可用
