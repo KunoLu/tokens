@@ -19,7 +19,7 @@ UI 对照：`docs/demo/teamboard-demo.html`
 
 ## 当前指针
 
-**当前：T10 实现已落地，不标记 complete。** lint 0 error / typecheck 绿。Playwright LocaleToggle 4/4 通过。不合 main。
+**当前：T5 Team 管理页。** T10 已 archive（`cc2191c`）。不合 main。
 
 推荐顺序：
 
@@ -194,7 +194,7 @@ UI 对照：`docs/demo/teamboard-demo.html`
 
 ### T10 i18n 基础设施 `L`
 
-**状态**：实现已落地；release readiness ready（Playwright LocaleToggle 已绿）。不合 main，不标记 complete。
+**状态**：已完成并 archive（2026-09-14，`cc2191c`）
 **依赖**：T0
 **插入点**：T5 / T7 之前，让新页面从第一天写字典 key
 
@@ -203,7 +203,7 @@ UI 对照：`docs/demo/teamboard-demo.html`
 - [x] 导航主题切换左侧：地球图标 + English / 中文
 - [x] worker / unstable_cache 缓存 key 并入 locale（`parseLocale` 后仅 `en`|`zh`）
 - [x] `format.ts` NumberFormat 经 `intlTag(locale)`（zh compact `123.5万`，非紧凑货币 `US$1,234,567.89`）；Leaderboard `useFormat()`
-- [x] 验证：lint 0 error / typecheck 绿；native `bun run test:e2e` 4 passed（2026-09-14）；LocaleToggle click/persist 不再 @todo；T11 场景仍 @todo；不标记 complete
+- [x] 验证：lint 0 error / typecheck 绿；native `bun run test:e2e` 4 passed；commit `cc2191c`；archive
 
 ---
 
@@ -283,4 +283,4 @@ bun run build
 | 2026-09-11 | 本地隔离 `tokens login` + `tokens submit` 对 `localhost:3000` 跑通；生产 credentials 未改写。未 start T3。 |
 | 2026-09-14 | T3 实现完成：`0025_add_teams_and_groups.sql` + schema + `lib/teams/types.ts`；checker 覆盖 5 表 / 部分索引 / CHECK / INV-1。`test:migrations` + `typecheck` 绿。`bun run build` skipped。待 3.4 commit。 |
 | 2026-09-14 | T10 i18n 基础设施：`tt_locale`、`t()`、导航地球切换、html lang、worker `__locale` 经 `parseLocale`、profile cache key 含 locale。NumberFormat 经 `intlTag(locale)`（zh compact `123.5万`）。T6 catch-up：`patchGroup` 后 `bumpLeaderboard`。不合 main，不标记 complete（缺 Playwright）。 |
-| 2026-09-14 | T10 Playwright：`@playwright/test` + `tests/e2e/i18n-locale.spec.ts`；LocaleToggle 四场景 4/4。正式报告 `tests/e2e/reports/html/playwright-report-i18n-feature_teamboard-teams-auth-2026_09_14-17_27_37.html` + 同 stem `.md`。不合 main，不标记 complete。 |
+| 2026-09-14 | T10 已提交 `cc2191c` 并 archive `--no-commit` → `.trellis/tasks/archive/2026-09/09-11-t10-i18n-infra/`。T6 catch-up `cd3e85c`。未合 main。未 start T5。 |
