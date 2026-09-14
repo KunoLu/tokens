@@ -15,7 +15,7 @@
   "branch": "feature/teamboard-teams-auth",
   "base_branch": "main",
   "worktree_path": null,
-  "commit": null,
+  "commit": "253c1e99a3b1e530a196da4f1bf3455e201d889d",
   "pr_url": null,
   "subtasks": [],
   "children": [],

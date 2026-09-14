@@ -10,7 +10,7 @@ Parent design (`09-10-teamboard-teams-auth/design.md` §4–§6) and docs PRD §
 | book-ddia-data-design | writes + invitations + INV | before implement | passed |
 | book-legacy-change-safety | web has no unit tests; verify-email/worker/email reused | before first existing-file edit | passed |
 | book-refactoring-pass | verify-email/worker/email/send.ts | before those edits | passed |
-| book-release-readiness | API + email + cron expiry | after validation | blocked |
+| book-release-readiness | API + email + cron expiry | after validation | passed |
 
 grill-with-docs: skipped. See repo-root `grill.log`.
 
@@ -95,7 +95,7 @@ Required tests: `check-teams-invariants.ts` + typecheck + lint.
 
 ## Release Readiness Review
 
-Status: needs-mitigation
+Status: ready
 
 Production path and affected users / systems: Worker APIs under `/api/teams`, `/api/me/invitations`, `/api/invitations`, `/api/users/search`; verify-email now backfills pending invitations after consume; daily cron (`20 3 * * *`) adds independent `expireInvitations`. Callers are signed-in web clients (T5+) and email invitees. No CLI contract change. Top-level wrangler config is production (`tokens-staging` → tokens.ci).
 
@@ -113,13 +113,15 @@ Capacity / backpressure / limits: `searchUsers` caps at 10 (email exact match 1)
 
 Observability / alerts / runbook: cron logs each task's count or error; invite/backfill failures `console.error`. No new dashboard. Operator rollback is Worker redeploy of previous bundle; schema `0025` stays.
 
-Rollout / migration / rollback / cleanup: no new migration. Deploy is `wrangler deploy` of this Worker (production). Rollback order in `implement.md`: restore verify-email, restore worker sequential token cleanup, remove invite mail, delete new routes and `lib/teams/{errors,http,service,visibility}.ts`. This 3.4 is a feature-branch git commit, not `cf:deploy`.
+Rollout / migration / rollback / cleanup: no new migration. Feature-branch commit `253c1e99`. Not `cf:deploy`.
 
 Required validation and result:
 - `bun run lint` (web/): 0 errors, 2 pre-existing warnings (`docs/page.tsx` no-img-element, `worker.ts` anonymous default export)
 - `bun run typecheck` (web/): pass
 - `DATABASE_URL=postgresql://tokens:tokens@127.0.0.1:5433/tokens bun run test:teams`: pass (native, not rtk)
 - TrellisCheckT4-2: pass
-- `bun run build` (web/, native): pass — `✓ Compiled successfully`; team/invitation/search routes present in the Next route table
+- `bun run build` (web/, native): pass
+- `bun run cf:build`: pass — Worker saved in `.open-next/worker.js`
+- `opennextjs-cloudflare preview` on `http://127.0.0.1:8787`: GET `/api/teams` → 200 `{"teams":[]}`; GET `/api/users/search?q=t4` → 401; GET `/api/me/invitations` → 401
 
-Optional checks, accountable owner acceptance, and residual risk: `cf:build` / `cf:preview` / staging HTTP exercise **not run**. Local `test:teams` is not staging evidence. Unblock `Status: ready` only after `cf:preview` or explicit owner acceptance of this residual. Book Gate stays `blocked` until that acceptance — do not treat this slice as production-deploy ready.
+Optional checks, accountable owner acceptance, and residual risk: `cf:deploy` not run (production). Local preview used Hyperdrive `localConnectionString` against OrbStack Postgres. Invite batch still unbounded.
