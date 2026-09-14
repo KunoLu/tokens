@@ -14,6 +14,7 @@ import { sendTeamInviteEmail } from "@/lib/email/send";
 import { TeamError, postgresErrorCode } from "./errors";
 import { canViewTeam, isTeamVisibility } from "./visibility";
 import type { TeamMemberRole } from "./types";
+import { normalizeUsernameCacheKey } from "@/lib/db/usernameLookup";
 const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const UUID_PATTERN =
@@ -29,15 +30,37 @@ function inviteGroupId(value: unknown): string | null {
   return trimmed === "" ? null : trimmed;
 }
 
-function bumpLeaderboard(): void {
+function revalidateTagSafe(tag: string): void {
   try {
-    revalidateTag("leaderboard", "max");
+    revalidateTag(tag, "max");
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
     if (message.includes("static generation store missing")) {
       return;
     }
-    console.error("Failed to revalidate leaderboard", error);
+    console.error(`Failed to revalidate ${tag}`, error);
+  }
+}
+
+function bumpLeaderboard(): void {
+  revalidateTagSafe("leaderboard");
+}
+
+/**
+ * /u/* and /api/users/* are cached under the `user:<username>` tag, so a
+ * leave must flush the leaver's profile too — otherwise the cached page can
+ * keep showing the membership for up to a minute. The username is looked up
+ * by userId server-side, never accepted from the client.
+ */
+async function bumpUserProfile(userId: string): Promise<void> {
+  const rows = await db
+    .select({ username: users.username })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1);
+  const username = rows[0]?.username;
+  if (username) {
+    revalidateTagSafe(`user:${normalizeUsernameCacheKey(username)}`);
   }
 }
 
@@ -554,6 +577,7 @@ export async function leaveTeam(teamId: string, userId: string) {
       .where(and(eq(teamMembers.teamId, teamId), eq(teamMembers.userId, userId)));
   });
   bumpLeaderboard();
+  await bumpUserProfile(userId);
 }
 
 export async function listGroups(teamId: string, viewerId: string | null) {
@@ -735,10 +759,10 @@ export async function leaveGroup(
       and(eq(groupMembers.groupId, groupId), eq(groupMembers.userId, userId))
     );
   bumpLeaderboard();
+  await bumpUserProfile(userId);
 }
 
 export async function listMyInvitations(userId: string, email: string | null) {
-  const now = new Date();
   const emailClause =
     email != null
       ? and(
@@ -760,7 +784,7 @@ export async function listMyInvitations(userId: string, email: string | null) {
     .where(
       and(
         eq(teamInvitations.status, "pending"),
-        sql`${teamInvitations.expiresAt} > ${now}`,
+        sql`${teamInvitations.expiresAt} > now()`,
         or(eq(teamInvitations.invitedUserId, userId), emailClause)
       )
     );

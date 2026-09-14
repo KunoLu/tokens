@@ -134,6 +134,10 @@ const en: Record<string, string> = {
   "teamboard.noSearchDesc": "No developer matches \"{q}\" for this period.",
   "teamboard.nothingTitle": "Nothing recorded",
   "teamboard.nothingDesc": "No usage was submitted for this period.",
+  "profile.membership": "Membership",
+  "profile.team": "Team",
+  "profile.group": "Group",
+  "profile.leaveGroup": "Leave group",
 };
 
 const zh: Record<string, string> = {
@@ -270,6 +274,10 @@ const zh: Record<string, string> = {
   "teamboard.noSearchDesc": "该周期内没有匹配“{q}”的开发者。",
   "teamboard.nothingTitle": "暂无记录",
   "teamboard.nothingDesc": "该周期内还没有成员提交用量。",
+  "profile.membership": "团队归属",
+  "profile.team": "团队",
+  "profile.group": "分组",
+  "profile.leaveGroup": "退出分组",
 };
 
 const dictionaries: Record<Locale, Record<string, string>> = { en, zh };

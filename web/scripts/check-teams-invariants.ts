@@ -22,6 +22,7 @@ import {
   getTeam,
   inviteMembers,
   leaveTeam,
+  listMyInvitations,
   linkPendingInvitationsForEmail,
   patchMemberRole,
   patchTeam,
@@ -435,6 +436,14 @@ try {
       { username: `t4out_${stamp}` },
     ]);
     expect("invite creates a pending row", firstInvite.created.length === 1);
+    const [outUser] = await sql<{ id: string }[]>`
+      SELECT id FROM "users" WHERE username = ${`t4out_${stamp}`}
+    `;
+    const listed = await listMyInvitations(outUser.id, null);
+    expect(
+      "listMyInvitations returns the pending invite (no Date-in-sql 500)",
+      listed.some((row) => row.id === firstInvite.created[0]?.id)
+    );
     const secondInvite = await inviteMembers(team.id, admin.id, [
       { username: `t4out_${stamp}` },
     ]);

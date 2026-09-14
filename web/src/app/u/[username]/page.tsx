@@ -5,6 +5,7 @@ import type { ProfileDevice } from '@/components/profile';
 import { getGitHubSocialLinks } from '@/lib/githubSocials';
 import { loadPublicProfileDevicesForPage } from '@/lib/publicProfileDevices';
 import { loadPublicProfileForPage } from '@/lib/publicProfileData';
+import { loadProfileMembershipForPage } from '@/lib/teams/profileMembership';
 import { LOCALE_COOKIE, parseLocale } from '@/lib/i18n';
 import ProfilePageClient, { type ProfileData } from './ProfilePageClient';
 import BannedProfileView, { type BannedProfileData } from './BannedProfileView';
@@ -60,6 +61,21 @@ async function getProfileDevices(username: string) {
     return (await loadPublicProfileDevicesForPage(username)) as ProfileDevice[];
   } catch {
     return [];
+  }
+}
+
+function isMissingDatabaseUrl(error: unknown): boolean {
+  return error instanceof Error && error.message === "DATABASE_URL environment variable is not set";
+}
+
+// Membership is an enrichment like devices: without a database the profile
+// still renders, just without the Team/Group block.
+async function getProfileMembership(username: string) {
+  try {
+    return await loadProfileMembershipForPage(username);
+  } catch (error) {
+    if (isMissingDatabaseUrl(error)) return null;
+    throw error;
   }
 }
 
@@ -119,10 +135,11 @@ export default async function ProfilePage({
   const { username } = await params;
   const resolvedSearchParams = await searchParams;
   const period = parseProfilePeriod(resolvedSearchParams.period);
-  const [data, devices, socialLinks] = await Promise.all([
+  const [data, devices, socialLinks, membership] = await Promise.all([
     getProfileData(username, period),
     getProfileDevices(username),
     getGitHubSocialLinks(username),
+    getProfileMembership(username),
   ]);
 
   if (!data) {
@@ -143,6 +160,7 @@ export default async function ProfilePage({
       initialDevices={devices}
       socialLinks={socialLinks}
       username={username}
+      membership={membership}
     />
   );
 }

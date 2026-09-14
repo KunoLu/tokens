@@ -29,8 +29,10 @@ import {
   type ProfileContributionView,
   type ProfileSocialLink,
   type ProfileUser,
+  ProfileMembership,
 } from "@/components/profile";
 import type { DailyContribution } from "@/lib/types";
+import type { ProfileMembership as ProfileMembershipData } from "@/lib/teams/profileMembership";
 import { toLocalDateString } from "@/lib/leaderboard/dateRange";
 import { useSettings } from "@/lib/useSettings";
 
@@ -89,6 +91,7 @@ interface ProfilePageClientProps {
   initialDevices?: ProfileDevice[];
   socialLinks?: ProfileSocialLink[];
   username: string;
+  membership?: ProfileMembershipData | null;
 }
 
 const EARLY_ADOPTERS = ["code-yeongyu", "gtg7784", "qodot"];
@@ -98,6 +101,7 @@ export default function ProfilePageClient({
   initialDevices,
   socialLinks,
   username,
+  membership,
 }: ProfilePageClientProps) {
   const router = useRouter();
   const [isEmbedOpen, setIsEmbedOpen] = useState(false);
@@ -356,6 +360,11 @@ export default function ProfilePageClient({
         devices={
           initialDevices && initialDevices.length > 0 ? (
             <ProfileDevices devices={initialDevices} />
+          ) : undefined
+        }
+        membership={
+          membership ? (
+            <ProfileMembership username={user.username} membership={membership} />
           ) : undefined
         }
       />

@@ -94,7 +94,7 @@ export function requireLoopbackPostgresUrl(raw: string): LoopbackPostgresTarget 
 }
 
 /** Unique-per-run identity: GitHub-username-safe, example.test mailbox. */
-export function fixtureUser(runId: string, slot: "a" | "b"): FixtureUser {
+export function fixtureUser(runId: string, slot: "a" | "b" | "c"): FixtureUser {
   return {
     email: `${FIXTURE_PREFIX}${runId}-${slot}@example.test`,
     username: `${FIXTURE_PREFIX}${runId}-${slot}`,

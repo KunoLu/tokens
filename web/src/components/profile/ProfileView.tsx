@@ -76,6 +76,8 @@ export interface ProfileViewProps {
   breakdown?: React.ReactNode;
   modelsSection?: React.ReactNode;
   devices?: React.ReactNode;
+  /** Team/Group affiliation. Omitted entirely when the user has none. */
+  membership?: React.ReactNode;
 }
 
 const PERIODS = [
@@ -213,6 +215,7 @@ export function ProfileView({
   breakdown,
   modelsSection,
   devices,
+  membership,
 }: ProfileViewProps) {
   const [copied, setCopied] = useState(false);
   const avatar = avatarUrlFor(user);
@@ -296,6 +299,7 @@ export function ProfileView({
           </Button>
         </div>
       </header>
+      {membership}
 
       <Separator className="my-7" />
 
