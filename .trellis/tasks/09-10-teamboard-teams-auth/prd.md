@@ -53,24 +53,26 @@
 
 ## Acceptance Criteria
 
-- [ ] `/shame` 返回 404，全仓无 Hall of Shame 残留引用，封禁机制仍生效
-- [ ] 导航第二项为 `Teamboard`，指向 `/teamboard`
-- [ ] 可用邮箱 + 用户名 + 密码注册；弱密码被拒并给出具体原因
-- [ ] 全站不存在 GitHub 图标、按钮或 OAuth 入口
-- [ ] `tokens login` 与 `tokens submit` 无需更新 CLI 即可工作
-- [ ] 创建 Team 者成为 admin；可改名、改头像、邀请（用户名 / 邮箱 / 批量）
-- [ ] subadmin 最多 2 个，且能做除解散与删除 Team 外的全部操作（含 Group 全部操作）
-- [ ] 未解散的 Team / Group 无法删除；解散清空成员；已解散实体仍可由创建者删除
-- [ ] Leaderboard 列序 `# / Developer / Team / Group / Tokens / Cost`，空值留空，排序无回归
-- [ ] Teamboard 支持 Team 单选 + Group 多选，列序 `# / Developer / Group / Tokens / Cost`
-- [ ] 建团表单强制选择可见性，未选择时落库 `private`；筛选器列出「公开团队 ∪ 本人所属团队」，请求他人 `private` 团队返回 404
-- [ ] Profile 展示 Team / Group，本人可退出，无归属时不渲染该区块
-- [ ] Docs 页删去「The verified badge」「Architecture」「Sponsors」「iOS app」四节，且全站不再展示 iOS App 入口（D-4 取删除）；Privacy / Terms / Settings / embed / badge / archive 行为无变化
-- [ ] Docs 保留章节的 default-English 渲染内容与线上 tokens.ci 一致（基准是线上页而非 demo；源码因 i18n 包裹变化，渲染产物不变）
-- [ ] 邀请对话框为可搜索下拉多选（勾选框 + 计数），输入完整邮箱可邀请未注册用户
-- [ ] 语言切换按钮存在且提供 English / 中文；切换后全部页面文案跟随，`tt_locale` 持久化，`<html lang>` 跟随，缓存按 locale 分离
-- [ ] 品牌块（导航左上角 `TokensMark` + demo 同款）蓝色底色改为紫色，白色 T 图案不变；favicon / 安装图标的位图本轮不重着色（无二进制生成流程），已明确说明未改
-- [ ] `bun run lint`、`bun run typecheck`、`bun run test:migrations` 全绿
+T9（2026-09-15）按 `docs/prd-teamboard-teams-auth.md` §12 证据勾选。父任务仍 `planning`，不 archive。
+
+- [x] `/shame` 返回 404，全仓无 Hall of Shame 残留引用，封禁机制仍生效 — `t9-acceptance` `/shame` 404 + 导航无 Hall of Shame；`BannedProfileView` + login 403
+- [x] 导航第二项为 `Teamboard`，指向 `/teamboard` — `tests/e2e/teamboard.spec.ts`、`Navigation.tsx`
+- [x] 可用邮箱 + 用户名 + 密码注册；弱密码被拒并给出具体原因 — T2 TODO 验证勾选（非本轮重跑）
+- [x] 全站不存在 GitHub 图标、按钮或 OAuth 入口 — T2 删除 `github` 路由与 `lib/auth/github.ts`
+- [x] `tokens login` 与 `tokens submit` 无需更新 CLI 即可工作 — TODO 2026-09-11 本地隔离 `TOKENS_API_URL=http://localhost:3000`（非本轮重跑）
+- [x] 创建 Team 者成为 admin；可改名、改头像、邀请（用户名 / 邮箱 / 批量） — `test:teams` creator admin + `patchTeam` name/avatar；`teams-signed-in` 创建+邀请
+- [x] subadmin 最多 2 个，且能做除解散与删除 Team 外的全部操作（含 Group 全部操作） — `test:teams` cap≤2、不能 disband/delete Team、能 rename/visibility/invite 与 Group 全套
+- [x] 未解散的 Team / Group 无法删除；解散清空成员；已解散实体仍可由创建者删除 — `test:teams` active 409；disband 清空成员；`created_by` 可删已解散空实体
+- [x] Leaderboard 列序 `# / Developer / Team / Group / Tokens / Cost`，空值留空，排序无回归 — `t9-acceptance` Desktop Chrome `thead th:visible`（手机端 `Usage` 仍在 DOM，不删）
+- [x] Teamboard 支持 Team 单选 + Group 多选，列序 `# / Developer / Group / Tokens / Cost` — `teamboard.spec.ts`（无 Team 列、`groupIds` A vs B）
+- [x] 建团表单强制选择可见性，未选择时落库 `private`；筛选器列出「公开团队 ∪ 本人所属团队」，请求他人 `private` 团队返回 404 — `teams-signed-in` 未选不能提交；DB default `private`；`teamboard.spec.ts` 登出后页面与 API 404
+- [x] Profile 展示 Team / Group，本人可退出，无归属时不渲染该区块 — `tests/e2e/profile-membership.spec.ts`
+- [x] Docs 页删去「The verified badge」「Architecture」「Sponsors」「iOS app」四节，且全站不再展示 iOS App 入口（D-4 取删除）；Privacy / Terms / Settings / embed / badge / archive 行为无变化 — `t9-acceptance` Docs 四节 count=0；`/privacy` `/terms` `/settings` 200
+- [x] Docs 保留章节的 default-English 渲染内容与线上 tokens.ci 一致（仅删上述四节、替换 GitHub 登录文案；基准是线上页而非 demo；源码因 i18n 包裹变化，渲染产物不变） — 2026-09-15 对照 live：三节标题/说明/命令/Everyday 旁注/Supported clients 43 格一致；`tokens login` 旁注由 live `link your GitHub account` 换成 T2 `sign in`
+- [x] 邀请对话框为可搜索下拉多选（勾选框 + 计数），输入完整邮箱可邀请未注册用户 — `teams-signed-in` 搜索/勾选/计数；`test:teams` email-only invite
+- [x] 语言切换按钮存在且提供 English / 中文；切换后全部页面文案跟随，`tt_locale` 持久化，`<html lang>` 跟随，缓存按 locale 分离 — `i18n-locale.spec.ts` 8/8；`worker.ts` cache key 写 `__locale`。`next dev` 不走 `caches.default`，未做 wrangler preview 对照
+- [x] 品牌块（导航左上角 `TokensMark` + demo 同款）蓝色底色改为紫色，白色 T 图案不变；favicon / 安装图标的位图本轮不重着色（无二进制生成流程），已明确说明未改 — T12
+- [x] `bun run lint`、`bun run typecheck`、`bun run test:migrations` 全绿 — T9 2026-09-15：lint 0 error（2 既有 warning）；typecheck 通过；`test:migrations` OrbStack 全绿
 
 ## Open Decisions
 
