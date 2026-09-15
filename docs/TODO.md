@@ -19,7 +19,7 @@ UI 对照：`docs/demo/teamboard-demo.html`
 
 ## 当前指针
 
-**当前：T9 文档与收尾。** T11 已 archive → `.trellis/tasks/archive/2026-09/09-11-t11-i18n-copy/`。PRD §12 已按本轮证据勾齐。不合 main。
+**当前：无 active 子任务。** T9 已 archive → `.trellis/tasks/archive/2026-09/09-11-t9-docs-wrapup/`。父任务仍 `planning`。下一步是父任务收口 / Draft PR，不合 main。
 
 推荐顺序：
 
@@ -222,7 +222,7 @@ UI 对照：`docs/demo/teamboard-demo.html`
 
 ### T9 文档与收尾 `M`
 
-**状态**：进行中（§12 已按本轮证据勾齐，待 check / commit / archive）  
+**状态**：已 archive（2026-09-15，`--no-commit`）→ `.trellis/tasks/archive/2026-09/09-11-t9-docs-wrapup/`。工作提交 `52a24fa3` + `6037ba42`。  
 **依赖**：T1–T8、T10、T11
 
 - [x] 同步 `.trellis/spec`、README
@@ -289,3 +289,4 @@ bun run build
 | 2026-09-15 | T8 Profile 团队区块：page-only membership、客户端 session 判断 isOwner、复用 T4 退出 API、`listMyInvitations` 用 SQL `now()`。`test:teams` + Playwright 9/9 + `bun run build` 过。待 Phase 3.4 提交确认。不合 main。 |
 | 2026-09-15 | T8 已提交 `19663bd9`（feat）+ `6fa4ec2`（contracts）并 archive `--no-commit` → `.trellis/tasks/archive/2026-09/09-11-t8-profile-membership/`。未合 main。未 start T11。 |
 | 2026-09-15 | T9 补齐 PRD §12：`test:teams` 覆盖改名/头像、subadmin 正向操作、解散后删除、public→private Teamboard；`t9-acceptance` 5/5（/shame 404、封禁 login 403、Desktop Chrome `thead th:visible` 列序、Docs 删节）。不合 main。 |
+| 2026-09-15 | T9 已提交 `52a24fa3`（test）+ `6037ba42`（contracts）并 archive `--no-commit` → `.trellis/tasks/archive/2026-09/09-11-t9-docs-wrapup/`。未合 main。 |
