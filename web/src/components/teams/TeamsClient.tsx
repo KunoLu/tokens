@@ -34,7 +34,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { avatarUrlFor } from "@/lib/avatar";
-import { intlTag, useI18n } from "@/lib/i18n";
+import { intlTag, useI18n, type TranslationKey } from "@/lib/i18n";
+import type { TeamMemberRole, TeamStatus, TeamVisibility } from "@/lib/teams/types";
 import type {
   TeamsPageData,
   TeamsPageGroup,
@@ -46,6 +47,24 @@ import { ConfirmDialog } from "./ConfirmDialog";
 import { InviteDialog } from "./InviteDialog";
 
 const ROLE_RANK: Record<string, number> = { admin: 0, subadmin: 1, member: 2 };
+
+const TEAM_ROLE_KEYS: Record<TeamMemberRole, TranslationKey> = {
+  admin: "teams.role.admin",
+  subadmin: "teams.role.subadmin",
+  member: "teams.role.member",
+};
+const TEAM_STATUS_KEYS: Record<TeamStatus, TranslationKey> = {
+  active: "teams.status.active",
+  disbanded: "teams.status.disbanded",
+};
+const TEAM_VISIBILITY_KEYS: Record<TeamVisibility, TranslationKey> = {
+  public: "teams.public",
+  private: "teams.private",
+};
+const TEAM_VIS_HINT_KEYS: Record<TeamVisibility, TranslationKey> = {
+  public: "teams.visHint.public",
+  private: "teams.visHint.private",
+};
 
 export function TeamsClient({
   initialData,
@@ -230,12 +249,12 @@ function TeamDashboard({
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
                 <strong className="text-[17px]">{team.name}</strong>
-                {myRole && <Badge>{myRole}</Badge>}
+                {myRole && <Badge>{t(TEAM_ROLE_KEYS[myRole])}</Badge>}
                 <Badge variant={team.status === "active" ? "secondary" : "destructive"}>
-                  {team.status}
+                  {t(TEAM_STATUS_KEYS[team.status])}
                 </Badge>
-                <Badge variant="outline" title={t(`teams.visHint.${team.visibility}`)}>
-                  {team.visibility}
+                <Badge variant="outline" title={t(TEAM_VIS_HINT_KEYS[team.visibility])}>
+                  {t(TEAM_VISIBILITY_KEYS[team.visibility])}
                 </Badge>
               </div>
               <p className="mt-1 text-[13px] text-muted-foreground tabular">
@@ -717,7 +736,7 @@ function MemberRow({
                 : "outline"
           }
         >
-          {member.role}
+          {t(TEAM_ROLE_KEYS[member.role])}
         </Badge>
         {canManage && !locked && (
           <>

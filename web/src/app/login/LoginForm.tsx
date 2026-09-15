@@ -7,12 +7,14 @@ import { Input } from "@/components/ui/input";
 import { CONTAINER } from "@/components/layout/Container";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { cn } from "@/lib/utils";
+import { useI18n } from "@/lib/i18n";
 
 export default function LoginForm({ returnTo }: { returnTo: string }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const { t } = useI18n();
 
   const onSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -26,13 +28,13 @@ export default function LoginForm({ returnTo }: { returnTo: string }) {
       });
       if (!response.ok) {
         const data = await response.json().catch(() => ({}));
-        setError(data.error || "Login failed");
+        setError(data.error || t("auth.login.failed"));
         return;
       }
       // Full reload so the navigation picks up the fresh session cookie.
       window.location.href = returnTo;
     } catch {
-      setError("Network error — please try again");
+      setError(t("auth.network"));
     } finally {
       setSubmitting(false);
     }
@@ -40,12 +42,12 @@ export default function LoginForm({ returnTo }: { returnTo: string }) {
 
   return (
     <main id="main-content" className={cn(CONTAINER, "max-w-[460px] pb-24 pt-10 sm:pt-14")}>
-      <PageHeader title="Sign in" description="Use the email and password you registered with." />
+      <PageHeader title={t("nav.signIn")} description={t("auth.login.desc")} />
 
       <form onSubmit={onSubmit} className="flex flex-col gap-4">
         <div className="flex flex-col gap-1.5">
           <label htmlFor="email" className="text-[13px] font-semibold">
-            Email
+            {t("auth.email")}
           </label>
           <Input
             id="email"
@@ -60,13 +62,13 @@ export default function LoginForm({ returnTo }: { returnTo: string }) {
         <div className="flex flex-col gap-1.5">
           <div className="flex items-baseline justify-between">
             <label htmlFor="password" className="text-[13px] font-semibold">
-              Password
+              {t("auth.password")}
             </label>
             <Link
               href={`/forgot-password?returnTo=${encodeURIComponent(returnTo)}`}
               className="text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
             >
-              Forgot password?
+              {t("auth.login.forgot")}
             </Link>
           </div>
           <Input
@@ -89,22 +91,22 @@ export default function LoginForm({ returnTo }: { returnTo: string }) {
         )}
 
         <Button type="submit" disabled={submitting} className="h-9">
-          {submitting ? "Signing in…" : "Sign in"}
+          {submitting ? t("auth.login.submitting") : t("nav.signIn")}
         </Button>
       </form>
 
       <p className="mt-6 text-sm text-muted-foreground">
-        No account yet?{" "}
+        {t("auth.login.noAccount")}{" "}
         <Link
           href={`/register?returnTo=${encodeURIComponent(returnTo)}`}
           className="text-primary underline-offset-4 hover:underline"
         >
-          Create one
+          {t("auth.login.createOne")}
         </Link>
         {" · "}
-        Didn&apos;t get a verification email?{" "}
+        {t("auth.login.noVerify")}{" "}
         <Link href="/verify-email" className="text-primary underline-offset-4 hover:underline">
-          Resend it
+          {t("auth.login.resend")}
         </Link>
       </p>
     </main>

@@ -6,6 +6,7 @@ import { ProfileView } from "@/components/profile/ProfileView";
 import { ProfileToday } from "@/components/profile/ProfileToday";
 import { ProfileEmbedDialog } from "@/components/profile/ProfileEmbedDialog";
 import { cn } from "@/lib/utils";
+import { useI18n } from "@/lib/i18n";
 
 import { useEffect, useId, useMemo, useState } from "react";
 import { useRouter } from "nextjs-toploader/app";
@@ -114,6 +115,7 @@ export default function ProfilePageClient({
   } = useSettings();
   const contributionBreakdownId = useId();
   const data = initialData;
+  const { t, locale } = useI18n();
 
   // The redesigned shell renders models as a table rather than a chart.
   const modelRows = useMemo(
@@ -137,9 +139,10 @@ export default function ProfilePageClient({
             data.contributions,
             rollingChartRange.start,
             rollingChartRange.end,
+            locale,
           )
         : [],
-    [data.contributions, period, rollingChartRange],
+    [data.contributions, period, rollingChartRange, locale],
   );
   const [contributionRangeValue, setContributionRangeValue] =
     useState("recent");
@@ -252,10 +255,10 @@ export default function ProfilePageClient({
       {showResubmitBanner && (
         <div className={cn(CONTAINER, "pt-6")}>
           <Alert>
-            <AlertTitle>Fresh detail is available</AlertTitle>
+            <AlertTitle>{t("profile.resubmitTitle")}</AlertTitle>
             <AlertDescription>
-              Re-submit with <code className="font-mono">tokens submit</code> to add
-              daily model breakdowns.
+              {t("profile.resubmitA")}{" "}
+              <code className="font-mono">tokens submit</code> {t("profile.resubmitB")}
             </AlertDescription>
           </Alert>
         </div>
@@ -322,7 +325,7 @@ export default function ProfilePageClient({
             </div>
           ) : (
             <p className="py-10 text-center text-sm text-muted-foreground">
-              No activity recorded for this period.
+              {t("profile.noActivity")}
             </p>
           )
         }

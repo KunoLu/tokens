@@ -31,12 +31,12 @@ export function MembershipBadges({
 
 export function MembershipColumnHeaders({
   includeTeam = true,
-  teamLabel = "Team",
-  groupLabel = "Group",
+  teamLabel,
+  groupLabel,
 }: {
   includeTeam?: boolean;
-  teamLabel?: string;
-  groupLabel?: string;
+  teamLabel: string;
+  groupLabel: string;
 }) {
   return (
     <>

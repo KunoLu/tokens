@@ -12,6 +12,7 @@ import {
 } from "@/lib/utils";
 import { formatContributionDate } from "@/lib/date-utils";
 import { formatDuration } from "@/lib/format";
+import { useI18n, intlTag } from "@/lib/i18n";
 
 interface StatsPanelProps {
   data: TokenContributionData;
@@ -41,6 +42,7 @@ function BadgeList({ label, items, palette }: { label: string; items: string[]; 
 }
 
 export function StatsPanel({ data, palette, totalActiveTimeMs, sessionCount, mcpServers }: StatsPanelProps) {
+  const { t, locale } = useI18n();
   const { summary, contributions } = data;
   const currentStreak = calculateCurrentStreak(contributions);
   const longestStreak = calculateLongestStreak(contributions);
@@ -49,39 +51,39 @@ export function StatsPanel({ data, palette, totalActiveTimeMs, sessionCount, mcp
   return (
     <div className="rounded-2xl border border-border bg-card p-6 shadow-sm transition-shadow duration-150 hover:shadow-md">
       <h3 className="mb-4 text-sm font-bold uppercase tracking-wider text-muted-foreground">
-        Statistics
+        {t("graph.statistics")}
       </h3>
 
       {/* 2 up on phones, 1 below 400px, 3 from sm, 4 from md — the same
           breakpoints the styled grid used. */}
       <div className="grid grid-cols-2 gap-6 max-[560px]:gap-4 max-[400px]:grid-cols-1 sm:grid-cols-3 md:grid-cols-4">
         <StatItem
-          label="Total Cost"
-          value={formatCurrency(summary.totalCost)}
+          label={t("graph.totalCost")}
+          value={formatCurrency(summary.totalCost, locale)}
           highlightDarkColor={getDarkGradeColors(palette)[3]}
           highlightLightColor={palette.grade4}
           highlight
         />
-        <StatItem label="Total Tokens" value={formatTokenCount(summary.totalTokens)} />
-        <StatItem label="Active Days" value={`${summary.activeDays} / ${summary.totalDays}`} />
-        <StatItem label="Avg / Day" value={formatCurrency(summary.averagePerDay)} />
-        <StatItem label="Current Streak" value={`${currentStreak} day${currentStreak !== 1 ? "s" : ""}`} />
-        <StatItem label="Longest Streak" value={`${longestStreak} day${longestStreak !== 1 ? "s" : ""}`} />
+        <StatItem label={t("graph.totalTokens")} value={formatTokenCount(summary.totalTokens, locale)} />
+        <StatItem label={t("graph.activeDays")} value={`${summary.activeDays.toLocaleString(intlTag(locale))} / ${summary.totalDays.toLocaleString(intlTag(locale))}`} />
+        <StatItem label={t("graph.avgPerDay")} value={formatCurrency(summary.averagePerDay, locale)} />
+        <StatItem label={t("graph.currentStreak")} value={t(currentStreak === 1 ? "graph.daysOne" : "graph.daysMany", { n: currentStreak })} />
+        <StatItem label={t("graph.longestStreak")} value={t(longestStreak === 1 ? "graph.daysOne" : "graph.daysMany", { n: longestStreak })} />
         {bestDay && bestDay.totals.cost > 0 && (
-          <StatItem label="Best Day" value={formatContributionDate(bestDay)} subValue={formatCurrency(bestDay.totals.cost)} />
+          <StatItem label={t("graph.bestDay")} value={formatContributionDate(bestDay, locale)} subValue={formatCurrency(bestDay.totals.cost, locale)} />
         )}
-        <StatItem label="Models" value={summary.models.length.toString()} />
+        <StatItem label={t("graph.models")} value={summary.models.length.toLocaleString(intlTag(locale))} />
         {totalActiveTimeMs != null && totalActiveTimeMs > 0 && (
-          <StatItem label="Active Time" value={formatDuration(totalActiveTimeMs)} />
+          <StatItem label={t("graph.activeTime")} value={formatDuration(totalActiveTimeMs)} />
         )}
         {sessionCount != null && sessionCount > 0 && (
-          <StatItem label="Sessions" value={sessionCount.toString()} />
+          <StatItem label={t("graph.sessions")} value={sessionCount.toLocaleString(intlTag(locale))} />
         )}
       </div>
 
-      <BadgeList label="Clients" items={summary.clients} palette={palette} />
+      <BadgeList label={t("graph.clients")} items={summary.clients} palette={palette} />
       {mcpServers && mcpServers.length > 0 && (
-        <BadgeList label="MCPs" items={mcpServers} palette={palette} />
+        <BadgeList label={t("graph.mcps")} items={mcpServers} palette={palette} />
       )}
     </div>
   );

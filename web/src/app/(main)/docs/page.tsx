@@ -10,6 +10,8 @@ import {
   SUPPORTED_CLIENTS,
 } from "@/lib/constants";
 import { PageHeader } from "@/components/layout/PageHeader";
+import { LOCALE_COOKIE, parseLocale, t, type Locale, type TranslationKey } from "@/lib/i18n";
+import { cookies } from "next/headers";
 import { cn } from "@/lib/utils";
 
 export const metadata: Metadata = {
@@ -49,22 +51,42 @@ const CLIENT_GRID: ReadonlyArray<{ id: string; name: string; logo: string }> = [
   { id: "orca", name: "Orca", logo: "/clients/client-orca.png" },
 ].sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
 
-const MACOS: readonly DocCommand[] = [
-  { command: BREW_INSTALL_COMMAND, note: "install" },
-  { command: "tokens login", note: "sign in" },
-  { command: "brew services start tokens", note: "submit automatically" },
-];
+// Commands stay literal; the notes beside them are dictionary keys resolved
+// at render, so the arrays keep working as plain module constants.
+const MACOS = [
+  { command: BREW_INSTALL_COMMAND, note: "docs.note.install" },
+  { command: "tokens login", note: "docs.note.signIn" },
+  { command: "brew services start tokens", note: "docs.note.submitAuto" },
+] as const;
 
-const LINUX: readonly DocCommand[] = [
-  { command: "curl -fsSL https://tokens.ci/install.sh | sh", note: "install" },
-  { command: "tokens login", note: "sign in" },
-  { command: "tokens serve", note: "submit automatically" },
-];
+const LINUX = [
+  { command: "curl -fsSL https://tokens.ci/install.sh | sh", note: "docs.note.install" },
+  { command: "tokens login", note: "docs.note.signIn" },
+  { command: "tokens serve", note: "docs.note.submitAuto" },
+] as const;
 
-const WINDOWS: readonly DocCommand[] = [
-  { command: "bunx tokens-cli@latest login", note: "sign in" },
-  { command: "bunx tokens-cli@latest submit", note: "submit your usage" },
-];
+const WINDOWS = [
+  { command: "bunx tokens-cli@latest login", note: "docs.note.signIn" },
+  { command: "bunx tokens-cli@latest submit", note: "docs.note.submitUsage" },
+] as const;
+
+const EVERYDAY = [
+  { command: "tokens login", note: "docs.note.authenticate" },
+  { command: "tokens submit", note: "docs.note.sendNow" },
+  { command: "tokens serve", note: "docs.note.keepSubmitting" },
+  { command: "tokens status", note: "docs.note.whatSubmitted" },
+  { command: "tokens help", note: "docs.note.everythingElse" },
+] as const;
+
+function localize(
+  locale: Locale,
+  commands: ReadonlyArray<{ command: string; note: TranslationKey }>
+): DocCommand[] {
+  return commands.map(({ command, note }) => ({
+    command,
+    note: t(locale, note),
+  }));
+}
 
 /**
  * Platform marks. Apple and Microsoft come from the shared brand set so they
@@ -119,7 +141,8 @@ function Section({
   );
 }
 
-export default function DocsPage() {
+export default async function DocsPage() {
+  const locale = parseLocale((await cookies()).get(LOCALE_COOKIE)?.value);
   return (
     <main
       className={cn(CONTAINER, "pb-24 pt-10 sm:pt-14")}
@@ -127,15 +150,15 @@ export default function DocsPage() {
     >
       <div className="mx-auto w-full max-w-[860px]">
       <PageHeader
-        title="Docs"
-        description="Get your AI coding usage onto the leaderboard from the terminal."
+        title={t(locale, "nav.docs")}
+        description={t(locale, "docs.desc")}
       />
 
         <div className="flex flex-col gap-12">
         <Section
           id="cli"
-          title="Install the CLI"
-          description="The CLI scans the AI coding clients already installed on your machine, totals the usage locally, and submits only the totals."
+          title={t(locale, "docs.cliTitle")}
+          description={t(locale, "docs.cliDesc")}
         >
           <Tabs defaultValue="macos">
             <TabsList>
@@ -143,41 +166,38 @@ export default function DocsPage() {
                   the monochrome marks legible in both themes. */}
               <TabsTrigger value="macos">
                 <OsIcon name="macos" />
-                macOS
+                {t(locale, "docs.os.macos")}
               </TabsTrigger>
               <TabsTrigger value="linux">
                 <OsIcon name="linux" />
-                Linux
+                {t(locale, "docs.os.linux")}
               </TabsTrigger>
               <TabsTrigger value="windows">
                 <OsIcon name="windows" />
-                Windows
+                {t(locale, "docs.os.windows")}
               </TabsTrigger>
             </TabsList>
 
             <TabsContent value="macos" className="mt-4 flex flex-col gap-3">
-              <CommandBlock commands={MACOS} />
+              <CommandBlock commands={localize(locale, MACOS)} />
               <p className="text-sm leading-relaxed text-muted-foreground">
                 <code className="font-mono text-[13px]">brew services</code>{" "}
-                keeps a background agent running, so your usage stays current
-                without you thinking about it.
+                {t(locale, "docs.macosNote")}
               </p>
             </TabsContent>
 
             <TabsContent value="linux" className="mt-4 flex flex-col gap-3">
-              <CommandBlock commands={LINUX} />
+              <CommandBlock commands={localize(locale, LINUX)} />
               <p className="text-sm leading-relaxed text-muted-foreground">
-                <code className="font-mono text-[13px]">tokens serve</code> runs
-                the submitter in the foreground; pair it with a systemd unit to
-                keep it alive across reboots.
+                <code className="font-mono text-[13px]">tokens serve</code>{" "}
+                {t(locale, "docs.linuxNote")}
               </p>
             </TabsContent>
 
             <TabsContent value="windows" className="mt-4 flex flex-col gap-3">
-              <CommandBlock commands={WINDOWS} />
+              <CommandBlock commands={localize(locale, WINDOWS)} />
               <p className="text-sm leading-relaxed text-muted-foreground">
-                Runs straight from npm, so nothing is installed globally. Use a
-                Scheduled Task to submit on a timer.
+                {t(locale, "docs.windowsNote")}
               </p>
             </TabsContent>
           </Tabs>
@@ -186,30 +206,21 @@ export default function DocsPage() {
 
         <Section
           id="usage"
-          title="Everyday use"
-          description="Five commands cover the whole workflow."
+          title={t(locale, "docs.usageTitle")}
+          description={t(locale, "docs.usageDesc")}
         >
-          <CommandBlock
-            commands={[
-              { command: "tokens login", note: "authenticate" },
-              { command: "tokens submit", note: "send usage now" },
-              { command: "tokens serve", note: "keep submitting in the background" },
-              { command: "tokens status", note: "what has been submitted" },
-              { command: "tokens help", note: "everything else" },
-            ]}
-          />
+          <CommandBlock commands={localize(locale, EVERYDAY)} />
         </Section>
 
 
         <Section
           id="clients"
-          title="Supported clients"
-          description="The CLI scans whatever is already on your machine — nothing to configure per client."
+          title={t(locale, "docs.clientsTitle")}
+          description={t(locale, "docs.clientsDesc")}
         >
           <div className="flex flex-col gap-4">
             <p className="text-sm leading-relaxed text-muted-foreground">
-              All {CLIENT_GRID.length} of these are detected automatically — if
-              it is installed and has written sessions, it is counted.
+              {t(locale, "docs.clientsDetected", { n: CLIENT_GRID.length })}
             </p>
 
             {/* A plain responsive grid rather than a table: these are names,

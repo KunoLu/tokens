@@ -4,6 +4,7 @@ import { useId, type CSSProperties } from "react";
 import { formatNumber } from "@/lib/utils";
 import type { ProfileStatsData } from "./types";
 import { tw } from "@/lib/tw";
+import { useI18n } from "@/lib/i18n";
 
 export interface TokenBreakdownProps {
   stats: ProfileStatsData;
@@ -112,31 +113,32 @@ function finiteNonnegative(value: number | undefined): number {
 export function TokenBreakdown({ stats, className }: TokenBreakdownProps) {
   const headingId = useId();
   const descriptionId = useId();
+  const { t, locale } = useI18n();
   const tokenTypes = [
     {
-      label: "Input",
+      label: t("graph.tokenInput"),
       value: finiteNonnegative(stats.inputTokens),
       color: TOKEN_MIX_COLORS.input,
     },
     {
-      label: "Output",
+      label: t("graph.tokenOutput"),
       value: finiteNonnegative(stats.outputTokens),
       color: TOKEN_MIX_COLORS.output,
     },
     {
-      label: "Cache read",
+      label: t("graph.tokenCacheRead"),
       value: finiteNonnegative(stats.cacheReadTokens),
       color: TOKEN_MIX_COLORS.cacheRead,
     },
     {
-      label: "Cache write",
+      label: t("graph.tokenCacheWrite"),
       value: finiteNonnegative(stats.cacheWriteTokens),
       color: TOKEN_MIX_COLORS.cacheWrite,
     },
     ...(finiteNonnegative(stats.reasoningTokens) > 0
       ? [
           {
-            label: "Reasoning",
+            label: t("graph.tokenReasoning"),
             value: finiteNonnegative(stats.reasoningTokens),
             color: TOKEN_MIX_COLORS.reasoning,
           },
@@ -148,7 +150,7 @@ export function TokenBreakdown({ stats, className }: TokenBreakdownProps) {
     0,
   );
   const describedBreakdown = tokenTypes
-    .map((type) => `${type.label} ${formatNumber(type.value)}`)
+    .map((type) => `${type.label} ${formatNumber(type.value, locale)}`)
     .join(", ");
 
   return (
@@ -158,16 +160,16 @@ export function TokenBreakdown({ stats, className }: TokenBreakdownProps) {
       aria-describedby={descriptionId}
     >
       <BreakdownHeader>
-        <BreakdownHeading id={headingId}>Token mix</BreakdownHeading>
+        <BreakdownHeading id={headingId}>{t("profile.breakdown.title")}</BreakdownHeading>
         <BreakdownDescription id={descriptionId}>
-          Distribution across input, output, cache, and reasoning tokens.
+          {t("profile.breakdown.desc")}
         </BreakdownDescription>
       </BreakdownHeader>
 
       <BreakdownBody>
         <SegmentedBar
           role="img"
-          aria-label={`Token distribution: ${describedBreakdown}`}
+          aria-label={t("profile.breakdown.aria", { breakdown: describedBreakdown })}
         >
           {tokenTypes
             .filter((type) => type.value > 0)
@@ -177,7 +179,7 @@ export function TokenBreakdown({ stats, className }: TokenBreakdownProps) {
                 $color={type.color}
                 $weight={type.value}
                 aria-hidden="true"
-                title={`${type.label}: ${formatNumber(type.value)}`}
+                title={t("profile.breakdown.segmentTitle", { label: type.label, tokens: formatNumber(type.value, locale) })}
               />
             ))}
         </SegmentedBar>
@@ -201,7 +203,7 @@ export function TokenBreakdown({ stats, className }: TokenBreakdownProps) {
                   <Label>{type.label}</Label>
                 </LabelRow>
                 <ValueRow>
-                  {formatNumber(type.value)}
+                  {formatNumber(type.value, locale)}
                   <Percentage>{percentage.toFixed(1)}%</Percentage>
                 </ValueRow>
               </BreakdownItem>

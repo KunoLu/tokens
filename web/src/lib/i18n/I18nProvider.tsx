@@ -3,11 +3,19 @@
 import { createContext, useContext, useMemo } from "react";
 import type { Locale } from "./locale";
 import { t as translate } from "./t";
+import type { TranslationKey } from "./t";
 import { formatCompact, formatCurrency, formatNumber } from "@/lib/format";
+
+export type TranslationVariables = Record<string, string | number>;
+
+export type Translate = (
+  key: TranslationKey,
+  vars?: TranslationVariables,
+) => string;
 
 const I18nContext = createContext<{
   locale: Locale;
-  t: (key: string, vars?: Record<string, string | number>) => string;
+  t: Translate;
 }>({
   locale: "en",
   t: (key, vars) => translate("en", key, vars),
@@ -23,7 +31,7 @@ export function I18nProvider({
   const value = useMemo(
     () => ({
       locale,
-      t: (key: string, vars?: Record<string, string | number>) =>
+      t: (key: TranslationKey, vars?: TranslationVariables) =>
         translate(locale, key, vars),
     }),
     [locale]

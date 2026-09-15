@@ -57,26 +57,31 @@ Feature: 界面语言切换
       When 访客关闭浏览器后重新打开网站
       Then 界面仍然为中文
 
-  Rule: 其余页面文案由后续任务包裹
+  Rule: 已包裹的页面文案跟随语言偏好
 
-    @todo
-    # T11: 全站文案包裹未开始。
+    # 覆盖: tests/e2e/i18n-locale.spec.ts「切换后全部页面文案跟随」。
     Scenario: 切换后全部页面文案跟随
-      Given 当前语言为 English
-      When 访客在语言切换器中选择 "中文"
-      Then 当前页面所有文案变为中文
-      And 导航、页面标题、按钮、表单标签、提示、空态、页脚均为中文
+      Given 访客的语言偏好为中文
+      When 访客依次打开排行榜、团队榜、团队、文档、本地查看器和认证页面
+      Then 每个页面的标题和主要操作文案均为中文
+      And 排行榜、文档和认证表单的已包裹说明文案均为中文
 
-    @todo
-    # T11: Privacy / Terms 中文版与「英文为准」标注。
+    # 覆盖: tests/e2e/i18n-locale.spec.ts「已登录设置页」。
+    Scenario: 已登录用户打开设置页
+      Given 用户已登录
+      And 访客的语言偏好为中文
+      When 访客打开设置页
+      Then 页面标题为 "设置"
+      And 页面说明文案为中文
+
+    # 覆盖: tests/e2e/i18n-locale.spec.ts「隐私页面」。
     Scenario: 隐私页面
       Given 访客已将语言切换为 "中文"
       When 访客打开隐私政策页
       Then 页面为中文
       And 页面明确标注英文版本具有最终效力
 
-    @todo
-    # T11: Privacy / Terms 中文版与「英文为准」标注。
+    # 覆盖: tests/e2e/i18n-locale.spec.ts「条款页面」。
     Scenario: 条款页面
       Given 访客已将语言切换为 "中文"
       When 访客打开服务条款页

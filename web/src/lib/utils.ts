@@ -14,6 +14,7 @@ import type {
   ClientContribution,
   TokenBreakdown,
 } from "./types";
+import { intlTag, type Locale } from "@/lib/i18n/locale";
 
 export function groupByWeek(contributions: DailyContribution[], year: string): WeekData[] {
   const weeks: WeekData[] = [];
@@ -191,7 +192,13 @@ function recalculateSummary(
   };
 }
 
-export function formatTokenCount(count: number): string {
+export function formatTokenCount(count: number, locale: Locale = "en"): string {
+  if (locale === "zh") {
+    return new Intl.NumberFormat(intlTag(locale), {
+      notation: "compact",
+      maximumFractionDigits: count >= 100 ? 1 : 2,
+    }).format(count);
+  }
   if (count >= 1_000_000_000_000) {
     const val = (count / 1_000_000_000_000).toFixed(3).replace(/\.?0+$/, '');
     return `${val}T`;
@@ -220,7 +227,15 @@ export function formatTokenCount(count: number): string {
 
 export const formatNumber = formatTokenCount;
 
-export function formatCurrency(amount: number): string {
+export function formatCurrency(amount: number, locale: Locale = "en"): string {
+  if (locale === "zh") {
+    return new Intl.NumberFormat(intlTag(locale), {
+      style: "currency",
+      currency: "USD",
+      notation: "compact",
+      maximumFractionDigits: amount >= 100 ? 1 : 2,
+    }).format(amount);
+  }
   if (amount >= 1_000_000_000) {
     return `$${(amount / 1_000_000_000).toFixed(2)}B`;
   }
@@ -240,43 +255,22 @@ export function formatCurrency(amount: number): string {
   return `$${amount.toFixed(2)}`;
 }
 
-export function formatDate(dateStr: string): string {
-  return format(parseISO(dateStr), "MMM d, yyyy");
+export function formatDate(dateStr: string, locale: Locale = "en"): string {
+  return new Intl.DateTimeFormat(intlTag(locale), {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  }).format(parseISO(dateStr));
 }
 
-export function formatDateFull(dateStr: string): string {
-  return format(parseISO(dateStr), "MMMM d, yyyy");
+export function formatDateFull(dateStr: string, locale: Locale = "en"): string {
+  return new Intl.DateTimeFormat(intlTag(locale), {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  }).format(parseISO(dateStr));
 }
 
-/**
- * Format an ISO timestamp as a short relative time, e.g. "just now",
- * "5m ago", "3h ago", "12d ago", "2mo ago", "1y ago". Returns "never"
- * for null/invalid input so callers can render it directly. `now` is
- * injectable for tests; future timestamps clamp to "just now".
- */
-export function formatRelativeTime(
-  iso: string | null | undefined,
-  now: Date = new Date()
-): string {
-  if (!iso) return "never";
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return "never";
-
-  const diffMs = now.getTime() - date.getTime();
-  if (diffMs < 60_000) return "just now";
-
-  const minutes = Math.floor(diffMs / 60_000);
-  if (minutes < 60) return `${minutes}m ago`;
-
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-
-  const days = Math.floor(hours / 24);
-  if (days < 30) return `${days}d ago`;
-  if (days < 365) return `${Math.floor(days / 30)}mo ago`;
-
-  return `${Math.floor(days / 365)}y ago`;
-}
 
 export function calculateCurrentStreak(contributions: DailyContribution[]): number {
   const sorted = [...contributions]

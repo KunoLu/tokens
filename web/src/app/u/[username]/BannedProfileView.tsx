@@ -1,3 +1,6 @@
+import { cookies } from "next/headers";
+import { intlTag, LOCALE_COOKIE, parseLocale, t } from "@/lib/i18n";
+
 export interface BannedProfileData {
   banned: true;
   bannedAt: string | null;
@@ -16,9 +19,17 @@ export interface BannedProfileData {
  * the identity, a ban stamp, and the reason. The identity block is pushed
  * to grayscale so the stamp is the only thing with any color.
  */
-export default function BannedProfileView({ data }: { data: BannedProfileData }) {
+export default async function BannedProfileView({ data }: { data: BannedProfileData }) {
+  const locale = parseLocale((await cookies()).get(LOCALE_COOKIE)?.value);
   const { user } = data;
-  const banDate = data.bannedAt ? data.bannedAt.slice(0, 10) : null;
+  const banDate = data.bannedAt
+    ? new Intl.DateTimeFormat(intlTag(locale), {
+        day: "numeric",
+        month: "long",
+        year: "numeric",
+        timeZone: "UTC",
+      }).format(new Date(data.bannedAt))
+    : null;
 
   return (
     <main className="main-container" id="main-content">
@@ -29,7 +40,7 @@ export default function BannedProfileView({ data }: { data: BannedProfileData })
             aria-hidden="true"
             className="pointer-events-none absolute right-4 top-6 rotate-12 rounded-md border-4 border-danger/70 px-3 py-1 font-mono text-xl font-black uppercase tracking-widest text-danger/80"
           >
-            Banned
+            {t(locale, "banned.stamp")}
           </div>
 
           <div className="grayscale">
@@ -54,19 +65,17 @@ export default function BannedProfileView({ data }: { data: BannedProfileData })
           </div>
 
           <p className="mt-2 inline-block rounded-md bg-danger/10 px-2.5 py-1 font-mono text-xs font-semibold uppercase tracking-wide text-danger">
-            Account banned{banDate ? ` on ${banDate}` : ""}
+            {banDate ? t(locale, "banned.badgeOn", { date: banDate }) : t(locale, "banned.badge")}
           </p>
 
           <p className="mt-6 text-sm leading-relaxed text-muted-foreground">
-            This account has been permanently banned for submitting fraudulent
-            usage data. All of its statistics have been removed from public
-            view and are excluded from every ranking.
+            {t(locale, "banned.desc")}
           </p>
 
           {data.banReason && (
             <div className="mt-6 rounded-xl border border-danger/25 bg-danger/5 p-4 text-left">
               <h2 className="font-mono text-[11px] font-semibold uppercase tracking-wide text-danger">
-                Ban reason
+                {t(locale, "banned.reason")}
               </h2>
               <p className="mt-2 text-sm leading-relaxed text-foreground/85">
                 {data.banReason}

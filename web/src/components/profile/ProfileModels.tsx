@@ -16,6 +16,7 @@ import {
 import { tw } from "@/lib/tw";
 import { cn } from "@/lib/utils";
 import { ModelIcon } from "./ModelIcon";
+import { intlTag, useI18n } from "@/lib/i18n";
 import type { ModelUsage } from "./types";
 
 export interface ProfileModelsProps {
@@ -55,6 +56,7 @@ export function ProfileModels({
   modelUsage,
   className,
 }: ProfileModelsProps) {
+  const { t, locale } = useI18n();
   const filteredUsage = (modelUsage ?? [])
     .filter((usage) => usage.model !== "<synthetic>")
     .sort((a, b) => b.cost - a.cost);
@@ -66,18 +68,18 @@ export function ProfileModels({
     return (
       <ListCard className={className}>
         <ListTable>
-          <ListCaption>Model usage</ListCaption>
+          <ListCaption>{t("profile.models.caption")}</ListCaption>
           <ListHead>
             <tr>
-              <ListHeaderCell $width="52%">Model</ListHeaderCell>
+              <ListHeaderCell $width="52%">{t("profile.model")}</ListHeaderCell>
               <ListHeaderCell $width="18%" $align="right">
-                Tokens
+                {t("profile.tokens")}
               </ListHeaderCell>
               <ListHeaderCell $width="17%" $align="right">
-                Cost
+                {t("profile.cost")}
               </ListHeaderCell>
               <ListHeaderCell $width="13%" $align="right">
-                Share
+                {t("profile.models.share")}
               </ListHeaderCell>
             </tr>
           </ListHead>
@@ -90,17 +92,17 @@ export function ProfileModels({
                     <ModelName>{usage.model}</ModelName>
                   </ModelIdentity>
                 </ListPrimaryCell>
-                <ListCell data-label="Tokens" $align="right">
-                  <NumericValue title={usage.tokens.toLocaleString("en-US")}>
-                    {formatNumber(usage.tokens)}
+                <ListCell data-label={t("profile.tokens")} $align="right">
+                  <NumericValue title={usage.tokens.toLocaleString(intlTag(locale))}>
+                    {formatNumber(usage.tokens, locale)}
                   </NumericValue>
                 </ListCell>
-                <ListCell data-label="Cost" $align="right">
+                <ListCell data-label={t("profile.cost")} $align="right">
                   <NumericValue $accent>
-                    {formatCurrency(usage.cost)}
+                    {formatCurrency(usage.cost, locale)}
                   </NumericValue>
                 </ListCell>
-                <ListCell data-label="Share" $align="right">
+                <ListCell data-label={t("profile.models.share")} $align="right">
                   <NumericValue>{usage.percentage.toFixed(1)}%</NumericValue>
                 </ListCell>
               </ListRow>
@@ -115,7 +117,7 @@ export function ProfileModels({
 
   return (
     <ModelsFallback className={className}>
-      <ModelsFallbackList aria-label="Models used">
+      <ModelsFallbackList aria-label={t("profile.models.usedAria")}>
         {filteredModels.map((model) => (
           <ModelTag key={model}>
             <ModelIcon model={model} size={13} />

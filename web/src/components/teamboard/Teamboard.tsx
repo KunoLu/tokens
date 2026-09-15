@@ -32,6 +32,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import {
   DeveloperRow,
   FormatToggle,
+  PERIOD_LABEL_KEYS,
   PERIODS,
 } from "@/components/leaderboard/Leaderboard";
 import { MembershipColumnHeaders } from "@/components/leaderboard/MembershipCells";
@@ -51,17 +52,6 @@ interface TeamboardProps {
 
 const NO_GROUPS: string[] = [];
 
-// Period order is the Leaderboard's (`PERIODS`); labels come from the
-// dictionary like the rest of this page's copy. `custom` is parsed on the
-// URL but is not a ToggleGroup option, so it reuses the All-time label.
-const PERIOD_LABEL_KEYS: Record<Period, string> = {
-  all: "teamboard.periodAll",
-  today: "teamboard.periodToday",
-  week: "teamboard.periodWeek",
-  month: "teamboard.periodMonth",
-  "last-month": "teamboard.periodLastMonth",
-  custom: "teamboard.periodAll",
-};
 
 /**
  * Filter state lives in the URL (`?team=<id>&group=<id>…&period=&sortBy=
@@ -384,6 +374,7 @@ export function TeamboardClient({ teams, board, currentUserId, period: periodPro
                 {/* No Team column: the board is already scoped to one team. */}
                 <MembershipColumnHeaders
                   includeTeam={false}
+                  teamLabel={t("leaderboard.colTeam")}
                   groupLabel={t("teamboard.colGroup")}
                 />
                 <TableHead className="pr-4 text-right sm:hidden">
@@ -391,7 +382,7 @@ export function TeamboardClient({ teams, board, currentUserId, period: periodPro
                 </TableHead>
                 <TableHead className="hidden w-44 p-0 text-right sm:table-cell">
                   <FormatToggle
-                    label="Tokens"
+                    label={t("teamboard.sortTokens")}
                     compact={tokenFormat === "compact"}
                     onToggle={toggleFormat}
                     titles={formatTitles}
@@ -399,7 +390,7 @@ export function TeamboardClient({ teams, board, currentUserId, period: periodPro
                 </TableHead>
                 <TableHead className="hidden w-32 p-0 pr-4 text-right sm:table-cell">
                   <FormatToggle
-                    label="Cost"
+                    label={t("teamboard.sortCost")}
                     compact={tokenFormat === "compact"}
                     onToggle={toggleFormat}
                     titles={formatTitles}

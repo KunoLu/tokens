@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { CONTAINER } from "@/components/layout/Container";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { cn } from "@/lib/utils";
+import { useI18n } from "@/lib/i18n";
 
 export default function ResetPasswordForm({ token }: { token: string }) {
   const [password, setPassword] = useState("");
@@ -14,6 +15,7 @@ export default function ResetPasswordForm({ token }: { token: string }) {
   const [details, setDetails] = useState<string[]>([]);
   const [done, setDone] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const { t } = useI18n();
 
   const onSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -28,13 +30,13 @@ export default function ResetPasswordForm({ token }: { token: string }) {
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
-        setError(data.error || "Failed to reset password");
+        setError(data.error || t("auth.reset.failed"));
         setDetails(Array.isArray(data.details) ? data.details : []);
         return;
       }
       setDone(true);
     } catch {
-      setError("Network error — please try again");
+      setError(t("auth.network"));
     } finally {
       setSubmitting(false);
     }
@@ -42,32 +44,32 @@ export default function ResetPasswordForm({ token }: { token: string }) {
 
   return (
     <main id="main-content" className={cn(CONTAINER, "max-w-[460px] pb-24 pt-10 sm:pt-14")}>
-      <PageHeader title="Choose a new password" />
+      <PageHeader title={t("auth.reset.title")} />
 
       {!token ? (
         <div
           role="alert"
           className="rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive"
         >
-          This reset link is missing its token. Request a fresh link from the{" "}
+          {t("auth.reset.missingToken")}{" "}
           <Link href="/forgot-password" className="underline underline-offset-4">
-            forgot password
+            {t("auth.reset.forgotPage")}
           </Link>{" "}
-          page.
+          {t("auth.reset.missingTokenEnd")}
         </div>
       ) : done ? (
         <div role="status" className="rounded-lg border border-border bg-card px-4 py-3 text-sm">
-          Password updated. Every existing sign-in was ended —{" "}
+          {t("auth.reset.done")}{" "}
           <Link href="/login" className="text-primary underline-offset-4 hover:underline">
-            sign in
+            {t("auth.reset.signIn")}
           </Link>{" "}
-          with the new password.
+          {t("auth.reset.doneEnd")}
         </div>
       ) : (
         <form onSubmit={onSubmit} className="flex flex-col gap-4">
           <div className="flex flex-col gap-1.5">
             <label htmlFor="password" className="text-[13px] font-semibold">
-              New password
+              {t("auth.reset.newPassword")}
             </label>
             <Input
               id="password"
@@ -78,8 +80,7 @@ export default function ResetPasswordForm({ token }: { token: string }) {
               onChange={(e) => setPassword(e.target.value)}
             />
             <p className="text-xs text-muted-foreground">
-              At least 8 characters, with an uppercase letter, a lowercase letter
-              and a special character.
+              {t("auth.register.passwordHint")}
             </p>
           </div>
 
@@ -100,7 +101,7 @@ export default function ResetPasswordForm({ token }: { token: string }) {
           )}
 
           <Button type="submit" disabled={submitting} className="h-9">
-            {submitting ? "Updating…" : "Update password"}
+            {submitting ? t("auth.reset.submitting") : t("auth.reset.submit")}
           </Button>
         </form>
       )}

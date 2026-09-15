@@ -6,13 +6,15 @@ import { Button } from "@/components/ui/button";
 import { CONTAINER } from "@/components/layout/Container";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { cn } from "@/lib/utils";
+import { useI18n } from "@/lib/i18n";
 
 type State = "verifying" | "success" | "error";
 
 export default function VerifyEmailClient({ token }: { token: string }) {
+  const { t } = useI18n();
   const [state, setState] = useState<State>(token ? "verifying" : "error");
   const [message, setMessage] = useState(
-    token ? "" : "This verification link is missing its token."
+    token ? "" : t("auth.verify.missingToken")
   );
   const [signedIn, setSignedIn] = useState(false);
   const [resending, setResending] = useState(false);
@@ -42,16 +44,16 @@ export default function VerifyEmailClient({ token }: { token: string }) {
         if (!response.ok) {
           const data = await response.json().catch(() => ({}));
           setState("error");
-          setMessage(data.error || "Verification failed");
+          setMessage(data.error || t("auth.verify.failed"));
           return;
         }
         setState("success");
       } catch {
         setState("error");
-        setMessage("Network error — please open the link again");
+        setMessage(t("auth.verify.networkOpen"));
       }
     })();
-  }, [token]);
+  }, [token, t]);
 
   const resend = async () => {
     setResending(true);
@@ -61,18 +63,18 @@ export default function VerifyEmailClient({ token }: { token: string }) {
         method: "POST",
       });
       if (response.status === 401) {
-        setMessage("Sign in to resend the verification email.");
+        setMessage(t("auth.verify.signInResend"));
         setSignedIn(false);
         return;
       }
       if (!response.ok) {
         const data = await response.json().catch(() => ({}));
-        setMessage(data.error || "Could not resend the email");
+        setMessage(data.error || t("auth.verify.couldNotResend"));
         return;
       }
       setResent(true);
     } catch {
-      setMessage("Network error — please try again");
+      setMessage(t("auth.network"));
     } finally {
       setResending(false);
     }
@@ -81,19 +83,19 @@ export default function VerifyEmailClient({ token }: { token: string }) {
   return (
     <main id="main-content" className={cn(CONTAINER, "max-w-[460px] pb-24 pt-10 sm:pt-14")}>
       <PageHeader
-        title="Verify your email"
-        description="Open the link we sent, or resend it if the message never arrived."
+        title={t("auth.verify.title")}
+        description={t("auth.verify.desc")}
       />
 
       {state === "verifying" && (
-        <p className="text-sm text-muted-foreground">Confirming your address…</p>
+        <p className="text-sm text-muted-foreground">{t("auth.verify.confirming")}</p>
       )}
 
       {state === "success" && (
         <div role="status" className="rounded-lg border border-border bg-card px-4 py-3 text-sm">
-          Your email is verified.{" "}
+          {t("auth.verify.success")}{" "}
           <Link href="/leaderboard" className="text-primary underline-offset-4 hover:underline">
-            Back to the leaderboard
+            {t("auth.verify.back")}
           </Link>
         </div>
       )}
@@ -109,19 +111,19 @@ export default function VerifyEmailClient({ token }: { token: string }) {
           {signedIn ? (
             <div className="flex flex-col gap-2">
               <Button type="button" onClick={resend} disabled={resending} className="h-9">
-                {resending ? "Sending…" : "Resend verification email"}
+                {resending ? t("auth.sending") : t("auth.verify.resend")}
               </Button>
               {resent && (
                 <p role="status" className="text-sm text-muted-foreground">
-                  If this account still needs verification, a new link is on its way.
+                  {t("auth.verify.resent")}
                 </p>
               )}
             </div>
           ) : (
             <p className="text-sm text-muted-foreground">
-              Sign in, then come back here to resend the verification email.{" "}
+              {t("auth.verify.signInThen")}{" "}
               <Link href="/login?returnTo=/verify-email" className="text-primary underline-offset-4 hover:underline">
-                Sign in
+                {t("nav.signIn")}
               </Link>
             </p>
           )}

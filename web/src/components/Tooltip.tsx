@@ -6,6 +6,7 @@ import type { DailyContribution, TooltipPosition, GraphColorPalette } from "@/li
 import { getThemeGradeColor } from "@/lib/themes";
 import { formatCurrency, formatTokenCount } from "@/lib/utils";
 import { formatContributionDate } from "@/lib/date-utils";
+import { intlTag, useI18n } from "@/lib/i18n";
 
 interface TooltipProps {
   day: DailyContribution | null;
@@ -38,6 +39,8 @@ export function Tooltip({ day, position, visible, palette }: TooltipProps) {
   const tooltipRef = useRef<HTMLDivElement>(null);
   const { resolvedTheme } = useTheme();
   const adjustedPosition = useAdjustedPosition(position, visible, tooltipRef);
+  const { t, locale } = useI18n();
+
 
   if (!visible || !day || !adjustedPosition) return null;
 
@@ -46,12 +49,12 @@ export function Tooltip({ day, position, visible, palette }: TooltipProps) {
   return (
     <div ref={tooltipRef} role="tooltip" className="pointer-events-none fixed z-50" style={{ left: adjustedPosition.x, top: adjustedPosition.y }}>
       <div className="min-w-[220px] rounded-2xl border border-border bg-card p-4 text-foreground shadow-2xl backdrop-blur-md">
-        <div className="mb-3 text-base font-bold text-foreground">{formatContributionDate(day)}</div>
+        <div className="mb-3 text-base font-bold text-foreground">{formatContributionDate(day, locale)}</div>
 
         <div className="my-3 border-t border-border" />
 
         <div className="mb-3 flex items-center justify-between">
-          <span className="text-sm font-medium text-muted-foreground">Total Tokens</span>
+          <span className="text-sm font-medium text-muted-foreground">{t("graph.totalTokens")}</span>
           <span
             className="text-xl font-bold tracking-tight"
             style={{
@@ -65,30 +68,30 @@ export function Tooltip({ day, position, visible, palette }: TooltipProps) {
                   : "var(--foreground)",
             }}
           >
-            {formatTokenCount(totals.tokens)}
+            {formatTokenCount(totals.tokens, locale)}
           </span>
         </div>
 
         <div className="my-3 border-t border-border" />
 
         <div className="flex flex-col gap-2 text-sm">
-          <TokenRow label="Input" value={tokenBreakdown.input} />
-          <TokenRow label="Output" value={tokenBreakdown.output} />
-          <TokenRow label="Cache Read" value={tokenBreakdown.cacheRead} />
-          <TokenRow label="Cache Write" value={tokenBreakdown.cacheWrite} />
-          {tokenBreakdown.reasoning > 0 && <TokenRow label="Reasoning" value={tokenBreakdown.reasoning} />}
+          <TokenRow label={t("graph.tokenInput")} value={tokenBreakdown.input} />
+          <TokenRow label={t("graph.tokenOutput")} value={tokenBreakdown.output} />
+          <TokenRow label={t("graph.tokenCacheRead")} value={tokenBreakdown.cacheRead} />
+          <TokenRow label={t("graph.tokenCacheWrite")} value={tokenBreakdown.cacheWrite} />
+          {tokenBreakdown.reasoning > 0 && <TokenRow label={t("graph.tokenReasoning")} value={tokenBreakdown.reasoning} />}
         </div>
 
         <div className="my-3 border-t border-border" />
 
         <div className="flex items-center justify-between">
-          <span className="text-sm font-semibold text-muted-foreground">Cost</span>
-          <span className="font-bold text-foreground">{formatCurrency(totals.cost)}</span>
+          <span className="text-sm font-semibold text-muted-foreground">{t("graph.cost")}</span>
+          <span className="font-bold text-foreground">{formatCurrency(totals.cost, locale)}</span>
         </div>
 
         <div className="mt-2 flex items-center justify-between">
-          <span className="text-sm font-medium text-muted-foreground">Messages</span>
-          <span className="text-sm font-semibold text-foreground">{totals.messages.toLocaleString()}</span>
+          <span className="text-sm font-medium text-muted-foreground">{t("graph.messages")}</span>
+          <span className="text-sm font-semibold text-foreground">{totals.messages.toLocaleString(intlTag(locale))}</span>
         </div>
       </div>
     </div>
@@ -96,11 +99,12 @@ export function Tooltip({ day, position, visible, palette }: TooltipProps) {
 }
 
 function TokenRow({ label, value }: { label: string; value: number }) {
+  const { locale } = useI18n();
   if (value === 0) return null;
   return (
     <div className="flex items-center justify-between">
       <span className="font-medium text-muted-foreground">{label}</span>
-      <span className="font-mono font-semibold text-foreground">{formatTokenCount(value)}</span>
+      <span className="font-mono font-semibold text-foreground">{formatTokenCount(value, locale)}</span>
     </div>
   );
 }

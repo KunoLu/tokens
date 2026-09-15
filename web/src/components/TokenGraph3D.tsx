@@ -5,7 +5,8 @@ import { useTheme } from "next-themes";
 import type { DailyContribution, GraphColorPalette, TooltipPosition } from "@/lib/types";
 import { getThemeGradeColor } from "@/lib/themes";
 import { groupByWeek, hexToNumber, formatCurrency, formatTokenCount } from "@/lib/utils";
-import { formatContributionDate } from "@/lib/date-utils";
+import { formatContributionDateShort } from "@/lib/date-utils";
+import { useI18n } from "@/lib/i18n";
 import { CUBE_SIZE, MAX_CUBE_HEIGHT, MIN_CUBE_HEIGHT, ISO_CANVAS_WIDTH, ISO_CANVAS_HEIGHT } from "@/lib/constants";
 
 interface TokenGraph3DProps {
@@ -51,6 +52,7 @@ export function TokenGraph3D({
   const weeksData = useMemo(() => groupByWeek(contributions, year), [contributions, year]);
   const { resolvedTheme } = useTheme();
   const isDark = resolvedTheme === "dark";
+  const { t, locale } = useI18n();
 
   useEffect(() => {
     async function loadObelisk() {
@@ -175,14 +177,14 @@ export function TokenGraph3D({
         style={aspect}
       >
         <p className="text-sm text-muted-foreground">
-          The 3D view could not be loaded.
+          {t("graph.load3dFailed")}
         </p>
         <button
           type="button"
           onClick={onReturnTo2D}
           className="inline-flex h-10 items-center justify-center rounded-lg border border-border bg-card px-4 text-sm font-medium text-foreground transition hover:border-foreground/20 hover:bg-muted"
         >
-          Return to 2D
+          {t("graph.returnTo2d")}
         </button>
       </div>
     );
@@ -191,7 +193,7 @@ export function TokenGraph3D({
   if (!obeliskLoaded) {
     return (
       <div ref={containerRef} className="flex w-full items-center justify-center bg-background" style={aspect}>
-        <div className="animate-pulse text-muted-foreground">Loading 3D view...</div>
+        <div className="animate-pulse text-muted-foreground">{t("graph.loading3d")}</div>
       </div>
     );
   }
@@ -214,41 +216,45 @@ export function TokenGraph3D({
       />
 
       <div className="absolute top-3 right-5">
-        <h5 className="mb-1 text-sm font-semibold text-foreground">Token Usage</h5>
+        <h5 className="mb-1 text-sm font-semibold text-foreground">{t("graph.tokenUsage")}</h5>
         <div className={statsBox}>
           <div className="p-2">
-            <span className={statValue} style={{ color: statColor }}>{formatCurrency(totalCost)}</span>
-            <span className={statLabel}>Total</span>
-            <span className={statSubtext}>{dateRange.start} → {dateRange.end}</span>
+            <span className={statValue} style={{ color: statColor }}>{formatCurrency(totalCost, locale)}</span>
+            <span className={statLabel}>{t("graph.totalLabel")}</span>
+            <span className={statSubtext}>
+              {dateRange.start && dateRange.end
+                ? `${formatContributionDateShort({ date: dateRange.start }, locale)} → ${formatContributionDateShort({ date: dateRange.end }, locale)}`
+                : null}
+            </span>
           </div>
           <div className="hidden p-2 min-[1280px]:block">
-            <span className={statValue} style={{ color: statColor }}>{formatTokenCount(totalTokens)}</span>
-            <span className={statLabel}>Tokens</span>
-            <span className={statSubtext}>{activeDays} active days</span>
+            <span className={statValue} style={{ color: statColor }}>{formatTokenCount(totalTokens, locale)}</span>
+            <span className={statLabel}>{t("profile.tokens")}</span>
+            <span className={statSubtext}>{t(activeDays === 1 ? "graph.activeDaysInlineOne" : "graph.activeDaysInlineMany", { n: activeDays })}</span>
           </div>
           {bestDay && (
             <div className="p-2">
-              <span className={statValue} style={{ color: statColor }}>{formatCurrency(bestDay.totals.cost)}</span>
-              <span className={statLabel}>Best day</span>
-              <span className={statSubtext}>{formatContributionDate(bestDay).split(",")[0]}</span>
+              <span className={statValue} style={{ color: statColor }}>{formatCurrency(bestDay.totals.cost, locale)}</span>
+              <span className={statLabel}>{t("graph.bestDayLabel")}</span>
+              <span className={statSubtext}>{formatContributionDateShort(bestDay, locale)}</span>
             </div>
           )}
         </div>
         <p className="mt-1 text-right text-xs text-muted-foreground">
-          Average: <span className="font-bold" style={{ color: statColor }}>{formatCurrency(activeDays > 0 ? totalCost / activeDays : 0)}</span> / day
+          {t("graph.averagePrefix")} <span className="font-bold" style={{ color: statColor }}>{formatCurrency(activeDays > 0 ? totalCost / activeDays : 0, locale)}</span> {t("graph.perDay")}
         </p>
       </div>
 
       <div className="absolute bottom-6 left-5">
-        <h5 className="mb-1 text-sm font-semibold text-foreground">Streaks</h5>
+        <h5 className="mb-1 text-sm font-semibold text-foreground">{t("graph.streaks")}</h5>
         <div className={statsBox}>
           <div className="p-2">
-            <span className={statValue} style={{ color: statColor }}>{longestStreak} <span className="text-base">days</span></span>
-            <span className={statLabel}>Longest</span>
+            <span className={statValue} style={{ color: statColor }}>{longestStreak} <span className="text-base">{t("graph.daysSuffix")}</span></span>
+            <span className={statLabel}>{t("graph.longest")}</span>
           </div>
           <div className="p-2">
-            <span className={statValue} style={{ color: statColor }}>{currentStreak} <span className="text-base">days</span></span>
-            <span className={statLabel}>Current</span>
+            <span className={statValue} style={{ color: statColor }}>{currentStreak} <span className="text-base">{t("graph.daysSuffix")}</span></span>
+            <span className={statLabel}>{t("graph.current")}</span>
           </div>
         </div>
       </div>

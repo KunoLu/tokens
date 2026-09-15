@@ -1,9 +1,10 @@
 "use client";
 
 import type { ViewMode, ColorPaletteName, ClientType, GraphColorPalette } from "@/lib/types";
-import { getPaletteNames, colorPalettes } from "@/lib/themes";
+import { getPaletteNames } from "@/lib/themes";
 import { SOURCE_DISPLAY_NAMES, SOURCE_LOGOS } from "@/lib/constants";
 import { formatTokenCount, toggleClientFilter } from "@/lib/utils";
+import { PALETTE_LABEL_KEYS, useI18n } from "@/lib/i18n";
 
 interface GraphControlsProps {
   view: ViewMode;
@@ -57,6 +58,8 @@ export function GraphControls({
   palette,
   totalTokens,
 }: GraphControlsProps) {
+  const { t, locale } = useI18n();
+
   const paletteNames = getPaletteNames();
   const activeViewForeground = paletteForeground(palette.grade3);
 
@@ -73,18 +76,18 @@ export function GraphControls({
       <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
         <h2 className="min-w-0 text-lg font-medium text-foreground">
           <span className="font-mono font-bold text-primary tabular-nums">
-            {formatTokenCount(totalTokens)}
+            {formatTokenCount(totalTokens, locale)}
           </span>{" "}
-          tokens used
+          {t("graph.tokensUsed")}
           {selectedYear && (
             <>
               {" "}
-              in{" "}
+              {t("graph.tokensUsedIn")}{" "}
               {availableYears.length > 1 ? (
                 <select
                   value={selectedYear}
                   onChange={(e) => onYearChange(e.target.value)}
-                  aria-label="Select year"
+                  aria-label={t("graph.selectYear")}
                   className="cursor-pointer border-none bg-transparent font-bold text-foreground underline decoration-dotted decoration-2 underline-offset-4"
                 >
                   {availableYears.map((year) => (
@@ -104,21 +107,21 @@ export function GraphControls({
           <select
             value={paletteName}
             onChange={(e) => onPaletteChange(e.target.value as ColorPaletteName)}
-            aria-label="Color palette"
+            aria-label={t("graph.colorPalette")}
             className="cursor-pointer rounded-lg border border-border bg-accent px-2 py-1.5 text-xs font-medium text-foreground"
           >
             {paletteNames.map((name) => (
               <option key={name} value={name}>
-                {colorPalettes[name].name}
+                {t(PALETTE_LABEL_KEYS[name])}
               </option>
             ))}
           </select>
 
-          <div role="group" aria-label="View mode" className="flex">
+          <div role="group" aria-label={t("graph.viewMode")} className="flex">
             <button
               onClick={() => onViewChange("2d")}
               aria-pressed={view === "2d"}
-              aria-label="2D view"
+              aria-label={t("graph.view2d")}
               className="rounded-l-full border px-3 py-1.5 text-xs font-semibold transition"
               style={{
                 backgroundColor: view === "2d" ? palette.grade3 : "var(--accent)",
@@ -131,7 +134,7 @@ export function GraphControls({
             <button
               onClick={() => onViewChange("3d")}
               aria-pressed={view === "3d"}
-              aria-label="3D view"
+              aria-label={t("graph.view3d")}
               className="rounded-r-full border border-l-0 px-3 py-1.5 text-xs font-semibold transition"
               style={{
                 backgroundColor: view === "3d" ? palette.grade3 : "var(--accent)",
@@ -147,8 +150,8 @@ export function GraphControls({
 
       <div className="mt-3 flex flex-wrap items-center justify-between gap-3 max-[560px]:flex-col max-[560px]:items-stretch max-[560px]:justify-start max-[560px]:gap-2">
         {availableClients.length > 1 && (
-          <div role="group" aria-label="Client filters" className="flex max-w-full flex-wrap items-center gap-2 overflow-x-auto pb-1 max-[560px]:flex-nowrap [&::-webkit-scrollbar]:hidden">
-            <span className="shrink-0 text-xs font-semibold whitespace-nowrap text-muted-foreground">Filter:</span>
+          <div role="group" aria-label={t("graph.filterAria")} className="flex max-w-full flex-wrap items-center gap-2 overflow-x-auto pb-1 max-[560px]:flex-nowrap [&::-webkit-scrollbar]:hidden">
+            <span className="shrink-0 text-xs font-semibold whitespace-nowrap text-muted-foreground">{t("graph.filter")}</span>
             {availableClients.map((client) => {
               const isSelected = clientFilter.length === 0 || clientFilter.includes(client);
               return (
@@ -156,7 +159,7 @@ export function GraphControls({
                   key={client}
                   onClick={() => handleClientToggle(client)}
                   aria-pressed={isSelected}
-                  aria-label={`Filter by ${SOURCE_DISPLAY_NAMES[client] || client}`}
+                  aria-label={t("graph.filterBy", { client: SOURCE_DISPLAY_NAMES[client] || client })}
                   className={`flex flex-none items-center gap-1.5 rounded-full border-[1.5px] py-1 pr-3 pl-1.5 text-xs transition hover:scale-105 ${isSelected ? "font-semibold opacity-100" : "font-normal opacity-50"}`}
                   style={{
                     backgroundColor: isSelected ? `${palette.grade3}30` : "transparent",
@@ -166,20 +169,20 @@ export function GraphControls({
                 >
                   {SOURCE_LOGOS[client] && (
                     // eslint-disable-next-line @next/next/no-img-element
-                    <img src={SOURCE_LOGOS[client]} alt={`${SOURCE_DISPLAY_NAMES[client] || client} logo`} className="h-5 w-5 shrink-0 rounded-full object-cover" />
+                    <img src={SOURCE_LOGOS[client]} alt={t("graph.clientLogo", { client: SOURCE_DISPLAY_NAMES[client] || client })} className="h-5 w-5 shrink-0 rounded-full object-cover" />
                   )}
                   {SOURCE_DISPLAY_NAMES[client] || client}
                 </button>
               );
             })}
             {clientFilter.length > 0 && clientFilter.length < availableClients.length && (
-              <button onClick={() => onClientFilterChange([...availableClients])} aria-label="Show all clients" className="rounded-full px-3 py-1 text-xs font-medium text-muted-foreground transition hover:bg-foreground/10">
-                Show all
+              <button onClick={() => onClientFilterChange([...availableClients])} aria-label={t("graph.showAllAria")} className="rounded-full px-3 py-1 text-xs font-medium text-muted-foreground transition hover:bg-foreground/10">
+                {t("graph.showAll")}
               </button>
             )}
             {clientFilter.length === availableClients.length && (
-              <button onClick={() => onClientFilterChange([])} aria-label="Clear all client filters" className="rounded-full px-3 py-1 text-xs font-medium text-muted-foreground transition hover:bg-foreground/10">
-                Clear
+              <button onClick={() => onClientFilterChange([])} aria-label={t("graph.clearAria")} className="rounded-full px-3 py-1 text-xs font-medium text-muted-foreground transition hover:bg-foreground/10">
+                {t("graph.clear")}
               </button>
             )}
           </div>

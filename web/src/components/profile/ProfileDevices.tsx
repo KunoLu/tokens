@@ -1,6 +1,6 @@
 "use client";
 
-import { formatRelativeTime } from "@/lib/format";
+import { formatRelativeTime } from "@/lib/formatRelativeTime";
 import { formatCurrency, formatNumber } from "@/lib/utils";
 import {
   ListBody,
@@ -16,6 +16,7 @@ import {
 } from "./listStyles";
 import { tw } from "@/lib/tw";
 import { cn } from "@/lib/utils";
+import { intlTag, useI18n } from "@/lib/i18n";
 
 /** Public device usage shape returned by the profile devices route. */
 export interface ProfileDevice {
@@ -67,6 +68,8 @@ const LastSubmitted = tw(
 );
 /** Compact per-device usage for public profiles. */
 export function ProfileDevices({ devices, className }: ProfileDevicesProps) {
+  const { t, locale } = useI18n();
+
   if (devices.length === 0) return null;
 
   return (
@@ -75,23 +78,23 @@ export function ProfileDevices({ devices, className }: ProfileDevicesProps) {
       aria-labelledby="profile-devices-heading"
     >
       <SectionHeading id="profile-devices-heading">
-        Devices · all-time
+        {t("profile.devices.heading")}
       </SectionHeading>
 
       <DevicesList>
         <ListTable>
-          <ListCaption>Usage by device</ListCaption>
+          <ListCaption>{t("profile.devices.caption")}</ListCaption>
           <ListHead>
             <tr>
-              <ListHeaderCell $width="52%">Device</ListHeaderCell>
+              <ListHeaderCell $width="52%">{t("profile.devices.device")}</ListHeaderCell>
               <ListHeaderCell $width="19%" $align="right">
-                Tokens
+                {t("profile.tokens")}
               </ListHeaderCell>
               <ListHeaderCell $width="16%" $align="right">
-                Cost
+                {t("profile.cost")}
               </ListHeaderCell>
               <ListHeaderCell $width="13%" $align="right">
-                Active days
+                {t("profile.activeDays")}
               </ListHeaderCell>
             </tr>
           </ListHead>
@@ -101,30 +104,30 @@ export function ProfileDevices({ devices, className }: ProfileDevicesProps) {
                 <ListPrimaryCell scope="row">
                   <DeviceName>{device.displayName}</DeviceName>
                   <LastSubmitted>
-                    Last submitted{" "}
+                    {t("profile.devices.lastSubmittedPrefix")}{" "}
                     <time
                       dateTime={device.lastSubmittedAt ?? undefined}
                       suppressHydrationWarning
                     >
-                      {formatRelativeTime(device.lastSubmittedAt)}
+                      {formatRelativeTime(device.lastSubmittedAt, undefined, locale)}
                     </time>
                   </LastSubmitted>
                 </ListPrimaryCell>
-                <ListCell data-label="Tokens" $align="right">
+                <ListCell data-label={t("profile.tokens")} $align="right">
                   <NumericValue
-                    title={device.totalTokens.toLocaleString("en-US")}
+                    title={device.totalTokens.toLocaleString(intlTag(locale))}
                   >
-                    {formatNumber(device.totalTokens)}
+                    {formatNumber(device.totalTokens, locale)}
                   </NumericValue>
                 </ListCell>
-                <ListCell data-label="Cost" $align="right">
+                <ListCell data-label={t("profile.cost")} $align="right">
                   <NumericValue $accent>
-                    {formatCurrency(device.totalCost)}
+                    {formatCurrency(device.totalCost, locale)}
                   </NumericValue>
                 </ListCell>
-                <ListCell data-label="Active days" $align="right">
+                <ListCell data-label={t("profile.activeDays")} $align="right">
                   <NumericValue>
-                    {device.activeDays.toLocaleString("en-US")}
+                    {device.activeDays.toLocaleString(intlTag(locale))}
                   </NumericValue>
                 </ListCell>
               </ListRow>

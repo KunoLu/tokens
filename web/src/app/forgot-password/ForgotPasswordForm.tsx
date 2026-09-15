@@ -7,12 +7,14 @@ import { Input } from "@/components/ui/input";
 import { CONTAINER } from "@/components/layout/Container";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { cn } from "@/lib/utils";
+import { useI18n } from "@/lib/i18n";
 
 export default function ForgotPasswordForm({ returnTo }: { returnTo: string }) {
   const [email, setEmail] = useState("");
   const [sent, setSent] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const { t } = useI18n();
 
   const onSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -26,13 +28,13 @@ export default function ForgotPasswordForm({ returnTo }: { returnTo: string }) {
       });
       if (!response.ok) {
         const data = await response.json().catch(() => ({}));
-        setError(data.error || "Something went wrong");
+        setError(data.error || t("auth.somethingWrong"));
         return;
       }
       // The API answers 200 for every address, so this copy must too.
       setSent(true);
     } catch {
-      setError("Network error — please try again");
+      setError(t("auth.network"));
     } finally {
       setSubmitting(false);
     }
@@ -41,8 +43,8 @@ export default function ForgotPasswordForm({ returnTo }: { returnTo: string }) {
   return (
     <main id="main-content" className={cn(CONTAINER, "max-w-[460px] pb-24 pt-10 sm:pt-14")}>
       <PageHeader
-        title="Reset your password"
-        description="Enter your account email and we will send you a reset link."
+        title={t("auth.forgot.title")}
+        description={t("auth.forgot.desc")}
       />
 
       {sent ? (
@@ -50,14 +52,13 @@ export default function ForgotPasswordForm({ returnTo }: { returnTo: string }) {
           role="status"
           className="rounded-lg border border-border bg-card px-4 py-3 text-sm"
         >
-          If that address belongs to an account, a reset link is on its way.
-          The link is valid for one hour.
+          {t("auth.forgot.sent")}
         </div>
       ) : (
         <form onSubmit={onSubmit} className="flex flex-col gap-4">
           <div className="flex flex-col gap-1.5">
             <label htmlFor="email" className="text-[13px] font-semibold">
-              Email
+              {t("auth.email")}
             </label>
             <Input
               id="email"
@@ -79,18 +80,18 @@ export default function ForgotPasswordForm({ returnTo }: { returnTo: string }) {
           )}
 
           <Button type="submit" disabled={submitting} className="h-9">
-            {submitting ? "Sending…" : "Send reset link"}
+            {submitting ? t("auth.sending") : t("auth.forgot.submit")}
           </Button>
         </form>
       )}
 
       <p className="mt-6 text-sm text-muted-foreground">
-        Remembered it?{" "}
+        {t("auth.forgot.remembered")}{" "}
         <Link
           href={`/login?returnTo=${encodeURIComponent(returnTo)}`}
           className="text-primary underline-offset-4 hover:underline"
         >
-          Sign in
+          {t("nav.signIn")}
         </Link>
       </p>
     </main>

@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { CONTAINER } from "@/components/layout/Container";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { cn } from "@/lib/utils";
+import { useI18n } from "@/lib/i18n";
 
 export default function RegisterForm({ returnTo }: { returnTo: string }) {
   const [email, setEmail] = useState("");
@@ -15,6 +16,7 @@ export default function RegisterForm({ returnTo }: { returnTo: string }) {
   const [error, setError] = useState<string | null>(null);
   const [details, setDetails] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
+  const { t } = useI18n();
 
   const onSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -29,14 +31,14 @@ export default function RegisterForm({ returnTo }: { returnTo: string }) {
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
-        setError(data.error || "Registration failed");
+        setError(data.error || t("auth.register.failed"));
         setDetails(Array.isArray(data.details) ? data.details : []);
         return;
       }
       // Full reload so the navigation picks up the fresh session cookie.
       window.location.href = returnTo;
     } catch {
-      setError("Network error — please try again");
+      setError(t("auth.network"));
     } finally {
       setSubmitting(false);
     }
@@ -45,14 +47,14 @@ export default function RegisterForm({ returnTo }: { returnTo: string }) {
   return (
     <main id="main-content" className={cn(CONTAINER, "max-w-[460px] pb-24 pt-10 sm:pt-14")}>
       <PageHeader
-        title="Create your account"
-        description="Register with an email address and a password."
+        title={t("auth.register.title")}
+        description={t("auth.register.desc")}
       />
 
       <form onSubmit={onSubmit} className="flex flex-col gap-4">
         <div className="flex flex-col gap-1.5">
           <label htmlFor="email" className="text-[13px] font-semibold">
-            Email
+            {t("auth.email")}
           </label>
           <Input
             id="email"
@@ -66,7 +68,7 @@ export default function RegisterForm({ returnTo }: { returnTo: string }) {
 
         <div className="flex flex-col gap-1.5">
           <label htmlFor="username" className="text-[13px] font-semibold">
-            Username
+            {t("auth.username")}
           </label>
           <Input
             id="username"
@@ -78,13 +80,13 @@ export default function RegisterForm({ returnTo }: { returnTo: string }) {
             onChange={(e) => setUsername(e.target.value)}
           />
           <p className="text-xs text-muted-foreground">
-            1–39 characters: letters, digits, hyphens. Shown on the leaderboard.
+            {t("auth.register.usernameHint")}
           </p>
         </div>
 
         <div className="flex flex-col gap-1.5">
           <label htmlFor="password" className="text-[13px] font-semibold">
-            Password
+            {t("auth.password")}
           </label>
           <Input
             id="password"
@@ -95,8 +97,7 @@ export default function RegisterForm({ returnTo }: { returnTo: string }) {
             onChange={(e) => setPassword(e.target.value)}
           />
           <p className="text-xs text-muted-foreground">
-            At least 8 characters, with an uppercase letter, a lowercase letter
-            and a special character.
+            {t("auth.register.passwordHint")}
           </p>
         </div>
 
@@ -117,17 +118,17 @@ export default function RegisterForm({ returnTo }: { returnTo: string }) {
         )}
 
         <Button type="submit" disabled={submitting} className="h-9">
-          {submitting ? "Creating account…" : "Create account"}
+          {submitting ? t("auth.register.submitting") : t("auth.register.submit")}
         </Button>
       </form>
 
       <p className="mt-6 text-sm text-muted-foreground">
-        Already have an account?{" "}
+        {t("auth.register.haveAccount")}{" "}
         <Link
           href={`/login?returnTo=${encodeURIComponent(returnTo)}`}
           className="text-primary underline-offset-4 hover:underline"
         >
-          Sign in
+          {t("nav.signIn")}
         </Link>
       </p>
     </main>

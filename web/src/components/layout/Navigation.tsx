@@ -121,6 +121,7 @@ function LocaleToggle() {
  */
 function ThemeToggle() {
   const { resolvedTheme, setTheme } = useTheme();
+  const { t } = useI18n();
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
@@ -139,21 +140,21 @@ function ThemeToggle() {
       variant="ghost"
       size="icon"
       className="size-8"
-      aria-label={isDark ? "Switch to light theme" : "Switch to dark theme"}
+      aria-label={isDark ? t("nav.toLight") : t("nav.toDark")}
       onClick={() => setTheme(isDark ? "light" : "dark")}
     >
       {isDark ? <MoonIcon /> : <SunIcon />}
     </Button>
   );
 }
-
 function UserMenu({ user, onSignOut }: { user: User; onSignOut: () => void }) {
+  const { t } = useI18n();
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
         render={
           <button
-            aria-label={`Account menu for ${user.username}`}
+            aria-label={t("nav.accountMenu", { username: user.username })}
             className="rounded-full ring-offset-background transition-opacity hover:opacity-85 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
           />
         }
@@ -176,18 +177,18 @@ function UserMenu({ user, onSignOut }: { user: User; onSignOut: () => void }) {
         <DropdownMenuGroup>
           <DropdownMenuItem render={<Link href={`/u/${user.username}`} />}>
             <UserIcon />
-            Your profile
+            {t("nav.yourProfile")}
           </DropdownMenuItem>
           <DropdownMenuItem render={<Link href="/settings" />}>
             <SettingsIcon />
-            Settings
+            {t("nav.settings")}
           </DropdownMenuItem>
         </DropdownMenuGroup>
         <DropdownMenuSeparator />
         <DropdownMenuGroup>
           <DropdownMenuItem variant="destructive" onClick={onSignOut}>
             <LogOutIcon />
-            Sign out
+            {t("nav.signOut")}
           </DropdownMenuItem>
         </DropdownMenuGroup>
       </DropdownMenuContent>
@@ -271,10 +272,10 @@ export function Navigation() {
   return (
     <header className="sticky top-0 z-50 border-b bg-background/85 backdrop-blur-xl">
       <nav
-        aria-label="Main navigation"
+        aria-label={t("nav.mainAria")}
         className={cn(CONTAINER, "flex h-14 items-center gap-2")}
       >
-        <Link href="/leaderboard" className="flex shrink-0 items-center gap-2" aria-label="Tokens home">
+        <Link href="/leaderboard" className="flex shrink-0 items-center gap-2" aria-label={t("nav.homeAria")}>
           {/* The mark paints with currentColor, so one file covers both themes. */}
           <TokensMark />
           <span className="text-[15px] font-semibold tracking-tight">Tokens</span>
