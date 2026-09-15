@@ -638,31 +638,34 @@ LEFT JOIN groups        ON groups.id = group_members.group_id AND groups.status 
 
 ## 12. 验收标准
 
-- [ ] `/shame` 返回 404，全仓无 Hall of Shame 残留引用，封禁机制本身仍生效
-- [ ] 导航第二项为 `Teamboard`，指向 `/teamboard`
-- [ ] 可用邮箱 + 用户名 + 密码完成注册；弱密码被拒绝并给出具体原因
-- [ ] 全站不存在 GitHub 图标、按钮或 OAuth 入口
-- [ ] `tokens login`（device flow）与 `tokens submit` 在改造后无需更新 CLI 即可工作
-- [ ] 创建 Team 者成为 admin；可改名、改头像、邀请（用户名 / 邮箱 / 批量）
-- [ ] subadmin 最多 2 个；subadmin 能做除解散和删除 Team 外的全部操作，含 Group 全部操作
-- [ ] 未解散的 Team / Group 无法删除；解散会清空成员；已解散实体仍可由创建者删除
-- [ ] Leaderboard 列序为 `# / Developer / Team / Group / Tokens / Cost`，空值留空，排序行为无回归
-- [ ] Teamboard 支持 Team 单选 + Group 多选，列序为 `# / Developer / Group / Tokens / Cost`
-- [ ] 建团表单必须显式选择可见性，未选择时落库为 `private`
-- [ ] Teamboard 筛选器列出「公开团队 ∪ 本人所属团队」；请求他人的 `private` 团队返回 404
-- [ ] 团队从 `public` 改为 `private` 后，非成员立即无法再在 Teamboard 中选中它
-- [ ] Profile 展示 Team / Group，本人可退出，无归属时不渲染该区块
-- [ ] 全站无 `verified` 徽章渲染，`socialVerification.ts` 与 `VerifiedBadge.tsx` 已删除，全仓无残留引用
-- [ ] Profile 页社交链接图标行仍正常展示（徽章移除不牵连社交链接功能）
-- [ ] Docs 页不再有「The verified badge」「Architecture」「Sponsors」「iOS app」四个章节，`TESTFLIGHT_URL` 与 metadata / OG 里的 iOS 引用已移除，全站再无 iOS App 入口；Privacy / Terms / Settings / embed / badge / archive 行为无变化
-- [ ] Docs 页保留章节（Install the CLI / Everyday use / Supported clients）的 **default-English 渲染内容与结构**与当前线上 tokens.ci 一致（仅删上述四节、替换 GitHub 登录文案）；**验收基准是 tokens.ci 的当前页面，不是 demo 文件**。注：T11 的 i18n 包裹会让源码变化，这里的「一致」指渲染产物，不是源码逐行不动
-- [ ] 邀请对话框为可搜索下拉多选：输入实时筛选、选项左侧勾选框、选中计数、可再次点击取消；输入完整邮箱可邀请未注册用户
-- [ ] 导航右上角主题切换左侧有语言切换按钮，提供 English / 中文；切换后所有页面文案完整跟随，无遗漏硬编码
-- [ ] `tt_locale` 持久化跨会话生效，`<html lang>` 跟随
-- [ ] worker 页面缓存按 locale 分离，切换语言后刷新页面不会看到另一种语言的缓存
-- [ ] Privacy / Terms 中文页标注「英文版本为准」
-- [ ] 品牌块（导航左上角 `TokensMark` + demo 同款）蓝色底色改为紫色，白色 T 图案不变；favicon / 安装图标的位图本轮不重着色（无二进制生成流程），已明确说明未改
-- [ ] `bun run lint`、`bun run typecheck`、`bun run test:migrations` 全绿
+T9（2026-09-15）按行对照证据勾选。本轮已补齐原先未勾行。
+
+- [x] `/shame` 返回 404，全仓无 Hall of Shame 残留引用，封禁机制本身仍生效 — `t9-acceptance` `/shame` 404 + 导航无 Hall of Shame（`22_48_41`/`22_55`）；`BannedProfileView` + login 403（同 spec 5/5）
+- [x] 导航第二项为 `Teamboard`，指向 `/teamboard` — `tests/e2e/teamboard.spec.ts`、`Navigation.tsx`
+- [x] 可用邮箱 + 用户名 + 密码完成注册；弱密码被拒绝并给出具体原因 — T2 TODO 验证勾选（非本轮重跑）
+- [x] 全站不存在 GitHub 图标、按钮或 OAuth 入口 — T2 删除 `github` 路由与 `lib/auth/github.ts`
+- [x] `tokens login`（device flow）与 `tokens submit` 在改造后无需更新 CLI 即可工作 — TODO 2026-09-11 本地隔离 `TOKENS_API_URL=http://localhost:3000`（非本轮重跑）
+- [x] 创建 Team 者成为 admin；可改名、改头像、邀请（用户名 / 邮箱 / 批量） — `test:teams` creator admin + `patchTeam` name/avatar；`teams-signed-in` 创建+邀请；email-only invite 在用户插入前创建
+- [x] subadmin 最多 2 个；subadmin 能做除解散和删除 Team 外的全部操作，含 Group 全部操作 — `test:teams`：third subadmin 409、concurrent cap≤2；不能 disband/delete Team、不能 assign subadmin；能 rename/visibility/invite，以及 create/rename/add/remove/disband/delete Group
+- [x] 未解散的 Team / Group 无法删除；解散会清空成员；已解散实体仍可由创建者删除 — `test:teams` active team/group 409；disband 清空成员；created_by/admin 可删已解散空实体
+- [x] Leaderboard 列序为 `# / Developer / Team / Group / Tokens / Cost`，空值留空，排序行为无回归 — `t9-acceptance` Desktop Chrome 下 `thead th:visible`（手机端 `Usage` 仍在 DOM 的 `sm:hidden` 格，不删）；空值/排序沿用既有 Leaderboard 行为未改
+- [x] Teamboard 支持 Team 单选 + Group 多选，列序为 `# / Developer / Group / Tokens / Cost` — `teamboard.spec.ts`（无 Team 列、`groupIds` A vs B）
+- [x] 建团表单必须显式选择可见性，未选择时落库为 `private` — `teams-signed-in`「未选可见性不能提交」；DB default `private`（schema/0025）
+- [x] Teamboard 筛选器列出「公开团队 ∪ 本人所属团队」；请求他人的 `private` 团队返回 404 — `teamboard.spec.ts` 登出后页面与 API 404、筛选器不列出
+- [x] 团队从 `public` 改为 `private` 后，非成员立即无法再在 Teamboard 中选中它 — `test:teams` `getTeamboardTeams` 列表剔除 + `getTeamboard` 对非成员 404
+- [x] Profile 展示 Team / Group，本人可退出，无归属时不渲染该区块 — `tests/e2e/profile-membership.spec.ts`
+- [x] 全站无 `verified` 徽章渲染，`socialVerification.ts` 与 `VerifiedBadge.tsx` 已删除，全仓无残留引用 — T2
+- [x] Profile 页社交链接图标行仍正常展示（徽章移除不牵连社交链接功能） — T2；`ProfileSocialLinks.tsx` 仍在
+- [x] Docs 页不再有「The verified badge」「Architecture」「Sponsors」「iOS app」四个章节，`TESTFLIGHT_URL` 与 metadata / OG 里的 iOS 引用已移除，全站再无 iOS App 入口；Privacy / Terms / Settings / embed / badge / archive 行为无变化 — `t9-acceptance` Docs 四节 count=0；`/privacy` `/terms` `/settings` 200；`TESTFLIGHT_URL` 全仓无；modelIcons 仅代码注释提及 iOS
+- [x] Docs 页保留章节（Install the CLI / Everyday use / Supported clients）的 **default-English 渲染内容与结构**与当前线上 tokens.ci 一致（仅删上述四节、替换 GitHub 登录文案）；验收基准是 tokens.ci 当前页面，不是 demo — 2026-09-15 对照 live：三节标题、说明、命令列表、Everyday 旁注与 Supported clients 43 格一致；Install 的 `tokens login` 旁注由 live `link your GitHub account` 换成 T2 `sign in`（判据允许的 GitHub 替换）；live 仍穿插本 fork 已删的四节（未部署，属上一行）
+- [x] 邀请对话框为可搜索下拉多选：输入实时筛选、选项左侧勾选框、选中计数、可再次点击取消；输入完整邮箱可邀请未注册用户 — `teams-signed-in` 搜索/勾选/计数；`test:teams` email-only invite 在目标用户插入前创建并可被之后注册的验证邮箱接受
+- [x] 导航右上角主题切换左侧有语言切换按钮，提供 English / 中文；切换后所有页面文案完整跟随，无遗漏硬编码 — `tests/e2e/i18n-locale.spec.ts` 8/8（`16_55_59`）
+- [x] `tt_locale` 持久化跨会话生效，`<html lang>` 跟随 — 同上
+- [x] worker 页面缓存按 locale 分离，切换语言后刷新页面不会看到另一种语言的缓存 — `worker.ts` `pageCacheKey`/`profileCacheKey` 写入 `__locale`（仅 `en`|`zh`）；`i18n-locale.spec.ts` 切换后 reload 仍为中文。`next dev` 不走 `caches.default`，未做 wrangler preview 对照
+- [x] Privacy / Terms 中文页标注「英文版本为准」 — `i18n-locale.spec.ts` 隐私/条款两条
+- [x] 品牌块（导航左上角 `TokensMark` + demo 同款）蓝色底色改为紫色，白色 T 图案不变；favicon / 安装图标的位图本轮不重着色（无二进制生成流程），已明确说明未改 — T12
+- [x] `bun run lint`、`bun run typecheck`、`bun run test:migrations` 全绿 — T9 2026-09-15：lint 0 error（docs `<img>`、worker anonymous default 既有 warning）；typecheck 通过；`test:migrations` 对 OrbStack `tokens-postgres` 全绿（journal idx 0..26）
+
 
 ---
 

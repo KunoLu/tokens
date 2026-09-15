@@ -19,7 +19,7 @@ UI 对照：`docs/demo/teamboard-demo.html`
 
 ## 当前指针
 
-**当前：无 active 任务。** T8 已提交 `19663bd9` 并 archive `--no-commit` → `.trellis/tasks/archive/2026-09/09-11-t8-profile-membership/`。下一步 `task.py start 09-11-t11-i18n-copy`。不合 main。
+**当前：T9 文档与收尾。** T11 已 archive → `.trellis/tasks/archive/2026-09/09-11-t11-i18n-copy/`。PRD §12 已按本轮证据勾齐。不合 main。
 
 推荐顺序：
 
@@ -209,27 +209,27 @@ UI 对照：`docs/demo/teamboard-demo.html`
 
 ### T11 全站文案包裹 `L`
 
-**状态**：未开始  
+**状态**：已 archive（2026-09-15）  
 **依赖**：T10，且 T1 / T2 / T5 / T6 / T7 / T8 已完成
 
-- [ ] 逐页把硬编码字符串收进字典
-- [ ] Docs / Privacy / Terms 的 `en` 值与原文案逐字一致（渲染产物对齐线上）
-- [ ] Privacy / Terms 中文页标注「英文版本为准」
-- [ ] 邮件模板保持英文（不加 `users.locale`）
-- [ ] 验证：JSX 无裸中英文字符串遗漏；两语言完整渲染
+- [x] 逐页把硬编码字符串收进字典
+- [x] Docs / Privacy / Terms 的 `en` 值与原文案逐字一致（渲染产物对齐线上）
+- [x] Privacy / Terms 中文页标注「英文版本为准」
+- [x] 邮件模板保持英文（不加 `users.locale`）
+- [x] 验证：JSX 无裸中英文字符串遗漏；两语言完整渲染
 
 ---
 
 ### T9 文档与收尾 `M`
 
-**状态**：未开始  
+**状态**：进行中（§12 已按本轮证据勾齐，待 check / commit / archive）  
 **依赖**：T1–T8、T10、T11
 
-- [ ] 同步 `.trellis/spec`、README
-- [ ] `upstream_policy.md` §2.2 已落地行移入 §2.1；解除 T2/T3 前缀条目
-- [ ] 用两点语法复核代码分歧（`git diff --stat upstream/main HEAD -- web cli packages`）
-- [ ] 父任务验收清单逐条勾选
-- [ ] 验证：`bun run lint`、`bun run typecheck`、`bun run test:migrations` 全绿
+- [x] 同步 `.trellis/spec`、README
+- [x] `upstream_policy.md` §2.2 已落地行移入 §2.1；解除 T2/T3 前缀条目
+- [x] 用两点语法复核代码分歧（`git diff --stat upstream/main HEAD -- web cli packages`）
+- [x] 父任务验收清单逐条勾选（2026-09-15：`test:teams` + `t9-acceptance` 5/5 + live Docs 对照；§12 保留章节行已写回「仅删四节、替换 GitHub 登录文案」例外，未把 live GitHub 旁注当失败）
+- [x] 验证：`bun run lint`（0 error / 2 既有 warning）、`bun run typecheck`、`bun run test:migrations` 全绿（OrbStack `tokens-postgres` 127.0.0.1:5433）；本轮补跑 `test:teams` 与 `t9-acceptance` 5/5（`23_18_00`：`thead th:visible` + 封禁 login 403）
 
 ---
 
@@ -288,3 +288,4 @@ bun run build
 | 2026-09-14 | T7 已提交 `21a84933`（feat）+ `87a456b`（contracts）并 archive `--no-commit` → `.trellis/tasks/archive/2026-09/09-11-t7-teamboard-page/`。未合 main。未 start T8。 |
 | 2026-09-15 | T8 Profile 团队区块：page-only membership、客户端 session 判断 isOwner、复用 T4 退出 API、`listMyInvitations` 用 SQL `now()`。`test:teams` + Playwright 9/9 + `bun run build` 过。待 Phase 3.4 提交确认。不合 main。 |
 | 2026-09-15 | T8 已提交 `19663bd9`（feat）+ `6fa4ec2`（contracts）并 archive `--no-commit` → `.trellis/tasks/archive/2026-09/09-11-t8-profile-membership/`。未合 main。未 start T11。 |
+| 2026-09-15 | T9 补齐 PRD §12：`test:teams` 覆盖改名/头像、subadmin 正向操作、解散后删除、public→private Teamboard；`t9-acceptance` 5/5（/shame 404、封禁 login 403、Desktop Chrome `thead th:visible` 列序、Docs 删节）。不合 main。 |

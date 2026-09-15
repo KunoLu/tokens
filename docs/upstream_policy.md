@@ -59,9 +59,7 @@ grand     https://github.com/junhoyeo/tokscale.git
 
 下面两节决定了后面所有规则。**必须先分清哪些已经落地、哪些只是计划**——用计划态去判断上游改动，会把本该直接合并的提交误判成需要重写。
 
-截至本文写作时，本仓库在**代码上与 `upstream/main` 没有分歧**。`feature/teamboard-teams-auth` 分支只改动文档与规划产物，`web/`、`cli/`、`packages/` 一行未动。Teamboard、Team / Group 表、邮箱密码认证、Hall of Shame 的移除**都还没有落地**，它们是 T0–T12 的计划（见 `docs/prd-teamboard-teams-auth.md` §11）。
-
-任何时候都可以自己确认当前处于哪个阶段：
+T0–T12 已在 `feature/teamboard-teams-auth` 落地。`web/` 与 `upstream/main` 已有实质分歧（邮箱认证、Team/Group、Teamboard、i18n、迁移 `0024`–`0026`）；`cli/` 与 `packages/` 仍与上游一致。任何时候都可以自己确认：
 
 ```bash
 # 比较两端完整的已提交代码树（两点语法）
@@ -70,7 +68,9 @@ git diff --stat upstream/main HEAD -- web cli packages
 git status --short -- web cli packages
 ```
 
-两条都为空输出，才说明代码零分歧。**注意必须用两点 `A B`，不能用三点 `A...B`**：`git diff` 的三点语法比较的是 `merge-base(A,B)` 与 `B`，只回答"HEAD 自分叉点以来改了什么"，完全忽略 `upstream/main` 在分叉点之后独有的提交——本地落后上游时它照样是空的，据此判断会得出"两端相同"的错误结论。pathspec 也要用 `web` 而不是 `web/src`，否则漏掉 `web/worker.ts`、`web/wrangler.jsonc`、`web/scripts/` 这些同样是运行代码的路径。
+**注意必须用两点 `A B`，不能用三点 `A...B`**：`git diff` 的三点语法比较的是 `merge-base(A,B)` 与 `B`，只回答"HEAD 自分叉点以来改了什么"，完全忽略 `upstream/main` 在分叉点之后独有的提交。pathspec 也要用 `web` 而不是 `web/src`，否则漏掉 `web/worker.ts`、`web/wrangler.jsonc`、`web/scripts/`。
+
+T9 核对（2026-09-15）：`git diff --stat upstream/main HEAD -- web cli packages` 对 `web/` 约 148 files / +20600 / −2446；`cli/` 与 `packages/` 无输出。干净工作树上 `git status --short -- web cli packages` 为空。
 
 ### 2.1 现状
 
@@ -79,26 +79,20 @@ git status --short -- web cli packages
 | CLI | 完整 TUI 面板 + 报表命令 | 无 TUI 与 `models` / `monthly` / `hourly` / `graph` / `wrapped` / `pricing` 等报表命令；保留提交、账户管理、后台提交、导入与各 provider 集成命令（顶层 `Commands` 共 15 个：`login`、`logout`、`whoami`、`status`、`import`、`submit`、`serve`、`autosubmit`、`headless`、`codex`、`cursor`、`antigravity`、`trae`、`warp`、`delete-submitted-data`） | 与直接上游一致，**且本次改造也不打算改动** |
 | 报表 | 终端内 | Web 端 | 与直接上游一致 |
 | 托管 | 自建 Docker + 同机 Postgres | Cloudflare Workers（OpenNext）+ Neon Postgres（经 Hyperdrive）；Worker 定点到数据库所在区域 `aws:us-west-2` | 与直接上游一致 |
-| 缓存 | — | R2 渲染页 + Durable Objects 标签失效；`/api/og` 与 SVG 图片端点另有显式 edge cache | 与直接上游一致 |
-| 前端 | 上游自有组件 | 重建于 shadcn/ui | 与直接上游一致 |
+| 缓存 | — | R2 渲染页 + Durable Objects 标签失效；`/api/og` 与 SVG 图片端点另有显式 edge cache | 与直接上游一致；页面缓存 key 另含 `__locale` |
+| 前端 | 上游自有组件 | 重建于 shadcn/ui | 与直接上游一致（组件栈）；文案走 `web/src/lib/i18n/` 字典 |
 | SEO / 元数据 | — | 多个页面各自声明 per-page Open Graph card | 与直接上游一致 |
-| 反作弊 | — | 跨设备去重、重复提交单调性校验、封禁、**公开 Hall of Shame** | 与直接上游一致：公示页仍在（`web/src/app/(main)/shame/page.tsx`、导航项 `Hall of Shame`） |
-| 身份 | 用户名 | GitHub OAuth + 社交链接验证徽章 | 与直接上游一致：GitHub OAuth 仍是唯一登录方式 |
-| 组织 | team / group 排行榜 | 已移除，仅一张全局榜 | 与直接上游一致：schema 只有 9 张表，无 `teams` / `groups` |
-| 迁移序号 | 已到 `0029` | 停在 `0023` | 与直接上游一致，停在 `0023` |
-| 测试 | 有 | 保留 Rust 内联测试并由 CI 运行（`cargo test --manifest-path cli/Cargo.toml`）；另有迁移集成检查 `web/package.json` 的 `test:migrations`；web 侧只有 lint + typecheck，无单元测试 | 与直接上游一致 |
+| 反作弊 | — | 跨设备去重、重复提交单调性校验、封禁、**公开 Hall of Shame** | 封禁机制仍在；**无公开 Hall of Shame**（T1：`/shame` 404，导航为 Teamboard） |
+| 身份 | 用户名 | GitHub OAuth + 社交链接验证徽章 | **邮箱 + PBKDF2**；GitHub OAuth 与 `verified` 徽章已移除（T2）。`social_links` 与 Profile 社交图标仍在 |
+| 组织 | team / group 排行榜 | 已移除，仅一张全局榜 | **Team / Group 两级**（T3–T8）：表 `teams` / `team_members` / `groups` / `group_members` / `team_invitations`；Leaderboard 有 Team/Group 列；Teamboard 按 Team 单选 + Group 多选 |
+| 迁移序号 | 已到 `0029` | 停在 `0023` | 本仓库停在 **`0026`**（`0024` 密码认证、`0025` teams/groups、`0026` invitation `group_id`） |
+| 测试 | 有 | 保留 Rust 内联测试并由 CI 运行（`cargo test --manifest-path cli/Cargo.toml`）；另有迁移集成检查 `web/package.json` 的 `test:migrations`；web 侧只有 lint + typecheck，无单元测试 | Rust 测试与 `test:migrations` 仍在；另有 `test:teams` 与 Playwright E2E（`tests/e2e/`）。不引入 web 通用单测框架 |
 | 仓库布局 | `crates/`、`packages/frontend/` | `cli/`、`web/` | 与直接上游一致 |
 | 文档与规划产物 | 有 provider / 解析器与恢复方案等设计文档（`docs/9router-bridge.md`、`docs/providers/`、`docs/ratchet-inflation-recovery.md`、`docs/sessions-column-budget.md`）；通常只作为理解提交意图的材料，不直接合并 | 仅 `docs/upstream_policy.md`（且不含 `AGENTS.md`） | **本仓库独有**：`docs/prd-teamboard-teams-auth.md`、`docs/demo/`、`web/features/`、`.trellis/`、`AGENTS.md`；`docs/upstream_policy.md`（本文件）被整篇改写 |
 
-**所以在 §2.2 中任何一行生效之前，代码类上游改动一律按 §3 的通用规则评估，不存在本 fork 特有的冲突区。** 现存的唯一冲突面是文档：上游若改动 `docs/upstream_policy.md`（该文件继承自上游，本仓库已整篇改写），或新增与 `docs/` / `web/features/` 同名的文件。
+**代码类上游改动仍按 §3 评估。** 下表是原 §2.2 已落地行（T9 逐条迁入）。上游改这些路径默认「读意图、重新实现」，不能按逐字节一致 cherry-pick。
 
-### 2.2 计划态分歧区（随各自任务落地后**逐行**生效；目前均未落地）
-
-下表是改造完成后**将会**出现的高发冲突区，登记在此是为了让同步者提前知道未来的边界。
-
-**每一行从它的"落地任务"全部完成时起独立生效，不必等整个 T0–T12 跑完。** 落地是分阶段的，开发期间会长时间处于"一部分行已生效、T9 尚未开始"的状态；此时若按整节无效来处理，就会拿 §2.1 的规则去对待已经分歧的文件。未完成的行不参与判断；T9 只负责把已生效的行迁入 §2.1 并从本节删除。判断某行是否已生效，用 §2 的两条命令核对该行"相关路径"。
-
-| 区域 | 落地任务 | 落地后的分歧内容 | 相关路径 |
+| 区域 | 落地任务 | 分歧内容 | 相关路径 |
 |---|---|---|---|
 | 导航 | T1 / T2 / T7 | Hall of Shame 换成 Teamboard 导航项（T1）与页面（T7）；右上角移除 GitHub 图标（T2） | `web/src/components/layout/Navigation.tsx` |
 | 认证 | T2 | GitHub OAuth 全部移除，改为邮箱 + PBKDF2 密码 | `web/src/lib/auth/**`、`web/src/app/api/auth/**`、`web/middleware.ts` |
@@ -107,10 +101,16 @@ git status --short -- web cli packages
 | 组织体系 | T3 / T4 | 新增 5 张表与整个 Team 子域 | 迁移 `0025`、`web/src/lib/teams/**`、`web/src/app/api/teams/**` |
 | 榜单 | T6 | `LeaderboardUser` 增加 `team` / `group`；查询多两组 LEFT JOIN | `web/src/lib/leaderboard/**`、`web/src/components/leaderboard/**` |
 | Teamboard | T7 | 新增页面、组件、查询与 API，不改动上一行列出的路径 | `web/src/app/(main)/teamboard/**`、`web/src/components/teamboard/**`、`web/src/app/api/teamboard/**` |
-| 多语言（i18n） | T10 / T11 | **全站 UI 文案被包裹进字典**，几乎所有 `tsx` 文件都会与上游文案改动冲突；上游任何文案调整需要映射到字典 key，不能直接合并文本 | `web/src/lib/i18n/**`、全部页面 `page.tsx` / 组件 |
-| 徽章 | T2 | **`verified` 徽章整体移除**（决策 D-3 取 C）：两个文件删除，6 个文件的引用移除，含 Docs 页「The verified badge」章节。上游对这两个已删文件的任何改动**直接丢弃**；上游若在其他文件新增徽章渲染点，同样丢弃该片段。**社交链接本身不是分歧区**——`social_links` 两列与 `ProfileSocialLinks.tsx` 与上游一致，照常采纳 | 删除 `web/src/lib/socialVerification.ts`、`web/src/components/ui/VerifiedBadge.tsx`；改写 `web/src/lib/leaderboard/{getLeaderboard,types}.ts`、`web/src/components/leaderboard/Leaderboard.tsx`、`web/src/components/profile/ProfileView.tsx`、`web/src/app/u/[username]/ProfilePageClient.tsx`、`web/src/app/(main)/docs/page.tsx` |
+| 多语言（i18n） | T10 / T11 | **全站 UI 文案被包裹进字典**；上游任何文案调整需要映射到字典 key，不能直接合并文本 | `web/src/lib/i18n/**`、全部页面 `page.tsx` / 组件 |
+| 徽章 | T2 | **`verified` 徽章整体移除**（D-3 取 C）。上游对已删文件的改动**直接丢弃**；其他文件新增徽章渲染点同样丢弃该片段。**社交链接本身不是分歧区**——`social_links` 与 `ProfileSocialLinks.tsx` 与上游一致，照常采纳 | 删除 `web/src/lib/socialVerification.ts`、`web/src/components/ui/VerifiedBadge.tsx`；改写 `getLeaderboard` / `types`、`Leaderboard.tsx`、`ProfileView.tsx`、`ProfilePageClient.tsx`、`docs/page.tsx` |
+| 品牌块 | T12 | 导航 `TokensMark` 底色 `#7C3AED`；favicon / 安装图标位图不重着色 | `web/src/components/layout/Navigation.tsx`、`docs/demo/teamboard-demo.html` |
 
-**落地后，`Navigation.tsx`、`schema.ts`、`getLeaderboard.ts` 会成为冲突最集中的三个文件；T10 / T11 落地后，i18n 字典包裹会让几乎所有页面的文案都成为分歧点——上游的任何文案微调都无法直接合并，需要改写字典。** 届时上游只要改动它们，默认走"读意图、重新实现"——这不是因为 cherry-pick 不可用，而是这三个文件会被大幅改写，逐行解冲突的收益低于照意图实现。**在 T1 / T2 / T6 落地之前，这三个文件与上游逐字节一致，照常 cherry-pick。**
+`Navigation.tsx`、`schema.ts`、`getLeaderboard.ts` 是冲突最集中的三个文件；i18n 字典包裹让几乎所有页面文案都成为分歧点。
+
+### 2.2 计划态分歧区
+
+T9 已把上表各行从本节迁入 §2.1。**目前无待迁入行。** 以后新的计划态分歧仍登记在此，落地后由下一次收尾迁入 §2.1。
+
 
 ---
 
@@ -124,8 +124,8 @@ git status --short -- web cli packages
 | 前端**样式、组件、布局** | **永不合并** | 上游的 styled-components、HeroUI 用法、配色、间距 |
 | CLI 展示、交互、报表功能 | **跳过** | TUI 主题、更漂亮的表格、wrapped 图片 |
 | 提交管线、安全、正确性 | **总是合并** | 解析溢出、重复计数、去重 |
-| **认证与身份** | 现状：按 §3.2 区分"身份提供方"与"会话机制"。**T2 落地后**：身份提供方类改动默认拒绝，逐个人工评估 | 落地后上游的 OAuth 改动与本仓库的邮箱体系不兼容 |
-| **team / group 相关** | 现状：无冲突，照常评估。**T3 落地后**：默认拒绝 | 落地后上游若恢复 group 排行榜，其语义与本仓库的 Team 不同，不可混用 |
+| **认证与身份** | 身份提供方类改动默认拒绝，逐个人工评估。会话机制安全修复按 §3.2 合并 | 上游的 OAuth 改动与本仓库的邮箱体系不兼容 |
+| **team / group 相关** | 默认拒绝 | 上游若恢复 group 排行榜，其语义与本仓库的 Team 不同，不可混用 |
 | 部署、缓存、SEO 元数据 | **保留本仓库运行拓扑，逐项评估** | Worker 区域定点、图片端点的 edge cache、per-page OG card——上游改动不可直接覆盖 |
 | 数据库迁移 | **逐条人工评审** | 见 §5 |
 | 不确定的 | **开一个 draft PR，列出提交并询问** | — |
@@ -145,11 +145,7 @@ git status --short -- web cli packages
 
 ### 3.2 认证类改动为什么默认拒绝
 
-**本节分两段：现状与 T2 落地之后。**
-
-**现状（T2 未落地）**：本仓库的 GitHub OAuth 代码与上游一致，上游的 OAuth 改动照常按通用规则评估合并，没有理由默认拒绝。
-
-**T2 落地后**：本仓库不再存在 GitHub OAuth，上游任何"改进 OAuth 流程""增加 OAuth scope""调整 GitHub 用户字段同步"的提交，在这里都无处落地。
+**T2 已落地。** 本仓库不再存在 GitHub OAuth，上游任何"改进 OAuth 流程""增加 OAuth scope""调整 GitHub 用户字段同步"的提交，在这里都无处落地。
 
 但有一个例外必须留意：**会话与 token 的安全修复要合并**。`tt_session` 的 cookie 属性、`token_hash` 的比较方式、CSRF Origin 白名单、device flow 的过期处理——这些代码本仓库原样保留，上游在这些地方的安全修复同样适用于我们。区分标准是：*修复对象是"身份提供方"还是"会话机制"*。前者跳过，后者合并。
 
@@ -177,7 +173,7 @@ git cherry-pick -x <sha>                     # -x 记录来源提交
    单父提交沿用上面的命令即可。GitHub PR 的 merge commit，在确认第一个父确实位于 `upstream/main` 主线后用 `git cherry-pick -m 1 -x <sha>`；否则直接去挑该 PR 里的单父提交，**不要猜 mainline**。注意提交信息以 `Merge pull request` 开头并不代表它是 merge commit——上游存在被压平成单父的这类提交（如 `f114057f`），只看 message 会判断错。
 2. 在 PR 描述里列出**跳过的提交及每一条的理由**。没有理由的跳过，会在下一次同步时变成一个谜。
 3. 运行 `cargo check --manifest-path cli/Cargo.toml --workspace --all-targets` 与 **`cargo test --manifest-path cli/Cargo.toml --workspace`**（CI 会跑后者，本地先跑可以省一轮往返），以及 `web/` 下的 `bun run lint` 与 `bun run typecheck`。
-4. 额外运行 `bun run test:migrations`。这一步目前带着两个**继承自上游、与本次改造无关的既存缺陷**：`web/scripts/check-migrations.ts` 仍在断言 `0020` 已经删除的 `groups` / `group_members` / `group_invites` 三张表，且 `meta/` 快照停在 `0021` 而 journal 已到 `23`。T0 负责修掉它们；在此之前该脚本的失败需要人工分辨真假。等 T2 / T3 带来本仓库自有的迁移后，这一步会比现在更重要。
+4. 额外运行 `bun run test:migrations`。T0 已修掉 checker 对已删 `groups` 表的断言和 journal 尾 snapshot 缺口。本仓库自有迁移到 `0026`；失败即本仓库问题，不再当上游既存缺陷。
 
 ### 4.2 从原始项目（`junhoyeo/tokscale`）
 
@@ -240,10 +236,10 @@ Grok 的 `turn_completed` 解析器修复就是这么落地的：修复前我们
 
 本仓库新增的额外约束：
 
-- **序号撞车是明确风险。** 实测：本仓库与 `upstream/main` 当前都停在 `0023`（journal `idx` 上限 23），本方案拟占用 `0024`、`0025`（**尚未创建**），而 `grand/main` 的迁移已经到 `0029`。这些事实确定的是：**一旦从 `grand` 或 `upstream` 引入 `0024` 及以上的同号迁移，就会与本方案撞号**。它们并不能证明 `missuo/tokens` 接下来一定会采纳其中某一条，也不能证明它采纳时不会自行重编号——所以每次同步都要先看实际 journal，而不是无条件重编号。
+- **序号撞车是明确风险。** 实测：`upstream/main` 停在 `0023`，本仓库停在 `0026`（`0024` 密码认证、`0025` teams/groups、`0026` invitation `group_id`），`grand/main` 已到 `0029`。**一旦从 `grand` 或 `upstream` 引入 `0024` 及以上的同号迁移，就会与本仓库撞号**。它们并不能证明 `missuo/tokens` 接下来一定会采纳其中某一条，也不能证明它采纳时不会自行重编号——所以每次同步都要先看实际 journal，而不是无条件重编号。
 - **重编号要连 snapshot 一起做，不能只手改 journal 的三个字段。** 处理办法是把上游迁移重新编号为本仓库的下一个可用序号，但必须同时产出**同号的 `meta/NNNN_snapshot.json`**。`web/scripts/check-migrations.ts` 会显式校验这几件事，写错会被直接拦下（不是"不会报错"）：`idx` 序列连续且与数组顺序一致、`tag` 的数字前缀必须等于 `idx`、`when` 严格递增、journal 引用的 `.sql` 必须存在、磁盘上不能有无 journal 条目的孤儿 `.sql`，以及**最新的 `meta/NNNN_snapshot.json` 编号必须等于 journal 尾部的 `idx`**（历史号段的空缺是允许的，只有尾部必须是最新的）。尾部 snapshot 落后的后果不止是测试失败：`drizzle-kit generate` 是基于字典序最新的 snapshot 生成的，基线过旧会让它重新发出已经应用过的 DDL（例如重复的 `ADD COLUMN`，应用时报错）。因此优先用 `drizzle-kit generate` 在本仓库当前基线上产出迁移与 snapshot，再把上游的数据语句移植进去并逐条评审，而不是手工编辑元数据。
-- **（T2 / `0024` 落地后才适用）** 任何触及 `users` 表的上游迁移都要额外检查：届时本仓库已放宽 `github_id` 为可空，并新增 `password_hash`、`email_verified_at` 与 `users_email_lower_unique`。在此之前 `users` 表与上游一致。
-- **（T3 / `0025` 落地后才适用）** 上游若再次引入名为 `groups` 的表，**必须改名**：届时本仓库的 `groups` 表语义完全不同（从属于 `teams`），同名会造成迁移冲突和语义混淆。在此之前本仓库没有 `groups` 表，上游恢复该表不构成冲突。
+- 任何触及 `users` 表的上游迁移都要额外检查：本仓库已放宽 `github_id` 为可空，并新增 `password_hash`、`email_verified_at` 与 `users_email_lower_unique`。
+- 上游若再次引入名为 `groups` 的表，**必须改名**：本仓库的 `groups` 表语义完全不同（从属于 `teams`），同名会造成迁移冲突和语义混淆。
 
 ---
 

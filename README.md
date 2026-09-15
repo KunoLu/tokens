@@ -4,8 +4,8 @@
   <p><strong>The leaderboard for AI coding usage.</strong></p>
   <p>
     <a href="https://tokens.ci/leaderboard">Leaderboard</a> ·
-    <a href="https://tokens.ci/docs">Docs</a> ·
-    <a href="https://tokens.ci/shame">Hall of Shame</a>
+    <a href="https://tokens.ci/teamboard">Teamboard</a> ·
+    <a href="https://tokens.ci/docs">Docs</a>
   </p>
 </div>
 
@@ -18,19 +18,6 @@ and models, and where you rank against everyone else doing the same thing.
 ```sh
 bunx tokens-cli@latest login
 ```
-
-## iOS app
-
-<a href="https://testflight.apple.com/join/NWmvqqTX">
-  <img src="https://img.shields.io/badge/TestFlight-Join%20the%20beta-000000?style=for-the-badge&logo=apple&logoColor=white" alt="Join the TestFlight beta" height="34" />
-</a>
-
-Your rank and usage on your phone, without opening a browser — share cards
-rendered on device, plus Home screen and Lock screen widgets for the day's
-tokens, your running total and your rank.
-
-There is no sign-in. You enter a GitHub username and the app reads that public
-profile, so enter your own or the widgets will show someone else's usage.
 
 ## Why this repository is public
 
@@ -128,14 +115,12 @@ your day into two half-stories.
 
 **Built to be gamed against.** A public leaderboard attracts inflated numbers.
 Submissions are checked for cross-device duplicates and monotonic regressions,
-accounts caught faking totals are banned, and the bans are public in the
-[Hall of Shame](https://tokens.ci/shame). Ranking is worth nothing if nobody
+accounts caught faking totals are banned. Ranking is worth nothing if nobody
 polices it.
 
-**A profile worth linking.** Your page carries a verified badge if your GitHub
-account has at least two social links, your split by client and model, your
-contribution graph, and embeddable SVG cards for a README — ten templates, both
-themes, rendered server-side.
+**A profile worth linking.** Your page carries your split by client and model,
+your contribution graph, and embeddable SVG cards for a README — ten templates,
+both themes, rendered server-side.
 
 **Small on your machine.** The CLI is one job: scan, total, submit. It runs as a
 background service and otherwise stays out of the way.
@@ -150,9 +135,9 @@ and correctness fixes. Everything above that has diverged:
 |---|---|---|
 | CLI surface | Full TUI dashboard plus report commands (`models`, `monthly`, `hourly`, `graph`, `wrapped`, `pricing`, …) | Submit only — `login`, `submit`, `serve`, `status`. The TUI and every report command are removed, ~11k lines and 15 dependencies with them |
 | Reporting | In the terminal | On the web, where it can be linked and compared |
-| Anti-cheat | — | Cross-device duplicate guard, resubmit monotonicity checks, account bans, public Hall of Shame |
-| Identity | Username | Verified badge from GitHub social links, refreshed daily |
-| Groups | Team/group leaderboards | Removed — one global ranking |
+| Anti-cheat | — | Cross-device duplicate guard, resubmit monotonicity checks, account bans |
+| Identity | Username | Email and password; social links on the profile, no verified badge |
+| Groups | Team/group leaderboards | Team and Group on the web leaderboard and Teamboard |
 | Frontend | Upstream's components | Rebuilt on shadcn/ui with its own brand marks and per-page Open Graph cards |
 
 **Upstream sync policy:** data capabilities and correctness fixes come in; UI

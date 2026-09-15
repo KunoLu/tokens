@@ -14,13 +14,15 @@
 | `bun run typecheck` | `wrangler types` → `cloudflare-env.d.ts` + `tsc --noEmit` |
 | `bun run build` | asset copies + `next build` |
 | `bun run test:migrations` | `drizzle-kit migrate` + `scripts/check-migrations.ts` |
-| `bun run test:teams` | T4 domain invariants + T7 FR-2 Teamboard pagination / multi-value `groupIds` + T8 `listMyInvitations` (`scripts/check-teams-invariants.ts`); parent implement.md authorized this minimal runner |
-| `bun run test:e2e` | Playwright LocaleToggle, full-page copy, Privacy/Terms English-precedence, Teamboard, and Profile membership journeys. Specs live at repo-root `tests/e2e/`; config is `web/playwright.config.ts`. Owner approved 2026-09-14. Locale copy coverage is `tests/e2e/i18n-locale.spec.ts` (`web/features/i18n.feature`). |
+| `bun run test:teams` | T4 domain invariants + T7 FR-2 Teamboard pagination / multi-value `groupIds` + T8 `listMyInvitations` + T9 §12 (creator admin, rename/avatar, subadmin cap **and** remaining Team/Group ops, public→private Teamboard, delete-after-disband) (`scripts/check-teams-invariants.ts`); parent implement.md authorized this minimal runner. Needs `DATABASE_URL` (local OrbStack `tokens-postgres` is `postgresql://tokens:tokens@127.0.0.1:5433/tokens`). |
+| `bun run test:e2e` | Playwright LocaleToggle, full-page copy, Privacy/Terms English-precedence, Teamboard, Profile membership, and T9 acceptance (`tests/e2e/t9-acceptance.spec.ts`: `/shame` 404, Leaderboard column order, Docs remaining vs removed sections, banned profile + login 403). Specs live at repo-root `tests/e2e/`; config is `web/playwright.config.ts`. Owner approved 2026-09-14. Locale copy coverage is `tests/e2e/i18n-locale.spec.ts` (`web/features/i18n.feature`). Leaderboard `thead th` includes a mobile `Usage` cell (`sm:hidden`); column-order assertions use `thead th:visible` under the Desktop Chrome project — do not delete that header or filter it out of the expected sequence. |
 
 Do not add a general **unit-test** framework without a team decision — the upstream tests were
 deliberately removed (`docs/upstream_policy.md`). `test:teams` is the T4 exception
 for INV/permission checks, the T7 exception for Teamboard loader regressions
-(51-member pagination, multi-value `groupIds`), and the T8 exception for `listMyInvitations`. Playwright E2E is the T7/T8/T10/T11 exception for user-visible
+(51-member pagination, multi-value `groupIds`), the T8 exception for `listMyInvitations`,
+and the T9 exception for §12 domain evidence (subadmin positive ops need more than
+cap/forbid/disband). Playwright E2E is the T7/T8/T9/T10/T11 exception for user-visible
 browser journeys; do not add `*.test.ts` under `web/`. Reports under
 `tests/e2e/reports/` are gitignored runner output. Formal Playwright HTML is a
 named `playwright-report-*.html` next to the same-stem `.md` under
@@ -80,7 +82,8 @@ User-visible JSX, `aria-label`, toast, empty/error, and form labels go through
 `docs/upstream_policy.md` is the rulebook for merging from upstream:
 
 - **Never merge**: branding/naming/copy (`tokscale` strings, logos), frontend
-  styling/components/layout, TUI/report-command features, groups, tests.
+  styling/components/layout, TUI/report-command features, upstream `groups`
+  tables (this fork's `groups` belong to `teams`), tests.
 - **Always merge**: new providers/client scanners, parser fixes, submit
   pipeline and correctness fixes.
 - **Frontend data capability: merge the capability, rewrite the

@@ -3,7 +3,7 @@
   "name": "t9-docs-wrapup",
   "title": "T9 docs and wrap-up",
   "description": "Sync specs, move landed upstream_policy rows, run full lint/typecheck/migrations.",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": "web",
