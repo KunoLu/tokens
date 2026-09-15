@@ -53,6 +53,9 @@ Per `docs/upstream_policy.md`:
   `sortBy` param even if a pending RSC has not landed.
 - Client components start with `"use client"` and stay as far down the tree
   as possible.
+- User-visible copy uses `t()` / `useI18n()` from `@/lib/i18n`. Do not add
+  `getDictionary`, next-intl, or a second dictionary layout. See
+  [Quality Guidelines](./quality-guidelines.md#ui-copy-i18n).
 
 ## `tw()`: legacy helper, not a pattern to extend
 

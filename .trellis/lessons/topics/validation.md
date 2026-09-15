@@ -14,4 +14,17 @@
 - Fix: Remove dropped tables from the checker lists. Reconstruct `0022_snapshot.json` / `0023_snapshot.json` from `0021_snapshot.json` plus the SQL deltas. Verify with `bun run test:migrations`.
 - Prevention: After any drop migration, search `check-migrations.ts` for the old table/index names. After merging SQL, confirm newest snapshot idx equals `_journal.json` tail. Never run `bun run db:generate` in `web/src/lib/db/migrations` to “fill” missing historical snapshots.
 
+
+## LESSON-20260915-640-lint-preexisting-device-effect: HEAD DeviceClient set-state-in-effect is not T11
+
+- Date: 2026-09-15
+- Tags: validation, lint, eslint, react-hooks, i18n
+- Applicable scenarios: After wrapping copy with `useI18n()`, when `bun run lint` fails on a file T11 touched, or before “fixing” DeviceClient as part of an i18n wrap
+- Severity: medium
+- Source: T11 `09-11-t11-i18n-copy` (`web/src/app/device/DeviceClient.tsx` `react-hooks/set-state-in-effect` at `loadSession()`)
+- Problem: `bun run lint` failed (1 error, 3 warnings). The error is `DeviceClient.tsx` calling `loadSession()` inside `useEffect`. A T11-caused unused `colorPalettes` import in `ProfileContributionGraph.tsx` was a separate warning.
+- Root cause: T11 wrapping added `useI18n()` and dictionary keys; it did not change the session-load effect. `git show HEAD` already has `useEffect(() => { loadSession(); }, [loadSession]);`. Treating that error as T11-introduced would expand wrap remaining copy into an unrelated React effect refactor.
+- Fix: Remove the unused `colorPalettes` import (T11-caused). Leave the DeviceClient effect alone. Do not claim lint/E2E passed while the pre-existing error remains.
+- Prevention: Diff the failing line against HEAD before editing. If the pattern predates the wrap, record it as a remaining lint risk; do not fold it into the i18n task.
+
 <!-- lessons:640:end -->

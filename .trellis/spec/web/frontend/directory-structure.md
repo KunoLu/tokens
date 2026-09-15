@@ -42,7 +42,8 @@ web/
 │   │   ├── i18n/                 # locale cookie, dictionaries, t(), I18nProvider, useFormat
 │   │   ├── types.ts              # SUPPORTED_CLIENT_TYPES, ClientType, TokenBreakdown
 │   │   ├── utils.ts              # Domain formatters + cn()
-│   │   ├── format.ts             # Display formatting (compact numbers, XML escape); optional locale via intlTag
+│   │   ├── format.ts             # Compact numbers, XML escape, duration; optional locale via intlTag; no t.ts
+│   │   ├── formatRelativeTime.ts # Dictionary relative time; UI-only — embed/SVG/OG must keep importing format.ts
 │   │   ├── tw.tsx                # tw() styled-element helper (styled-components leftover)
 │   │   └── useSettings.ts        # Cross-route client preferences hook
 │   └── types/                    # Ambient declarations (static-images.d.ts)

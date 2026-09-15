@@ -3,7 +3,7 @@
   "name": "t11-i18n-copy",
   "title": "T11 wrap remaining copy",
   "description": "Move hardcoded UI strings into dictionaries with English source fidelity.",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": "web",

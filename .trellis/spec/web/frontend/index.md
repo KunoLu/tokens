@@ -43,7 +43,7 @@
 ## Verification commands
 
 From `web/package.json` — these are the only automated gates (there are no
-web unit tests; Playwright E2E is the T10 exception for browser journeys):
+web unit tests; Playwright E2E is the T7/T8/T10/T11 exception for browser journeys):
 
 | Command | Purpose |
 |---------|---------|
@@ -52,7 +52,7 @@ web unit tests; Playwright E2E is the T10 exception for browser journeys):
 | `bun run build` | copies `install.sh`/client assets into `public/`, then `next build` |
 | `bun run test:migrations` | `drizzle-kit migrate` + `scripts/check-migrations.ts` |
 | `bun run test:teams` | T4 domain invariants (`scripts/check-teams-invariants.ts`); T7 FR-2 Teamboard pagination / multi-value `groupIds` and T8 `listMyInvitations` live in the same runner |
-| `bun run test:e2e` | Playwright LocaleToggle, Teamboard, and Profile membership journeys (repo-root `tests/e2e/`, config `web/playwright.config.ts`) |
+| `bun run test:e2e` | Playwright LocaleToggle, full-page copy, Privacy/Terms English-precedence, Teamboard, and Profile membership journeys (repo-root `tests/e2e/`, config `web/playwright.config.ts`) |
 | `bun run cf:build` / `cf:preview` / `cf:deploy` | OpenNext Cloudflare bundle, local preview, `wrangler deploy` |
 
 ## Pre-Development Checklist
@@ -73,7 +73,7 @@ web unit tests; Playwright E2E is the T10 exception for browser journeys):
 
 ## Quality Check
 
-- `bun run lint` and `bun run typecheck` pass. Team/group domain and Teamboard loader changes also run `bun run test:teams`. LocaleToggle / Teamboard / Profile membership / user-visible nav journeys also run `bun run test:e2e`.
+- `bun run lint` and `bun run typecheck` pass. Team/group domain and Teamboard loader changes also run `bun run test:teams`. LocaleToggle / full-page copy / Privacy-Terms / Teamboard / Profile membership journeys also run `bun run test:e2e`.
 - Styling uses semantic tokens (`bg-background`, `text-muted-foreground`,
   `border`) — no hardcoded hex, no manual `dark:` branches.
 - New components come from `components/ui/` (vendored shadcn) — no new

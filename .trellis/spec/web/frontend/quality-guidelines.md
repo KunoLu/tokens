@@ -15,14 +15,16 @@
 | `bun run build` | asset copies + `next build` |
 | `bun run test:migrations` | `drizzle-kit migrate` + `scripts/check-migrations.ts` |
 | `bun run test:teams` | T4 domain invariants + T7 FR-2 Teamboard pagination / multi-value `groupIds` + T8 `listMyInvitations` (`scripts/check-teams-invariants.ts`); parent implement.md authorized this minimal runner |
-| `bun run test:e2e` | Playwright LocaleToggle, Teamboard, and Profile membership journeys. Specs live at repo-root `tests/e2e/`; config is `web/playwright.config.ts`. Owner approved 2026-09-14. |
+| `bun run test:e2e` | Playwright LocaleToggle, full-page copy, Privacy/Terms English-precedence, Teamboard, and Profile membership journeys. Specs live at repo-root `tests/e2e/`; config is `web/playwright.config.ts`. Owner approved 2026-09-14. Locale copy coverage is `tests/e2e/i18n-locale.spec.ts` (`web/features/i18n.feature`). |
 
 Do not add a general **unit-test** framework without a team decision — the upstream tests were
 deliberately removed (`docs/upstream_policy.md`). `test:teams` is the T4 exception
 for INV/permission checks, the T7 exception for Teamboard loader regressions
-(51-member pagination, multi-value `groupIds`), and the T8 exception for `listMyInvitations`. Playwright E2E is the T10 exception for user-visible
+(51-member pagination, multi-value `groupIds`), and the T8 exception for `listMyInvitations`. Playwright E2E is the T7/T8/T10/T11 exception for user-visible
 browser journeys; do not add `*.test.ts` under `web/`. Reports under
-`tests/e2e/reports/` are gitignored runner output.
+`tests/e2e/reports/` are gitignored runner output. Formal Playwright HTML is a
+named `playwright-report-*.html` next to the same-stem `.md` under
+`tests/e2e/reports/html/`.
 
 ## Hard rules
 
@@ -44,6 +46,34 @@ browser journeys; do not add `*.test.ts` under `web/`. Reports under
    `cli/tokens-cli/src/main.rs:1931+`).
 6. **Migrations are additive and hand-reviewed** — see
    [Database Guidelines](./database-guidelines.md).
+
+## UI copy (i18n)
+
+User-visible JSX, `aria-label`, toast, empty/error, and form labels go through
+`web/src/lib/i18n/t.ts`.
+
+- Client: `useI18n().t(key, vars?)`.
+- Server: `parseLocale((await cookies()).get(LOCALE_COOKIE)?.value)` then
+  `t(locale, key, vars?)`.
+- `zh` is typed `Record<keyof typeof en, string>` so missing keys fail
+  `bun run typecheck`.
+- English dictionary values match the previous rendered English copy
+  verbatim. Do not invent `getDictionary`, next-intl, or URL locale prefixes.
+- Email templates stay English. Do not add `users.locale`.
+- Leave CLI commands, vendor/product identifiers, format masks
+  (`XXXX-XXXX`), and generated embed/SVG output literal.
+- Privacy / Terms Chinese pages must keep `legal.enPrevails`
+  (「本页内容以英文版本为准。」).
+- Dates and numbers follow `tt_locale` through `intlTag` or `useFormat`.
+  Do not call bare `toLocaleDateString()` / `toLocaleString()` without a
+  locale tag. Shared `formatCurrency` / `formatNumber` from `@/lib/utils`
+  take `locale` as the last argument; `useFormat()` already binds locale
+  and its second argument is compact, not locale. Leave embed/SVG/OG
+  output on the English default. `format.ts` must not import `t.ts`:
+  embed/SVG/OG renderers import `format.ts` for compact numbers and XML
+  escape. Dictionary-backed relative time lives in
+  `formatRelativeTime.ts`. Do not re-export it from `format.ts` or `utils.ts`.
+
 
 ## Upstream policy (Tokscale fork)
 
