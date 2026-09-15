@@ -158,3 +158,40 @@ export async function deleteFixtureUsers(usernames: string[]): Promise<void> {
     await sql.end();
   }
 }
+
+/**
+ * Mark a fixture user banned so T9 can prove BannedProfileView and login 403
+ * still work after Hall of Shame was removed. Same loopback + prefix gates
+ * as deleteFixtureUsers.
+ */
+export async function banFixtureUser(username: string, reason: string): Promise<void> {
+  if (!username.startsWith(FIXTURE_PREFIX)) {
+    throw new Error(
+      "E2E fixture ban refused: username is outside the t5e2e- prefix"
+    );
+  }
+  const target = requireLoopbackPostgresUrl(
+    process.env.DATABASE_URL ?? LOCAL_DATABASE_URL
+  );
+  const sql = postgres({
+    host: target.host,
+    port: target.port,
+    database: target.database,
+    username: target.username,
+    password: target.password,
+    max: 1,
+    ssl: false,
+  });
+  try {
+    const updated = await sql`
+      update users
+      set banned_at = now(), ban_reason = ${reason}
+      where username = ${username}
+    `;
+    if (updated.count !== 1) {
+      throw new Error(`E2E fixture ban missed ${username} (count=${updated.count})`);
+    }
+  } finally {
+    await sql.end();
+  }
+}

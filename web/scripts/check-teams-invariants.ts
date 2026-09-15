@@ -15,6 +15,7 @@ import {
   createGroup,
   createTeam,
   declineInvitation,
+  deleteGroup,
   deleteTeam,
   disbandGroup,
   disbandTeam,
@@ -24,6 +25,7 @@ import {
   leaveTeam,
   listMyInvitations,
   linkPendingInvitationsForEmail,
+  patchGroup,
   patchMemberRole,
   patchTeam,
   removeGroupMember,
@@ -210,6 +212,17 @@ try {
       visibility: "private",
     });
     expect("createTeam makes an active private team", team.status === "active");
+    const creatorRole = await sql<{ role: string }[]>`
+      SELECT "role" FROM "team_members"
+      WHERE "team_id" = ${team.id} AND "user_id" = ${admin.id}
+    `;
+    expect("createTeam makes the creator admin", creatorRole[0]?.role === "admin");
+    const renamed = await patchTeam(team.id, admin.id, {
+      name: `T4 Renamed ${stamp}`,
+      avatarUrl: "https://example.com/t4.png",
+    });
+    expect("admin can rename the team", renamed.name === `T4 Renamed ${stamp}`);
+    expect("admin can set avatarUrl", renamed.avatarUrl === "https://example.com/t4.png");
 
     await expectTeamStatus(
       "INV-1 createTeam rejected when already on a team",
@@ -319,6 +332,36 @@ try {
       403,
       () => disbandTeam(team.id, s1.id)
     );
+    await expectTeamStatus(
+      "subadmin cannot delete team",
+      403,
+      () => deleteTeam(team.id, s1.id)
+    );
+    const subGroup = await createGroup(team.id, s1.id, { name: "SubG" });
+    expect("subadmin can create a group", Boolean(subGroup.id));
+    const subRenamed = await patchTeam(team.id, s1.id, {
+      name: `T4 SubName ${stamp}`,
+    });
+    expect("subadmin can rename the team", subRenamed.name === `T4 SubName ${stamp}`);
+    const madePublic = await patchTeam(team.id, s1.id, { visibility: "public" });
+    expect("subadmin can change visibility", madePublic.visibility === "public");
+    await patchTeam(team.id, s1.id, { visibility: "private" });
+    const subInvite = await inviteMembers(team.id, s1.id, [
+      { email: `t4subinv_${stamp}@example.com` },
+    ]);
+    expect("subadmin can invite by email", Boolean(subInvite.created[0]?.id));
+    await addGroupMember(team.id, subGroup.id, s1.id, s2.id);
+    expect("subadmin can add a group member", true);
+    const renamedGroup = await patchGroup(team.id, subGroup.id, s1.id, {
+      name: "SubG2",
+    });
+    expect("subadmin can rename a group", renamedGroup.name === "SubG2");
+    await removeGroupMember(team.id, subGroup.id, s1.id, s2.id);
+    expect("subadmin can remove a group member", true);
+    await disbandGroup(team.id, subGroup.id, s1.id);
+    expect("subadmin can disband a group", true);
+    await deleteGroup(team.id, subGroup.id, s1.id);
+    expect("subadmin can delete a disbanded group", true);
     await patchMemberRole(team.id, admin.id, s2.id, "subadmin");
     await expectTeamStatus(
       "third subadmin is rejected",
@@ -425,6 +468,28 @@ try {
       name: `T4 B ${stamp}`,
       visibility: "private",
     });
+    await patchTeam(teamB.id, outsider.id, { visibility: "public" });
+    const { getTeamboard, getTeamboardTeams } = await import(
+      "../src/lib/teamboard/getTeamboard"
+    );
+    const listedPublic = await getTeamboardTeams(null);
+    expect(
+      "public team appears on signed-out Teamboard list",
+      listedPublic.some((row) => row.id === teamB.id)
+    );
+    const publicBoard = await getTeamboard(teamB.id, [], null, { page: 1 });
+    expect("signed-out viewer can open a public Teamboard", publicBoard.team.id === teamB.id);
+    await patchTeam(teamB.id, outsider.id, { visibility: "private" });
+    const listedPrivate = await getTeamboardTeams(admin.id);
+    expect(
+      "public-to-private drops from a non-member Teamboard list",
+      listedPrivate.some((row) => row.id === teamB.id) === false
+    );
+    await expectTeamStatus(
+      "public-to-private is 404 to a non-member",
+      404,
+      () => getTeamboard(teamB.id, [], admin.id, { page: 1 })
+    );
     const groupB = await createGroup(teamB.id, outsider.id, { name: "Other" });
     await expectTeamStatus(
       "cannot delete group members on another team's group",
@@ -683,6 +748,13 @@ try {
       "accept after group disbanded joins team only",
       gdTeamRows[0]?.role === "member" && gdGroupRows[0].count === 0
     );
+    await expectTeamStatus(
+      "active group cannot be deleted",
+      409,
+      () => deleteGroup(team.id, autoGroup.id, admin.id)
+    );
+    await deleteGroup(team.id, goneGroup.id, admin.id);
+    expect("admin can delete a disbanded empty group", true);
 
     await sql`
       INSERT INTO "submissions" (
