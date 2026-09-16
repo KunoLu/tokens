@@ -1,101 +1,89 @@
-# Cloudflare Deployment
+# Self-host Deployment
 
-> The app deploys to a Cloudflare Worker via OpenNext. The moving parts:
-> `web/wrangler.jsonc` (bindings), `web/open-next.config.ts` (cache topology),
-> and `web/worker.ts` (custom entrypoint with edge caching and cron).
+> The app self-hosts on a Node server: `next build` + `next start`, with
+> Postgres over `DATABASE_URL`. The Cloudflare Workers layer (wrangler.jsonc,
+> OpenNext cache topology, `worker.ts` edge cache + cron) was removed in the
+> self-host cutover — this file is its replacement.
 
 ---
 
-## The Worker (`web/wrangler.jsonc`)
+## Runtime (`web/`)
 
-- **The top-level config IS production.** The Worker is named
-  `tokens-staging` for historical reasons, but tokens.ci is bound to it and
-  the database behind it was loaded from the production dump — every deploy of
-  this config goes straight to live traffic. The `env.production` block is
-  unused (a second Worker named `tokens` that was never created); do not read
-  it as "the real one".
-- `compatibility_flags: ["nodejs_compat", "global_fetch_strictly_public"]` —
-  the Postgres driver, `node:crypto`, and the Next.js runtime need Node
-  built-ins; the second flag makes OpenNext's server-side fetches go over the
-  public internet instead of looping in-process.
-- **Placement is pinned `targeted` to `aws:us-west-2`**, the database's
-  region. Pages issue several sequential queries and measured edge placement
-  spent 96% of wall time waiting on the database (p50 218ms vs 8ms CPU).
-  `targeted`, not `smart`: smart needs sustained multi-region traffic and the
-  answer is already known. This lives in config because wrangler treats the
-  file as source of truth and overwrites dashboard settings.
-- **Hyperdrive** points at Neon's *direct* endpoint, not the `-pooler` one —
-  Hyperdrive already pools, and stacking it on PgBouncer adds a hop for
-  nothing. Query caching (`max-age 60, swr 30`) and
-  `origin_connection_limit` live on the Hyperdrive config, set via
-  `wrangler hyperdrive update`.
-- `WORKER_SELF_REFERENCE` service binding lets the ISR queue re-invoke the
-  Worker to regenerate pages; the service name must equal the worker name.
+- `bun run build` — copies `install.sh`/client assets into `public/`, then
+  `next build`. No secrets and no `DATABASE_URL` are required at build time:
+  pages that touch the database are server-rendered on demand, and the
+  leaderboard tolerates a missing `DATABASE_URL`.
+- `bun run start` — the production process. Required env:
+  `NODE_ENV=production`, `DATABASE_URL`, `NEXT_PUBLIC_URL=https://<origin>`
+  (device-flow links, email links, invite links, and the CSRF origin list all
+  derive from it), and `DATABASE_SSL=disable` unless the database has TLS
+  (production defaults to `require`).
+- Serve HTTPS through a reverse proxy in front of `next start`. The CLI
+  device flow rejects non-loopback HTTP verification URLs, and production
+  session cookies are `Secure`.
+- `web/middleware.ts` runs the `/settings` session gate; everything else is
+  route-level.
 
-- **Auth rate limit:** `ratelimits` binding `AUTH_RATE_LIMITER` (namespace
-  `1001`, 10 requests / 60s) on register, login, forgot-password, and
-  resend-verification. Local `next dev` has no binding — skip, do not invent
-  a counter table. A bound limiter whose `limit()` throws fail-closes (429);
-  do not catch that as a skip.
-- **Email secrets** (`wrangler secret put`, not in this file):
-  `RESEND_API_KEY`, `EMAIL_FROM`. Missing secrets log and skip send; they
-  must not fail register/forgot.
+## Database connection (`web/src/lib/db/index.ts`)
 
-## Cache topology (`web/open-next.config.ts`)
+- One process-wide pool (singleton on `globalThis`, HMR-safe in dev). Default
+  `max=5`, overridable with `DATABASE_POOL_MAX` (clamped 1..5).
+- TLS: `DATABASE_SSL` (`disable`/`require`); production defaults to
+  `require`.
+- `prepare: false` — `max_lifetime` recycles connections and prepared
+  statements are connection-scoped.
 
-Every read goes through `unstable_cache` (60s revalidate) and every accepted
-submission fans out `revalidateTag` calls, so the topology is chosen for
-write-heavy invalidation:
+## Daily maintenance cron
 
-| Concern | Override | Why |
-|---------|----------|-----|
-| Incremental (ISR/`unstable_cache`) payloads | R2 (`NEXT_INC_CACHE_R2_BUCKET`) | Cheap, strongly consistent, unbounded vs KV |
-| Revalidation queue | `DOQueueHandler` Durable Object | Dedupes concurrent time-based revalidations — one regeneration per cache miss, not one per request |
-| Tag cache | `DOShardedTagCache` (`baseShardSize: 12`) | Sharded so concurrent submits invalidating overlapping tags don't serialize on one DO; D1 variant is for lighter loads |
-| Edge cache purge | `purgeCache({ type: "durableObject" })` via `BucketCachePurge` | Batches CDN purges per invalidated tag; needs no zone API token |
+There is no managed scheduler. Run the maintenance endpoint from the same
+host, on a schedule, against loopback so no public proxy timeout can cut a
+run:
 
-## Custom entrypoint (`web/worker.ts`)
+```
+POST http://127.0.0.1:3000/api/cron/refresh-social-links
+Authorization: Bearer $CRON_SECRET
+```
 
-Wraps `./.open-next/worker.js` for two reasons:
+- 401 without/with a wrong secret; 503 when `CRON_SECRET` is unset.
+- Awaits all three jobs (social-links refresh, expired email-token sweep,
+  invitation expiry). 200 with per-job counts only when all succeeded; 500
+  when any failed — the scheduler retries on non-2xx. All three are
+  idempotent sweeps, so retries are safe.
+`authRateLimitAllowed` is an in-process fixed window (10 requests / 60s per
+client IP) on register, login, forgot-password, and resend-verification. The
+client key is `X-Forwarded-For` ONLY, and only because the reverse proxy
+overwrites it — never honor `CF-Connecting-IP` on this path, or a direct
+client can forge its way into fresh buckets. Counters are per-process —
+horizontal scaling needs a shared store.
 
-1. **Explicit edge caching.** Cloudflare does not put Worker responses in the
-   edge cache on its own — `Cache-Control` headers are honored by browsers and
-   nothing else. The worker reads/writes `caches.default` for:
-   - `/api/og`, `/api/embed/*/svg`, `/api/badge/*/svg` (`CACHEABLE`) — pure
-     functions of their URL that cost real CPU/DB work;
-   - `/` and `/leaderboard` (`PAGE_CACHEABLE`) — signed-out readers
-     only, because these pages personalize from the session. `/teamboard` is
-     **not** edge-cached: public→private must 404 immediately and
-     `revalidateTag("leaderboard")` does not purge `caches.default`.
-     Synthetic cache keys include `__sort` (leaderboard sort cookie) and
-     `__locale` from `parseLocale(tt_locale)` (`en` or `zh` only — raw
-     cookies must not fragment the cache);
-   - `/u/*` (`PROFILE_CACHEABLE`) — cacheable for everyone (no per-reader
-     identity), with unknown query params dropped from the cache key, `__locale`
-     appended the same way, and only 200s stored (the case-canonicalizing 308
-     must not be cached).
-2. **The daily cron** (`20 3 * * *`) runs `refreshAllSocialLinks`,
-   `deleteExpiredEmailTokens`, and `expireInvitations` as independent
-   `waitUntil` tasks — no public endpoint, no `CRON_SECRET` round trip. A
-   social-link failure must not skip invitation expiry. Social-link snapshots
-   still feed Profile icons; there is no verified badge. Invitation expiry is
-   owned by T4.
+## Rate limiting
 
-## Commands
+`authRateLimitAllowed` is an in-process fixed window (10 requests / 60s per
+client IP) on register, login, forgot-password, and resend-verification. The
+client key reads `CF-Connecting-IP` then `X-Forwarded-For`; the reverse proxy
+must set/overwrite XFF or clients can spoof it. Counters are per-process —
+horizontal scaling needs a shared store.
 
-| Command | Purpose |
-|---------|---------|
-| `bun run cf:build` | asset copies + `opennextjs-cloudflare build` |
-| `bun run cf:preview` | build + local Cloudflare preview |
-| `bun run cf:deploy` | build + `wrangler deploy` (**production**) |
-| `bun run cf:typegen` | regenerate `cloudflare-env.d.ts` from bindings |
-| `bun run dev` | `next dev` with CF bindings via `initOpenNextCloudflareForDev` |
+## Caching
+
+Next's default cache handler (`.next/cache` filesystem + in-memory) backs
+`unstable_cache` and `revalidateTag`/`revalidatePath`. There is no edge HTML
+cache: every request renders at origin. Put a CDN in front if that becomes
+the bottleneck.
+
+## Email
+
+Resend over HTTPS. Without `RESEND_API_KEY` / `EMAIL_FROM` sends are logged
+and skipped — register/forgot still succeed; team email invitations are
+effectively disabled (invitees never see mail, and email-targeted invites
+require a verified address at accept time).
 
 ## Gotchas already paid for
 
-- `revalidate` + `searchParams` on Workers flaps between 200/500 — use
-  `force-dynamic` (former `/shame` page).
+- `revalidate` + `searchParams` on pages flapped between 200/500 in the
+  Workers era; pages that depend on `searchParams` use
+  `export const dynamic = 'force-dynamic'` (kept — harmless and safer).
 - `next/image` optimization is off (`images.unoptimized: true` in
-  `next.config.ts`) — use static assets and plain `<img>` for avatars.
-- Don't create per-request DB pools across requests — see
+  `next.config.ts`) — static assets and plain `<img>` for avatars.
+- Don't create per-request DB pools — see
   [Database Guidelines](./database-guidelines.md).

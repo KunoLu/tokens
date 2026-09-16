@@ -1,10 +1,11 @@
 # Web Frontend Guidelines (`@tokens/web`)
 
 > Conventions for the Next.js app under `web/` — the Tokens social platform
-> (leaderboard, public profiles, settings). Deployed to Cloudflare Workers via
-> OpenNext, with Drizzle/Postgres behind Hyperdrive. There is no separate web
-> backend package: API route handlers, the Drizzle schema, and data loaders
-> live inside this app, mostly under `web/src/lib/`.
+> (leaderboard, public profiles, settings). Self-hosted: `next build` +
+> `next start` on a Node server, with Drizzle/Postgres over `DATABASE_URL`.
+> There is no separate web backend package: API route handlers, the Drizzle
+> schema, and data loaders live inside this app, mostly under `web/src/lib/`.
+
 
 ---
 
@@ -13,12 +14,13 @@
 | Layer | Choice |
 |-------|--------|
 | Framework | Next.js 16 App Router, React 19 (`web/package.json`) |
-| Deploy | `@opennextjs/cloudflare` → Cloudflare Worker (`web/worker.ts` wraps `.open-next/worker.js`) |
+| Deploy | Self-hosted Node: `next build` + `next start` (the Cloudflare Workers layer was removed in the self-host cutover) |
 | UI | shadcn v4 (`style: base-nova` in `web/components.json`), `@base-ui/react` primitives, Tailwind CSS v4, CVA, lucide-react |
 | Theming | `next-themes`; semantic tokens in `web/src/app/globals.css` |
-| Database | Drizzle ORM + postgres-js; Hyperdrive binding in production, `DATABASE_URL` locally (`web/src/lib/db/index.ts`) |
+| Database | Drizzle ORM + postgres-js over `DATABASE_URL` in every environment (`web/src/lib/db/index.ts`) |
 | Validation | Zod (`web/src/lib/validation/submission.ts`) |
 | Toasts | react-toastify via `ThemedToastContainer` |
+
 
 ---
 
@@ -31,12 +33,11 @@
 | [Hook Guidelines](./hook-guidelines.md) | Hooks live in `lib/use*.ts`; the `useSettings` pattern |
 | [State Management](./state-management.md) | RSC `initialData`, URL query state, localStorage + cookie, local `useState` |
 | [Type Safety](./type-safety.md) | `lib/types.ts`, Zod submission schemas, const-array unions, Drizzle inference |
-| [Data Fetching](./data-fetching.md) | RSC calls lib functions directly; `unstable_cache` + tags; client fetch for mutations only |
-| [Error Handling](./error-handling.md) | `error.tsx` boundary, API JSON errors, Alert/toast, missing-`DATABASE_URL` fallback |
-| [Database Guidelines](./database-guidelines.md) | `lib/db/schema.ts`, Hyperdrive vs `DATABASE_URL`, per-request WeakMap, additive migrations |
+| [Database Guidelines](./database-guidelines.md) | `lib/db/schema.ts`, `DATABASE_URL` connection lifecycle, additive migrations |
 | [Authentication](./auth.md) | Email/password APIs, PBKDF2, Resend, session cookie unchanged, no GitHub OAuth |
-| [Cloudflare Deployment](./cloudflare-deployment.md) | wrangler, OpenNext cache topology, `worker.ts` edge cache + cron |
+| [Self-host Deployment](./self-host-deployment.md) | Node `next build`/`next start`, cron HTTP endpoint, in-process rate limit |
 | [Quality Guidelines](./quality-guidelines.md) | No web unit tests, verification commands, upstream merge policy |
+
 
 ---
 
@@ -48,12 +49,13 @@ web unit tests; Playwright E2E is the T7/T8/T9/T10/T11 exception for browser jou
 | Command | Purpose |
 |---------|---------|
 | `bun run lint` | ESLint (next core-web-vitals + typescript) |
-| `bun run typecheck` | `wrangler types` → `cloudflare-env.d.ts`, then `tsc --noEmit` |
+| `bun run typecheck` | `tsc --noEmit` |
 | `bun run build` | copies `install.sh`/client assets into `public/`, then `next build` |
 | `bun run test:migrations` | `drizzle-kit migrate` + `scripts/check-migrations.ts` |
 | `bun run test:teams` | T4 domain invariants (`scripts/check-teams-invariants.ts`); T7 FR-2 Teamboard pagination / multi-value `groupIds`, T8 `listMyInvitations`, and T9 §12 (creator admin, subadmin remaining ops, public→private Teamboard, delete-after-disband) live in the same runner |
-| `bun run test:e2e` | Playwright LocaleToggle, full-page copy, Privacy/Terms English-precedence, Teamboard, Profile membership, and T9 acceptance (`t9-acceptance.spec.ts`) (repo-root `tests/e2e/`, config `web/playwright.config.ts`) |
-| `bun run cf:build` / `cf:preview` / `cf:deploy` | OpenNext Cloudflare bundle, local preview, `wrangler deploy` |
+| `bun run test:e2e` | Playwright LocaleToggle, full-page copy, Privacy/Terms English-precedence, Teamboard, Profile membership, T9 acceptance (`t9-acceptance.spec.ts`), and maintenance-cron auth (`cron.spec.ts`) (repo-root `tests/e2e/`, config `web/playwright.config.ts`) |
+
+
 
 ## Pre-Development Checklist
 

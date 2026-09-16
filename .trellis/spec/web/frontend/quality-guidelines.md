@@ -11,11 +11,11 @@
 | Command | Gate |
 |---------|------|
 | `bun run lint` | ESLint (next core-web-vitals + typescript) |
-| `bun run typecheck` | `wrangler types` → `cloudflare-env.d.ts` + `tsc --noEmit` |
+| `bun run typecheck` | `tsc --noEmit` |
 | `bun run build` | asset copies + `next build` |
 | `bun run test:migrations` | `drizzle-kit migrate` + `scripts/check-migrations.ts` |
-| `bun run test:teams` | Worker `PAGE_CACHEABLE` / `workerSharesSignedOutHtml` (`scripts/check-page-cacheable.ts`; `/teamboard` must not be shared-cached) + T4 domain invariants + T7 FR-2 Teamboard pagination / multi-value `groupIds` + T8 `listMyInvitations` + T9 §12 (creator admin, rename/avatar, subadmin cap **and** remaining Team/Group ops, public→private Teamboard, delete-after-disband) (`scripts/check-teams-invariants.ts`). Needs `DATABASE_URL` (local OrbStack `tokens-postgres` is `postgresql://tokens:tokens@127.0.0.1:5433/tokens`). |
-| `bun run test:e2e` | Playwright LocaleToggle, full-page copy, Privacy/Terms English-precedence, Teamboard, Profile membership, and T9 acceptance (`tests/e2e/t9-acceptance.spec.ts`: `/shame` 404, Leaderboard column order, Docs remaining vs removed sections, banned profile + login 403, unsigned Settings→login, embed/badge SVG 200, archive POST 401). Specs live at repo-root `tests/e2e/`; config is `web/playwright.config.ts`. Owner approved 2026-09-14. Locale copy coverage is `tests/e2e/i18n-locale.spec.ts` (`web/features/i18n.feature`). Leaderboard `thead th` includes a mobile `Usage` cell (`sm:hidden`); column-order assertions use `thead th:visible` under the Desktop Chrome project — do not delete that header or filter it out of the expected sequence. |
+| `bun run test:teams` | T4 domain invariants + T7 FR-2 Teamboard pagination / multi-value `groupIds` + T8 `listMyInvitations` + T9 §12 (creator admin, rename/avatar, subadmin cap **and** remaining Team/Group ops, public→private Teamboard, delete-after-disband) (`scripts/check-teams-invariants.ts`). Needs `DATABASE_URL` (local OrbStack `tokens-postgres` is `postgresql://tokens:tokens@127.0.0.1:5433/tokens`). |
+| `bun run test:e2e` | Playwright LocaleToggle, full-page copy, Privacy/Terms English-precedence, Teamboard, Profile membership, maintenance-cron auth (`tests/e2e/cron.spec.ts`, `web/features/maintenance-cron.feature`), and T9 acceptance (`tests/e2e/t9-acceptance.spec.ts`: `/shame` 404, Leaderboard column order, Docs remaining vs removed sections, banned profile + login 403, unsigned Settings→login, embed/badge SVG 200, archive POST 401). Specs live at repo-root `tests/e2e/`; config is `web/playwright.config.ts`. Owner approved 2026-09-14. Locale copy coverage is `tests/e2e/i18n-locale.spec.ts` (`web/features/i18n.feature`). Leaderboard `thead th` includes a mobile `Usage` cell (`sm:hidden`); column-order assertions use `thead th:visible` under the Desktop Chrome project — do not delete that header or filter it out of the expected sequence. |
 
 Do not add a general **unit-test** framework without a team decision — the upstream tests were
 deliberately removed (`docs/upstream_policy.md`). `test:teams` is the T4 exception
@@ -103,10 +103,8 @@ User-visible JSX, `aria-label`, toast, empty/error, and form labels go through
 | Anti-pattern | Correct pattern |
 |--------------|-----------------|
 | Server-side `fetch` to own `/api/*` from RSC | Shared `lib/` function (`loadPublicProfileForPage`) |
-| Hyperdrive stacked on Neon's PgBouncer pooler | Point Hyperdrive at the direct endpoint |
-| DB pool reused across CF requests | Per-request client keyed by `ctx` (WeakMap in `lib/db/index.ts`) |
-| `revalidate` + `searchParams` on Workers | `export const dynamic = 'force-dynamic'` |
+| `revalidate` + `searchParams` on a page | `export const dynamic = 'force-dynamic'` |
 | HeroUI / styled-components | shadcn + Tailwind tokens + `tw()` leftover only |
-| `next/image` optimization on Workers | Disabled; static assets + plain `<img>` |
+| `next/image` optimization | Disabled; static assets + plain `<img>` |
 | Assuming `@/hooks` exists | Hooks live in `lib/use*.ts` |
 | Runtime-string Tailwind variants inside `tw()` | Normal component with `cva`/`cn()` |

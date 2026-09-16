@@ -1,28 +1,30 @@
 # Database Guidelines
 
-> Drizzle ORM over Postgres (Neon), reached through a Hyperdrive binding in
-> production and `DATABASE_URL` locally. Schema, migrations, and helpers live
-> in `web/src/lib/db/`.
+
+
+> Drizzle ORM over a self-hosted Postgres, reached through `DATABASE_URL` in
+> every environment. Schema, migrations, and helpers live in
+> `web/src/lib/db/`.
+
 
 ---
 
 ## Connection lifecycle (`web/src/lib/db/index.ts`)
 
-- On Workers, the connection string comes from the `HYPERDRIVE` binding; off
-  Workers (local dev, scripts) from `DATABASE_URL`
-  (`getConnectionString`).
-- TLS: `require` against Neon, off for local Postgres; `DATABASE_SSL` toggles
-  explicitly. Hyperdrive terminates TLS to the origin itself, so the driver
-  must not negotiate TLS a second time on that hop (`resolveSsl`).
+- The connection string always comes from `DATABASE_URL`
+  (`getConnectionString`) — the Workers/Hyperdrive layer was removed in the
+  self-host cutover.
+- TLS: `require` in production by default, off for a plain local Postgres;
+  `DATABASE_SSL` toggles explicitly (`resolveSsl`).
 - The client is created via Drizzle's config-based API — passing a `postgres`
   `Sql` instance directly breaks types in the monorepo (duplicate `postgres`
   package copies with incompatible branded types).
-- **Per-request clients, keyed by execution context.** Reusing one pool across
-  Cloudflare requests caused production 500s; `getDb()` keeps a
-  `WeakMap<object, DbClient>` keyed by the request `ctx`
-  (`db/index.ts:105-139`). The exported `db` is a lazy `Proxy` over `getDb()`.
-  Never cache a `DbClient` in module scope beyond the singleton/globalForDb
-  hot-start mechanism already there.
+- **One process-wide pool.** The server is a long-lived Node process, so
+  `getDb()` keeps a single client on `globalThis` (HMR-safe in dev). Default
+  `max=5`, overridable with `DATABASE_POOL_MAX` (clamped 1..5). The exported
+  `db` is a lazy `Proxy` over `getDb()`. Never cache a `DbClient` in module
+  scope beyond that singleton.
+
 
 ## Schema (`web/src/lib/db/schema.ts`)
 - `pgTable` definitions with section comments, explicit indexes, and `jsonb`
@@ -114,7 +116,8 @@ Row types: `$inferSelect` / `$inferInsert` on the tables. Domain unions: `lib/te
 - `teams.created_by` survives disband; delete auth reads this column, not `team_members.role`.
 - INV-2 (group member must already be a team member) is application-layer (T4), not a DB constraint.
 - Operational rollback: `DROP TABLE` the five tables. Forward SQL is CREATE only — do not put DROP in `0025`.
-- Env: none new. Apply with existing `DATABASE_URL` / Hyperdrive.
+- Env: none new. Apply with existing `DATABASE_URL`.
+
 
 ### 4. Validation & Error Matrix
 
@@ -152,10 +155,11 @@ Negative INSERTs inside the checker transaction MUST use `SAVEPOINT` / `ROLLBACK
 ### 7. Wrong vs Correct
 
 #### Wrong
-Put `DROP TABLE` in `0025` as “rollback SQL”. Run `bun run db:generate` against a stale snapshot to “fill” 0025. Encode INV-2 as a DB FK. Sweep `team_invitations` from `worker.ts` cron in T3.
+Put `DROP TABLE` in `0025` as “rollback SQL”. Run `bun run db:generate` against a stale snapshot to “fill” 0025. Encode INV-2 as a DB FK. Sweep `team_invitations` from `worker.ts` cron in T3 (file later removed in the self-host cutover).
 
 #### Correct
-Forward migration is CREATE / INDEX / FK / CHECK only. Commit `0025_snapshot.json` with journal idx 25. INV-2 stays in T4 domain code. Cron sweep waits for T4; tables exist as of 0025.
+Forward migration is CREATE / INDEX / FK / CHECK only. Commit `0025_snapshot.json` with journal idx 25. INV-2 stays in T4 domain code. Cron sweep waits for T4; tables exist as of 0025. The sweep now lives in `POST /api/cron/refresh-social-links` (see [Self-host Deployment](./self-host-deployment.md)).
+
 
 ## Scenario: 0026 invitation auto-assign group_id
 

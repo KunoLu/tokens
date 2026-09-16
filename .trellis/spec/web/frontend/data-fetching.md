@@ -45,14 +45,14 @@ third parties), not for our own pages.
   it); cache key includes teamId + sorted groupIds + period(+from/to) +
   sortBy + page + search (`lib/teamboard/getTeamboard.ts`).
 - Mutations invalidate by tag: the submit route calls `revalidateTag` after
-  writes, fanning out `leaderboard` + `user:<name>` invalidations (that
-  write-heaviness is why the tag cache is a *sharded* Durable Object — see
-  [Cloudflare Deployment](./cloudflare-deployment.md)).
+  writes, fanning out `leaderboard` + `user:<name>` invalidations. The cache
+  handler is Next's default (`.next/cache` filesystem + in-memory) — see
+  [Self-host Deployment](./self-host-deployment.md).
 - Pages/routes also export `revalidate` (`export const revalidate = 60` on
   `u/[username]/page.tsx:10` and the users API route).
-- **`revalidate` + `searchParams` flaps on Workers** (a former `/shame` page
-  alternated 200/500): pages that depend on `searchParams` use
-  `export const dynamic = 'force-dynamic'` instead.
+- **`revalidate` + `searchParams` flapped on Workers** (a former `/shame`
+  page alternated 200/500): pages that depend on `searchParams` keep
+  `export const dynamic = 'force-dynamic'` — harmless on self-hosted Node.
 
 ## Client `fetch`: mutations and session only
 

@@ -61,20 +61,20 @@
 | resend-verification | empty | **required cookie** |
 
 Mutating POSTs need `hasAllowedOrigin`. Missing/disallowed Origin → 403.
-`AUTH_RATE_LIMITER` (wrangler `ratelimits`, ns `1001`, 10/60s) on register,
-login, forgot-password, resend-verification. Missing binding (local
-`next dev`) skips the limiter. The binding is duplicated into
-`env.production` with the same stable `namespace_id` "1001" — wrangler env
-blocks override rather than merge, and the id must never change per deploy.
+`authRateLimitAllowed` (`lib/auth/rateLimit.ts`) is an in-process fixed
+window (10 requests / 60s per client IP) on register, login,
+forgot-password, resend-verification. Behind a reverse proxy the key comes
+from `X-Forwarded-For` — the proxy must overwrite it. Counters are
+per-process; horizontal scaling needs a shared store. (This replaced the
+Cloudflare `AUTH_RATE_LIMITER` binding in the self-host cutover.)
+
 
 Login with no user or no `password_hash` (legacy OAuth account) still runs
 PBKDF2 against a constant dummy hash derived once per isolate, so timing does
 not reveal registered emails; the 401 string is identical either way.
 
-**Response:** `{ ok: true }` or `{ error: string }` / `{ error, details: string[] }`.
-
-**Env (secrets via `wrangler secret put`, never in git):** `RESEND_API_KEY`,
-`EMAIL_FROM`. Optional: `NEXT_PUBLIC_URL` for email links.
+**Env (environment secrets, never in git):** `RESEND_API_KEY`,
+`EMAIL_FROM`, `CRON_SECRET`. `NEXT_PUBLIC_URL` for email/device/invite links.
 
 **DB (`0024_add_password_auth.sql`):** `users.password_hash`,
 `users.email_verified_at`, `users.github_id` nullable (UNIQUE kept),
@@ -158,13 +158,11 @@ import { avatarUrlFor } from "@/lib/avatar";
 src={avatarUrlFor(user)}
 ```
 
----
-
 ## Design Decision: PBKDF2 not bcrypt
 
-Workers cannot load bcrypt/argon2 native modules. WebCrypto PBKDF2 is
-zero-dependency and CPU-bounded. Prefix the stored hash so a later algorithm
-can migrate.
+PBKDF2 was chosen for the Workers era (no native modules, CPU-bounded).
+Kept after the self-host cutover: zero-dependency and adequate on Node; the
+stored hash carries an algorithm prefix so a later algorithm can migrate.
 
 ## Design Decision: Fire-and-forget email
 

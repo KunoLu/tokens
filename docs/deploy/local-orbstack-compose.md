@@ -1,6 +1,7 @@
 # 本地 OrbStack Compose（给 Agent）
 
-本 fork **本地**数据库是这份 OrbStack Compose 里的自建 Postgres。云服务器自建是**计划**，切流 pending：`web/wrangler.jsonc` 仍有真实 `HYPERDRIVE` 绑定（注释写的是上游 Neon）。Neon + Hyperdrive 是直接上游 `missuo/tokens` 的线上拓扑，不是本 fork 已落地的云上部署。
+本 fork **本地**数据库是这份 OrbStack Compose 里的自建 Postgres，云服务器同法自建。Workers/Hyperdrive 层已在 self-host cutover 中删除；Neon + Hyperdrive 是直接上游 `missuo/tokens` 的历史拓扑。
+
 
 
 本地 UI 验证用 Compose，**不**挂 git checkout。仓库改完必须先 rsync 再起 web。Compose 文件不在本仓库。
@@ -44,7 +45,7 @@
 | 宿主机 `DATABASE_URL` | `postgresql://tokens:tokens@127.0.0.1:5433/tokens` |
 | 容器 `DATABASE_URL` | `postgresql://tokens:tokens@postgres:5432/tokens` |
 | TLS | `DATABASE_SSL=disable` |
-| 上游绑定覆盖 | `CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE` 指到 Compose `postgres:5432`（`web/` 仍读 wrangler Hyperdrive 绑定，数据在自建库） |
+| 定时维护 | `CRON_SECRET=local-cron-secret`（仅 dev；生产用随机长串） |
 
 Web 是 **`next dev`**，不是 wrangler preview。本机若已有进程占 3000，先停掉。云上自建库尚未落地，不要把这份 Compose 密码当云上配置。
 

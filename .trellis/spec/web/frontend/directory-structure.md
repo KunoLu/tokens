@@ -50,11 +50,7 @@ web/
 ├── scripts/                      # Migration checks, codegen (excluded from tsc)
 ├── playwright.config.ts          # Playwright E2E; testDir is repo-root tests/e2e
 ├── drizzle.config.ts
-├── wrangler.jsonc                # Cloudflare Worker config (production!)
-├── open-next.config.ts           # OpenNext cache topology
-├── next.config.ts                # unoptimized images, security headers,
-│                                 # initOpenNextCloudflareForDev
-└── worker.ts                     # Edge cache for OG/embed/HTML + daily cron
+└── next.config.ts                # unoptimized images, security headers
 ```
 
 ## Ownership rules

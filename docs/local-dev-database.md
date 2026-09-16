@@ -2,7 +2,8 @@
 
 本仓库没有独立 backend 包；API / Drizzle schema 在 `web/`。
 
-**本 fork 本地库是自建 Postgres**（OrbStack Compose，`docs/deploy/local-orbstack-compose.md`）。云服务器自建是计划，切流 pending：`web/wrangler.jsonc` 仍有 `HYPERDRIVE` 绑定。**Neon + Hyperdrive 是直接上游 `missuo/tokens` 的线上拓扑，不是本 fork 已落地的云上部署。**云上自建的必要条件与验收清单见 `docs/deploy/self-host-production.md`。
+**本 fork 的库是自建 Postgres**（本地 OrbStack Compose，见 `docs/deploy/local-orbstack-compose.md`；云服务器同法自建）。Workers/Hyperdrive 层已在 self-host cutover 中删除；云上清单见 `docs/deploy/self-host-production.md`。**Neon + Hyperdrive 是直接上游 `missuo/tokens` 的历史拓扑，与本 fork 无关。**
+
 
 
 
@@ -28,9 +29,8 @@
 | Web 容器 `DATABASE_URL` | `postgresql://tokens:tokens@postgres:5432/tokens`（服务名，不要写 `127.0.0.1`） |
 | TLS | 关（本地容器无 TLS；Web 设 `DATABASE_SSL=disable`） |
 
-`web/` 仍带上游 Hyperdrive 绑定：`next dev` 会读 `web/wrangler.jsonc` 的 `localConnectionString`。Compose 用 `CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE` 指到本机 `postgres:5432`，**不是**在用 Neon。安装用 `bun install --frozen-lockfile`，不改仓库 `bun.lock`。
+Web 容器跑的是 **`next dev`**，数据库直连 `DATABASE_URL`（Compose 指向 `postgres:5432`）。没有任何 Cloudflare 绑定。安装用 `bun install --frozen-lockfile`，不改仓库 `bun.lock`。浏览器打开 `http://localhost:3000` 验 UI。邮件未配 `RESEND_API_KEY` 时只打日志。
 
-Web 容器跑的是 **`next dev`**，不是 OpenNext / wrangler preview。浏览器打开 `http://localhost:3000` 验 UI。邮件未配 `RESEND_API_KEY` 时只打日志。
 
 
 
