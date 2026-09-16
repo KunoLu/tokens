@@ -10,6 +10,7 @@ import { refreshAllSocialLinks } from "./src/lib/cron/refreshSocialLinks";
 import { deleteExpiredEmailTokens } from "./src/lib/auth/emailTokens";
 import { expireInvitations } from "./src/lib/teams/service";
 import { parseLocale } from "./src/lib/i18n/locale";
+import { workerSharesSignedOutHtml } from "./src/lib/cache/pageCacheable";
 
 /**
  * Routes whose responses are a pure function of their URL and cost real work to
@@ -43,8 +44,13 @@ const CACHEABLE = /^\/api\/(og|embed\/[^/]+\/svg|badge\/[^/]+\/svg)/;
  * leaderboard renders "Your position" from the session — and a shared cache is
  * exactly the wrong place for that. Anyone carrying a session cookie takes the
  * normal path and sees precisely what they see today.
+ *
+ * `PAGE_CACHEABLE` lives in `src/lib/cache/pageCacheable.ts` so the Worker and
+ * `scripts/check-page-cacheable.ts` cannot drift. `/teamboard` is not in the
+ * set: public→private must 404 immediately; `revalidateTag("leaderboard")`
+ * does not purge `caches.default`.
  */
-const PAGE_CACHEABLE = /^\/(leaderboard|teamboard)?$/;
+
 
 /**
  * Public profiles, cacheable for *every* reader rather than signed-out ones.
@@ -153,8 +159,10 @@ function sharedCacheKey(request: Request, url: URL): Request | null {
     return profileCacheKey(url, request);
   }
   if (
-    PAGE_CACHEABLE.test(url.pathname) &&
-    readCookie(request, SESSION_COOKIE) === null
+    workerSharesSignedOutHtml(
+      url.pathname,
+      readCookie(request, SESSION_COOKIE) !== null
+    )
   ) {
     return pageCacheKey(request, url);
   }

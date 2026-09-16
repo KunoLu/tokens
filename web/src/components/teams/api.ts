@@ -1,8 +1,9 @@
 /**
  * Thin fetch wrapper for the /api/teams* mutations. Returns `null` on
- * success, otherwise the server's error message — callers toast it as-is
- * because TeamError messages are already user-facing English.
+ * success, otherwise a locale-mapped server error for toasts.
  */
+import { localizeServerErrorFromCookie } from "@/lib/i18n";
+
 export async function teamApi(
   path: string,
   init?: { method?: "POST" | "PATCH" | "PUT" | "DELETE"; body?: unknown }
@@ -18,10 +19,15 @@ export async function teamApi(
       .json()
       .catch(() => ({}));
     if (Array.isArray(data.details) && data.details.length > 0) {
-      return data.details.join("; ");
+      return data.details
+        .filter((item): item is string => typeof item === "string")
+        .map(localizeServerErrorFromCookie)
+        .join("; ");
     }
-    return typeof data.error === "string" ? data.error : `HTTP ${res.status}`;
+    return typeof data.error === "string"
+      ? localizeServerErrorFromCookie(data.error)
+      : localizeServerErrorFromCookie(`HTTP ${res.status}`);
   } catch {
-    return "Network error";
+    return localizeServerErrorFromCookie("Network error");
   }
 }

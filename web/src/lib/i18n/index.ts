@@ -10,4 +10,10 @@ export {
   parseLocale,
 } from "./locale";
 export { t, PALETTE_LABEL_KEYS } from "./t";
+export {
+  localizeServerError,
+  localizeServerErrorFromCookie,
+  localizeServerErrorList,
+} from "./serverError";
+
 export { I18nProvider, useFormat, useI18n } from "./I18nProvider";

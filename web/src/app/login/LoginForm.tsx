@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { CONTAINER } from "@/components/layout/Container";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { cn } from "@/lib/utils";
-import { useI18n } from "@/lib/i18n";
+import { localizeServerError, useI18n } from "@/lib/i18n";
 
 export default function LoginForm({ returnTo }: { returnTo: string }) {
   const [email, setEmail] = useState("");
@@ -28,7 +28,11 @@ export default function LoginForm({ returnTo }: { returnTo: string }) {
       });
       if (!response.ok) {
         const data = await response.json().catch(() => ({}));
-        setError(data.error || t("auth.login.failed"));
+        setError(
+          typeof data.error === "string"
+            ? localizeServerError(t, data.error)
+            : t("auth.login.failed")
+        );
         return;
       }
       // Full reload so the navigation picks up the fresh session cookie.

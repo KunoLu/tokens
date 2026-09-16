@@ -45,6 +45,12 @@ function resolveSsl(usingHyperdrive: boolean): "require" | false {
   return process.env.NODE_ENV === "production" ? "require" : false;
 }
 
+function localPoolMax(): number {
+  const n = Number(process.env.DATABASE_POOL_MAX);
+  if (Number.isInteger(n) && n >= 1 && n <= 5) return n;
+  return 1;
+}
+
 // Singleton pattern: prevent creating multiple connection pools across
 // serverless invocations sharing the same runtime (hot-start reuse).
 //
@@ -72,8 +78,10 @@ function createDb() {
       //
       // Without Hyperdrive the sockets are Postgres connections and the old
       // reasoning stands: dozens of concurrent cold-starts would exhaust
-      // max_connections (error 53300), so that path stays at one.
-      max: usingHyperdrive ? 3 : 1,
+      // max_connections (error 53300), so that path stays at one unless a
+      // test runner opts in (`DATABASE_POOL_MAX=2` for concurrent
+      // `patchMemberRole` in `check-teams-invariants.ts`).
+      max: usingHyperdrive ? 3 : localPoolMax(),
 
       // Close idle connections after 20 s so they don't linger between
       // infrequent invocations.

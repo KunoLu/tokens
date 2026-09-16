@@ -159,7 +159,7 @@ export async function createTeam(
   }
 
   try {
-    return await db.transaction(async (tx) => {
+    const team = await db.transaction(async (tx) => {
       const inserted = await tx
         .insert(teams)
         .values({
@@ -170,14 +170,16 @@ export async function createTeam(
           createdBy: userId,
         })
         .returning();
-      const team = inserted[0];
+      const created = inserted[0];
       await tx.insert(teamMembers).values({
-        teamId: team.id,
+        teamId: created.id,
         userId,
         role: "admin",
       });
-      return team;
+      return created;
     });
+    bumpLeaderboard();
+    return team;
   } catch (err) {
     if (postgresErrorCode(err) === "23505") {
       const still = await db
@@ -600,6 +602,7 @@ export async function createGroup(
       .insert(groups)
       .values({ teamId, name, createdBy: userId })
       .returning();
+    bumpLeaderboard();
     return rows[0];
   } catch (err) {
     if (postgresErrorCode(err) === "23505") {

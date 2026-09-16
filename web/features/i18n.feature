@@ -87,3 +87,10 @@ Feature: 界面语言切换
       When 访客打开服务条款页
       Then 页面为中文
       And 页面明确标注英文版本具有最终效力
+
+    # 覆盖: tests/e2e/i18n-locale.spec.ts「中文界面登录失败」。
+    Scenario: 中文界面登录失败显示中文错误
+      Given 访客的语言偏好为中文
+      When 访客用错误密码提交登录
+      Then 页面提示「邮箱或密码不正确」
+

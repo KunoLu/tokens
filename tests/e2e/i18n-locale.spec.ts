@@ -243,3 +243,18 @@ test("已登录设置页: 中文偏好渲染设置标题和说明", async ({
     })
   ).toBeVisible();
 });
+
+test("中文界面登录失败: 错误密码提示邮箱或密码不正确", async ({
+  page,
+  context,
+}) => {
+  await context.addCookies([
+    { name: "tt_locale", value: "zh", url: BASE_URL },
+  ]);
+  await page.goto("/login");
+  await page.getByLabel("邮箱").fill("nobody@example.test");
+  await page.getByLabel("密码").fill("WrongPass1!");
+  await page.getByRole("button", { name: "登录" }).click();
+  await expect(page.getByText("邮箱或密码不正确")).toBeVisible();
+});
+

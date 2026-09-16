@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { CONTAINER } from "@/components/layout/Container";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { cn } from "@/lib/utils";
-import { useI18n } from "@/lib/i18n";
+import { localizeServerError, useI18n } from "@/lib/i18n";
 
 type State = "verifying" | "success" | "error";
 
@@ -44,7 +44,11 @@ export default function VerifyEmailClient({ token }: { token: string }) {
         if (!response.ok) {
           const data = await response.json().catch(() => ({}));
           setState("error");
-          setMessage(data.error || t("auth.verify.failed"));
+          setMessage(
+            typeof data.error === "string"
+              ? localizeServerError(t, data.error)
+              : t("auth.verify.failed")
+          );
           return;
         }
         setState("success");
@@ -69,7 +73,11 @@ export default function VerifyEmailClient({ token }: { token: string }) {
       }
       if (!response.ok) {
         const data = await response.json().catch(() => ({}));
-        setMessage(data.error || t("auth.verify.couldNotResend"));
+        setMessage(
+          typeof data.error === "string"
+            ? localizeServerError(t, data.error)
+            : t("auth.verify.couldNotResend")
+        );
         return;
       }
       setResent(true);

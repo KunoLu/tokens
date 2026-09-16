@@ -44,6 +44,11 @@ mock.module("next/cache", () => ({
   revalidateTag: () => {},
 }));
 
+// Local drizzle defaults to max:1. This runner needs two connections so
+// concurrent patchMemberRole transactions can overlap (INV-5).
+process.env.DATABASE_POOL_MAX ??= "2";
+
+
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) {
   throw new Error("DATABASE_URL is required");
@@ -393,10 +398,40 @@ try {
         (${capTeam.id}, ${cap3.id}, 'member')
     `;
     await patchMemberRole(capTeam.id, capAdmin.id, cap1.id, "subadmin");
-    await Promise.allSettled([
-      patchMemberRole(capTeam.id, capAdmin.id, cap2.id, "subadmin"),
-      patchMemberRole(capTeam.id, capAdmin.id, cap3.id, "subadmin"),
-    ]);
+    const lockSql = postgres(databaseUrl, { max: 1 });
+    const watchSql = postgres(databaseUrl, { max: 1 });
+    let raced!: Promise<PromiseSettledResult<unknown>[]>;
+    try {
+      await lockSql.begin(async (tx) => {
+        await tx`
+          SELECT id FROM "team_members" WHERE "team_id" = ${capTeam.id} FOR UPDATE
+        `;
+        raced = Promise.allSettled([
+          patchMemberRole(capTeam.id, capAdmin.id, cap2.id, "subadmin"),
+          patchMemberRole(capTeam.id, capAdmin.id, cap3.id, "subadmin"),
+        ]);
+        let queued = 0;
+        for (let i = 0; i < 40; i++) {
+          const waiting = await watchSql<{ n: number }[]>`
+            SELECT count(*)::int AS n
+            FROM pg_stat_activity
+            WHERE wait_event_type = 'Lock'
+              AND pid != pg_backend_pid()
+          `;
+          queued = waiting[0]?.n ?? 0;
+          if (queued >= 1) break;
+          const { promise, resolve } = Promise.withResolvers<void>();
+          setTimeout(resolve, 25);
+          await promise;
+        }
+        expect("service promotions queue on team_members FOR UPDATE", queued >= 1);
+      });
+      await raced;
+    } finally {
+      await lockSql.end({ timeout: 1 });
+      await watchSql.end({ timeout: 1 });
+    }
+
     const capRoles = await sql<{ count: number }[]>`
       SELECT count(*)::int AS count FROM "team_members"
       WHERE "team_id" = ${capTeam.id} AND "role" = 'subadmin'

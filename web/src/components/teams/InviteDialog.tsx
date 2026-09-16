@@ -24,7 +24,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { avatarUrlFor } from "@/lib/avatar";
-import { useI18n } from "@/lib/i18n";
+import { localizeServerError, localizeServerErrorList, useI18n } from "@/lib/i18n";
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -145,13 +145,17 @@ export function InviteDialog({
       } = await res.json().catch(() => ({}));
       if (!res.ok) {
         toast.error(
-          data.details?.join("; ") ?? data.error ?? `HTTP ${res.status}`
+          data.details && data.details.length > 0
+            ? localizeServerErrorList(t, data.details).join("; ")
+            : data.error
+              ? localizeServerError(t, data.error)
+              : `HTTP ${res.status}`
         );
         return;
       }
       const sent = (data.created ?? []).filter((row) => row.id).length;
       if (data.details && data.details.length > 0) {
-        toast.error(data.details.join("; "));
+        toast.error(localizeServerErrorList(t, data.details).join("; "));
       }
       if (sent > 0) {
         toast.success(t("invite.sent", { n: sent }));

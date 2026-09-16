@@ -85,11 +85,14 @@ Feature: 排行榜与团队榜
       Then 团队筛选项显示 "Atlas Guild"
       And 列表展示该团队的成员
 
+    # Worker 不把 /teamboard HTML 放进 caches.default，避免 public→private
+    # 后仍在边缘缓存里提供成员名单。覆盖: worker.ts PAGE_CACHEABLE。
     Scenario: 团队转为私有后非成员立即不可见
       Given 访客正在查看公开团队 "Neon Ravens"
       When 该团队的 admin 把可见性改为 "private"
       And 访客刷新页面
       Then 访客看不到 "Neon Ravens" 的成员数据
+
 
     Scenario: 登录用户默认选中自己的团队
       Given "songlin" 已登录且属于团队 "Neon Ravens"

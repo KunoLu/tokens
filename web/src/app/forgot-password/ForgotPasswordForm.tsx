@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { CONTAINER } from "@/components/layout/Container";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { cn } from "@/lib/utils";
-import { useI18n } from "@/lib/i18n";
+import { localizeServerError, useI18n } from "@/lib/i18n";
 
 export default function ForgotPasswordForm({ returnTo }: { returnTo: string }) {
   const [email, setEmail] = useState("");
@@ -28,7 +28,11 @@ export default function ForgotPasswordForm({ returnTo }: { returnTo: string }) {
       });
       if (!response.ok) {
         const data = await response.json().catch(() => ({}));
-        setError(data.error || t("auth.somethingWrong"));
+        setError(
+          typeof data.error === "string"
+            ? localizeServerError(t, data.error)
+            : t("auth.somethingWrong")
+        );
         return;
       }
       // The API answers 200 for every address, so this copy must too.

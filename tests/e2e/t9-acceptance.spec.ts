@@ -38,11 +38,28 @@ test("Docs keeps Install / Everyday / Supported clients and drops removed sectio
   await expect(page.getByRole("heading", { name: "The verified badge" })).toHaveCount(0);
 });
 
-test("Privacy, Terms and Settings still respond", async ({ page }) => {
-  expect((await page.goto("/privacy"))?.status()).toBe(200);
-  expect((await page.goto("/terms"))?.status()).toBe(200);
-  expect((await page.goto("/settings"))?.status()).toBe(200);
+test("Privacy, Terms, Settings, embed and badge still respond", async ({ page }) => {
+  const privacy = await page.goto("/privacy");
+  expect(privacy?.status()).toBe(200);
+  await expect(page.getByRole("heading", { name: "Privacy Policy" })).toBeVisible();
+  const terms = await page.goto("/terms");
+  expect(terms?.status()).toBe(200);
+  await expect(page.getByRole("heading", { name: "Terms of Service" })).toBeVisible();
+  const settings = await page.goto("/settings");
+  expect(settings?.status()).toBe(200);
+  await expect(page).toHaveURL(/\/login/);
+  await expect(page.getByRole("heading", { name: "Sign in" })).toBeVisible();
+  const embed = await page.goto("/api/embed/tokens/svg");
+  expect(embed?.status()).toBe(200);
+  expect(embed?.headers()["content-type"] ?? "").toContain("image/svg+xml");
+  const badge = await page.goto("/api/badge/tokens/svg");
+  expect(badge?.status()).toBe(200);
+  expect(badge?.headers()["content-type"] ?? "").toContain("image/svg+xml");
+  const archive = await page.request.post("/api/archive", { data: {} });
+  expect(archive.status()).toBe(401);
+  expect(await archive.json()).toEqual({ error: "Not authenticated" });
 });
+
 
 test("banned profile still renders and login is 403", async ({ page }) => {
   const user = fixtureUser(`t9${Date.now().toString(36)}`, "a");

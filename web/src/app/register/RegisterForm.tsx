@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { CONTAINER } from "@/components/layout/Container";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { cn } from "@/lib/utils";
-import { useI18n } from "@/lib/i18n";
+import { localizeServerError, localizeServerErrorList, useI18n } from "@/lib/i18n";
 
 export default function RegisterForm({ returnTo }: { returnTo: string }) {
   const [email, setEmail] = useState("");
@@ -31,8 +31,19 @@ export default function RegisterForm({ returnTo }: { returnTo: string }) {
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
-        setError(data.error || t("auth.register.failed"));
-        setDetails(Array.isArray(data.details) ? data.details : []);
+        setError(
+          typeof data.error === "string"
+            ? localizeServerError(t, data.error)
+            : t("auth.register.failed")
+        );
+        setDetails(
+          Array.isArray(data.details)
+            ? localizeServerErrorList(
+                t,
+                data.details.filter((item: unknown): item is string => typeof item === "string")
+              )
+            : []
+        );
         return;
       }
       // Full reload so the navigation picks up the fresh session cookie.
