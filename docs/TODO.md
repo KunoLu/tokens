@@ -86,7 +86,7 @@ UI 对照：`docs/demo/teamboard-demo.html`
 
 ### T1 删除 Shame + 导航占位 `S`
 
-**状态**：进行中（实现完成，等 3.4）
+**状态**：已 archive（2026-09-11）→ `.trellis/tasks/archive/2026-09/09-11-t1-remove-shame-nav/`。commit `6759e183`。
 **依赖**：T0、T12
 
 - [x] 删除 `web/src/app/(main)/shame/page.tsx`、`web/src/components/shame/BannedList.tsx`
@@ -94,7 +94,8 @@ UI 对照：`docs/demo/teamboard-demo.html`
 - [x] Docs 页删除 Architecture / Sponsors / iOS app 三节（verified 章节留给 T2）；`TESTFLIGHT_URL` 与 OG 里 iOS 引用一并删
 - [x] **不动** `ServiceFooter.tsx`（页脚 Sponsors 与 Docs 页 Sponsors 是两处内容）
 - [x] 导航第二项换成 Teamboard，先接占位页 `/teamboard`
-- [ ] 验证：`/shame` 404；`rg -i "hall of shame|/shame"` 无残留；封禁机制仍生效（源码已无 `/shame`；404 等 3.4 后本地预览）
+- [x] 验证：`/shame` 404；封禁机制仍生效 — T9 `t9-acceptance` `/shame` 404 + login 403 `Account banned`（2026-09-15）
+
 
 ---
 
@@ -119,7 +120,7 @@ UI 对照：`docs/demo/teamboard-demo.html`
 
 ### T3 团队数据模型 `M`
 
-**状态**：实现完成，待 3.4 commit（2026-09-14）
+**状态**：已 archive（2026-09-14）→ `.trellis/tasks/archive/2026-09/09-11-t3-team-schema/`。工作提交 `9a8928a6`。
 **依赖**：T0
 
 - [x] 迁移 `0025_add_teams_and_groups.sql`（teams / team_members / groups / group_members / team_invitations）

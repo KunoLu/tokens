@@ -63,11 +63,13 @@ Wraps `./.open-next/worker.js` for two reasons:
    nothing else. The worker reads/writes `caches.default` for:
    - `/api/og`, `/api/embed/*/svg`, `/api/badge/*/svg` (`CACHEABLE`) — pure
      functions of their URL that cost real CPU/DB work;
-   - `/` and `/leaderboard`, `/teamboard` (`PAGE_CACHEABLE`) — signed-out readers
-     only, because these pages personalize from the session. Synthetic cache
-     keys include `__sort` (leaderboard sort cookie) and `__locale` from
-     `parseLocale(tt_locale)` (`en` or `zh` only — raw cookies must not
-     fragment the cache);
+   - `/` and `/leaderboard` (`PAGE_CACHEABLE`) — signed-out readers
+     only, because these pages personalize from the session. `/teamboard` is
+     **not** edge-cached: public→private must 404 immediately and
+     `revalidateTag("leaderboard")` does not purge `caches.default`.
+     Synthetic cache keys include `__sort` (leaderboard sort cookie) and
+     `__locale` from `parseLocale(tt_locale)` (`en` or `zh` only — raw
+     cookies must not fragment the cache);
    - `/u/*` (`PROFILE_CACHEABLE`) — cacheable for everyone (no per-reader
      identity), with unknown query params dropped from the cache key, `__locale`
      appended the same way, and only 200s stored (the case-canonicalizing 308

@@ -621,7 +621,7 @@ LEFT JOIN groups        ON groups.id = group_members.group_id AND groups.status 
 | **T8** | Profile 展示 Team / Group + 退出操作（新增 `isOwner`） | T4 | M | 本人可见退出按钮；他人不可见；admin 退出有正确阻断提示 |
 | **T10** | i18n 基础设施：字典目录与 `t()`、`tt_locale` cookie、语言切换器、`<html lang>` 跟随、worker 缓存 key 并入 locale、`format.ts` locale 跟随 | T0 | **L** | 切换语言后已包裹的页面文案跟随；两种语言各自缓存不错串 |
 | **T11** | 全站文案包裹：逐页把硬编码字符串收进字典（含邮件模板），Privacy / Terms 标注「英文为准」 | T10，且需在各页面任务完成后 | **L** | 全部页面无遗漏；`<html lang>` 正确；切换语言后所有页面完整跟随 |
-| **T12** | 品牌图标底色改紫（独立小改动） | T0 | S | 导航品牌块 + SVG favicon + 位图资源全部改紫，白色 T 不变；favicon 与页面角落颜色一致；建议单独提交 |
+| **T12** | 品牌图标底色改紫（独立小改动） | T0 | S | 导航 `TokensMark` + demo tile 改紫，白色 T 不变；favicon / 安装图标本轮不重着色（无位图生成流程）；建议单独提交 |
 | **T9** | 更新 `upstream_policy.md`、`.trellis/spec`、README；最终回归 | T1–T8 | M | 文档与实现一致；lint + typecheck + 冒烟通过 |
 
 ### 11.3 推荐实施顺序
