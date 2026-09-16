@@ -14,8 +14,6 @@ const eslintConfig = defineConfig([
     "next-env.d.ts",
     // Standalone build tooling, not part of the app.
     "scripts/**",
-    // Generated Worker bundle from `opennextjs-cloudflare build`.
-    ".open-next/**",
   ]),
 ]);
 

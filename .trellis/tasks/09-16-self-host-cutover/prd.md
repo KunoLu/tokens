@@ -22,15 +22,15 @@
 
 ## Acceptance Criteria
 
-- [ ] `bun run lint`、`bun run typecheck`（纯 `tsc --noEmit`）、`bun run build` 全绿
-- [ ] `DATABASE_URL=<活库> next start`：核心页面 200；`DATABASE_URL=<死端口> next start`：页面报错（证明走 DATABASE_URL）
-- [ ] Compose `next dev`（去掉 Hyperdrive env 覆盖后）照常工作
-- [ ] `bun run test:migrations`、`bun run test:teams` 通过
-- [ ] Playwright 回归：`teams-gate`、`t9-acceptance`（Sign in 链接）、`teamboard` 通过
-- [ ] 全仓 grep 无 `@opennextjs/cloudflare`、`getCloudflareContext`、`wrangler.jsonc` 残留引用（文档历史叙述除外）
-- [ ] cron route 调 `expireInvitations`，且有 `CRON_SECRET` 保护
-- [ ] 限流在 Node 下仍生效（非放行）
-- [ ] 文档与 spec 不再把 Cloudflare/Neon 描述为本 fork 目标
+- [x] `bun run lint`、`bun run typecheck`（纯 `tsc --noEmit`）、`bun run build` 全绿
+- [x] `DATABASE_URL=<活库> next start`：核心页面 200；`DATABASE_URL=<死端口> next start`：页面报错（证明走 DATABASE_URL）
+- [x] Compose `next dev`（去掉 Hyperdrive env 覆盖后）照常工作
+- [x] `bun run test:migrations`、`bun run test:teams` 通过
+- [x] Playwright 回归：`teams-gate`、`t9-acceptance`（Sign in 链接）、`teamboard` 通过
+- [x] 全仓 grep 无 `@opennextjs/cloudflare`、`getCloudflareContext`、`wrangler.jsonc` 残留引用（文档历史叙述除外）
+- [x] cron route 调 `expireInvitations`，且有 `CRON_SECRET` 保护
+- [x] 限流在 Node 下仍生效（非放行）
+- [x] 文档与 spec 不再把 Cloudflare/Neon 描述为本 fork 目标
 
 ## Notes
 

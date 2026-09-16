@@ -41,11 +41,7 @@ yarn-error.log*
 next-env.d.ts
 .env*.local
 
-# cloudflare / opennext
-/.open-next/
-.wrangler/
-.dev.vars
-cloudflare-env.d.ts
+
 
 # Copied from the repo root at build time by `prebuild:assets`.
 public/install.sh

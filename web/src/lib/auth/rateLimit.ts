@@ -1,33 +1,45 @@
-import { getCloudflareContext } from "@opennextjs/cloudflare";
-
 /**
- * Cloudflare Rate Limiting binding (wrangler `ratelimits`, namespace_id
- * `"1001"` — a stable account-unique integer from Worker config, not a
- * provisioned secret). Guards register / login / forgot-password /
- * resend-verification: 10 requests per 60s per key.
+ * In-process fixed-window limiter for register / login / forgot-password /
+ * resend-verification: 10 requests per 60 seconds per client IP. Replaced the
+ * Cloudflare Rate Limiting binding when the Workers layer was removed.
  *
- * Missing Worker context or a missing binding (local `next dev`) skips the
- * check. A bound limiter that throws fail-closes so the caller returns 429.
+ * The client key is X-Forwarded-For ONLY, and only because the reverse proxy
+ * overwrites it — a client must never be able to pick its own bucket. Do NOT
+ * honor `CF-Connecting-IP` here: on the self-host path there is no Cloudflare
+ * in front, so a direct client could forge it and rotate through fresh
+ * buckets.
+ *
+ * ponytail: counters are per-process; a second instance would get its own
+ * bucket map. If the deployment ever scales beyond one process, this needs a
+ * shared store.
  */
+const WINDOW_MS = 60_000;
+const LIMIT = 10;
+
+const buckets = new Map<string, { count: number; resetAt: number }>();
+
+function clientKey(request: Request): string {
+  const forwarded = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
+  return forwarded || "0.0.0.0";
+}
+
 export async function authRateLimitAllowed(request: Request): Promise<boolean> {
-  let limiter:
-    | { limit(options: { key: string }): Promise<{ success: boolean }> }
-    | undefined;
-  try {
-    limiter = getCloudflareContext().env.AUTH_RATE_LIMITER as typeof limiter;
-  } catch {
-    // Not on Workers — no binding runtime.
-    return true;
+  const now = Date.now();
+  const key = clientKey(request);
+  let bucket = buckets.get(key);
+  if (!bucket || bucket.resetAt <= now) {
+    bucket = { count: 0, resetAt: now + WINDOW_MS };
+    buckets.set(key, bucket);
   }
-  if (!limiter) {
-    return true;
+  bucket.count += 1;
+
+  // Bound the map: sweep expired buckets only past a threshold so steady-state
+  // traffic never pays for the scan.
+  if (buckets.size > 10_000) {
+    for (const [k, b] of buckets) {
+      if (b.resetAt <= now) buckets.delete(k);
+    }
   }
-  try {
-    const key = request.headers.get("CF-Connecting-IP") ?? "0.0.0.0";
-    const { success } = await limiter.limit({ key });
-    return success;
-  } catch (error) {
-    console.error("[auth] AUTH_RATE_LIMITER.limit failed", error);
-    return false;
-  }
+
+  return bucket.count <= LIMIT;
 }

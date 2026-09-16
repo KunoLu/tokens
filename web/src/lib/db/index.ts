@@ -1,24 +1,13 @@
-import { drizzle } from "drizzle-orm/postgres-js";
-import { getCloudflareContext } from "@opennextjs/cloudflare";
+import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import * as schema from "./schema";
 
+/** The app's Drizzle client over the shared schema. */
+export type DbClient = PostgresJsDatabase<typeof schema>;
+
 /**
- * On Workers the Postgres URL comes from the Hyperdrive binding rather than an
- * environment variable. Hyperdrive keeps a warm, pooled connection next to the
- * database, which is what makes a page issuing several sequential queries
- * viable from the edge — without it each query pays a full WAN round trip.
- *
- * Importing `@opennextjs/cloudflare` is safe under Node (drizzle-kit, vitest,
- * `next build`); only the call throws there, and that is treated as "not on
- * Workers".
+ * Self-hosted Node runtime: the Postgres URL always comes from DATABASE_URL.
+ * (The Workers/Hyperdrive layer was removed in the self-host cutover.)
  */
-function getHyperdriveConnectionString(): string | null {
-  try {
-    return getCloudflareContext().env.HYPERDRIVE?.connectionString ?? null;
-  } catch {
-    return null;
-  }
-}
 
 function getConnectionString(): string {
   const connectionString = process.env.DATABASE_URL;
@@ -30,58 +19,35 @@ function getConnectionString(): string {
   return connectionString;
 }
 
-// Decide whether to require TLS to Postgres. Neon needs it; a local development
-// Postgres usually has no TLS configured at all, and forcing "require" there
-// fails the connection outright. `DATABASE_SSL` opts in/out explicitly.
-//
-// Hyperdrive terminates TLS to the origin database itself, so the hop the driver
-// sees is already secure and must not negotiate TLS a second time.
-function resolveSsl(usingHyperdrive: boolean): "require" | false {
-  if (usingHyperdrive) return false;
-
+// TLS: off for a plain local Postgres, "require" for providers that need it;
+// DATABASE_SSL toggles explicitly. Production defaults to require.
+function resolveSsl(): "require" | false {
   const mode = process.env.DATABASE_SSL?.toLowerCase();
   if (mode === "disable" || mode === "false" || mode === "off") return false;
   if (mode === "require" || mode === "true" || mode === "on") return "require";
   return process.env.NODE_ENV === "production" ? "require" : false;
 }
 
-function localPoolMax(): number {
+// One long-lived server process, so a single pool serves every request.
+// Default 5 covers the widest page (/u/[username] fires three queries in
+// parallel) with headroom; DATABASE_POOL_MAX overrides (clamped 1..5).
+function poolMax(): number {
   const n = Number(process.env.DATABASE_POOL_MAX);
   if (Number.isInteger(n) && n >= 1 && n <= 5) return n;
-  return 1;
+  return 5;
 }
 
-// Singleton pattern: prevent creating multiple connection pools across
-// serverless invocations sharing the same runtime (hot-start reuse).
-//
 // Use drizzle's config-based API to create the postgres client internally.
 // Passing a `postgres` Sql instance directly causes type errors in the monorepo
 // due to duplicate package resolution (two copies of postgres with incompatible
 // branded types).
-function createDb() {
-  const hyperdriveUrl = getHyperdriveConnectionString();
-  const usingHyperdrive = hyperdriveUrl !== null;
+function createDb(): DbClient {
 
   return drizzle({
     connection: {
-      url: hyperdriveUrl ?? getConnectionString(),
-      ssl: resolveSsl(usingHyperdrive),
-
-      // Behind Hyperdrive these sockets terminate at Hyperdrive, not at
-      // Postgres — it owns the real pool and its own origin_connection_limit
-      // caps what the database ever sees. So the only thing `max` decides here
-      // is whether the queries a single request issues in parallel actually run
-      // in parallel: `/u/[username]` fires three at once and the leaderboard
-      // two, and at max:1 they queued behind each other for no reason. Three
-      // covers the widest page; Cloudflare advises staying at or below five
-      // concurrent external connections per request.
-      //
-      // Without Hyperdrive the sockets are Postgres connections and the old
-      // reasoning stands: dozens of concurrent cold-starts would exhaust
-      // max_connections (error 53300), so that path stays at one unless a
-      // test runner opts in (`DATABASE_POOL_MAX=2` for concurrent
-      // `patchMemberRole` in `check-teams-invariants.ts`).
-      max: usingHyperdrive ? 3 : localPoolMax(),
+      url: getConnectionString(),
+      ssl: resolveSsl(),
+      max: poolMax(),
 
       // Close idle connections after 20 s so they don't linger between
       // infrequent invocations.
@@ -94,56 +60,27 @@ function createDb() {
       // Fail fast when the DB is unreachable instead of hanging the request.
       connect_timeout: 10,
 
-      // Prepared statements are connection-scoped. In serverless the connection
-      // that prepared a statement may be gone by the next invocation, and
-      // Hyperdrive multiplexes requests across connections — both surface as
-      // "prepared statement does not exist".
+      // Prepared statements are connection-scoped, and max_lifetime recycles
+      // connections — keeping prepared statements across that boundary would
+      // surface as "prepared statement does not exist".
       prepare: false,
     },
     schema,
   });
 }
 
-type DbClient = ReturnType<typeof createDb>;
 
+
+// Singleton: one pool per process. globalThis survives Next dev HMR reloads.
 const globalForDb = globalThis as unknown as {
   _db: DbClient | undefined;
 };
 
-/**
- * Per-request clients, keyed by the Cloudflare execution context.
- *
- * A Workers isolate is reused across requests, but the sockets inside a
- * connection pool belong to the request that opened them — touching one from a
- * later request is an error, which surfaced as intermittent 500s on the pages
- * that always hit the database (cached pages hid it by not querying at all).
- * Keying on the context object gives one client per request and lets the
- * garbage collector drop it with the request; Hyperdrive keeps the real pool
- * warm remotely, so building a client per request is cheap.
- */
-const requestClients = new WeakMap<object, DbClient>();
-
 export function getDb(): DbClient {
-  let ctx: object | null = null;
-  try {
-    ctx = getCloudflareContext().ctx as unknown as object;
-  } catch {
-    // Not on Workers: a process-wide singleton is correct and cheaper.
+  if (!globalForDb._db) {
+    globalForDb._db = createDb();
   }
-
-  if (!ctx) {
-    if (!globalForDb._db) {
-      globalForDb._db = createDb();
-    }
-    return globalForDb._db;
-  }
-
-  let client = requestClients.get(ctx);
-  if (!client) {
-    client = createDb();
-    requestClients.set(ctx, client);
-  }
-  return client;
+  return globalForDb._db;
 }
 
 export const db: DbClient = new Proxy({} as DbClient, {

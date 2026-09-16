@@ -1,4 +1,4 @@
-import { getCloudflareContext } from "@opennextjs/cloudflare";
+
 
 /**
  * Transactional email through Resend's HTTP API — no SDK, one fetch.
@@ -33,21 +33,16 @@ async function sendEmail(to: string, subject: string, text: string): Promise<voi
 }
 
 /**
- * Hand the send to the isolate so it can outlive the response; outside
- * Workers the floating promise settles on its own. Never throws.
+ * Fire-and-forget: a failed send logs and resolves, it never rolls back the
+ * user or token rows the caller already committed. The floating promise
+ * settles on its own in a long-lived Node process.
  */
 function sendInBackground(work: Promise<void>): void {
-  const guarded = work.catch((error: unknown) => {
+  void work.catch((error: unknown) => {
     console.error("[email] send failed", error);
   });
-  try {
-    getCloudflareContext().ctx.waitUntil(guarded);
-    return;
-  } catch {
-    // Not on Workers.
-  }
-  void guarded;
 }
+
 
 export function sendVerificationEmail(to: string, link: string): void {
   sendInBackground(
