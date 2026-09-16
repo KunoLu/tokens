@@ -68,7 +68,8 @@ git diff --stat upstream/main HEAD -- web cli packages
 git status --short -- web cli packages
 ```
 
-**注意必须用两点 `A B`，不能用三点 `A...B`**：`git diff` 的三点语法比较的是 `merge-base(A,B)` 与 `B`，只回答"HEAD 自分叉点以来改了什么"，完全忽略 `upstream/main` 在分叉点之后独有的提交。pathspec 也要用 `web` 而不是 `web/src`，否则漏掉 `web/worker.ts`、`web/wrangler.jsonc`、`web/scripts/`。
+**注意必须用两点 `A B`，不能用三点 `A...B`**：`git diff` 的三点语法比较的是 `merge-base(A,B)` 与 `B`，只回答"HEAD 自分叉点以来改了什么"，完全忽略 `upstream/main` 在分叉点之后独有的提交。pathspec 也要用 `web` 而不是 `web/src`，否则漏掉 `web/next.config.ts`、`web/scripts/` 这类顶层文件。
+
 
 T9 核对（2026-09-15）：`git diff --stat upstream/main HEAD -- web cli packages` 对 `web/` 约 148 files / +20600 / −2446；`cli/` 与 `packages/` 无输出。干净工作树上 `git status --short -- web cli packages` 为空。
 
@@ -98,7 +99,8 @@ T9 核对（2026-09-15）：`git diff --stat upstream/main HEAD -- web cli packa
 | 导航 | T1 / T2 / T7 | Hall of Shame 换成 Teamboard 导航项（T1）与页面（T7）；右上角移除 GitHub 图标（T2） | `web/src/components/layout/Navigation.tsx` |
 | 认证 | T2 | GitHub OAuth 全部移除，改为邮箱 + PBKDF2 密码 | `web/src/lib/auth/**`、`web/src/app/api/auth/**`、`web/middleware.ts` |
 | 用户模型 | T2 | `users.github_id` 放宽为可空；新增 `password_hash`、`email_verified_at` | `web/src/lib/db/schema.ts`、迁移 `0024` |
-| 定时任务 | T2 | social links 刷新**保留**（Profile 社交链接图标行仍需），仅去掉返回值里的 `verified` 计数；追加过期邀请 / token 清理 | `web/wrangler.jsonc`、`web/worker.ts`、`web/src/lib/cron/**` |
+| 定时任务 | T2 | social links 刷新**保留**（Profile 社交链接图标行仍需），仅去掉返回值里的 `verified` 计数；追加过期邀请 / token 清理 | `web/src/lib/cron/**`、`web/src/app/api/cron/refresh-social-links/route.ts`（HTTP 维护端点，自建部署由系统 cron 触发） |
+
 | 组织体系 | T3 / T4 | 新增 5 张表与整个 Team 子域 | 迁移 `0025`、`web/src/lib/teams/**`、`web/src/app/api/teams/**` |
 | 榜单 | T6 | `LeaderboardUser` 增加 `team` / `group`；查询多两组 LEFT JOIN | `web/src/lib/leaderboard/**`、`web/src/components/leaderboard/**` |
 | Teamboard | T7 | 新增页面、组件、查询与 API，不改动上一行列出的路径 | `web/src/app/(main)/teamboard/**`、`web/src/components/teamboard/**`、`web/src/app/api/teamboard/**` |

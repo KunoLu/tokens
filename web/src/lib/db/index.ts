@@ -49,8 +49,8 @@ function createDb(): DbClient {
       ssl: resolveSsl(),
       max: poolMax(),
 
-      // Close idle connections after 20 s so they don't linger between
-      // infrequent invocations.
+      // Close idle connections after 20 s so they don't linger unused.
+
       idle_timeout: 20,
 
       // Hard cap: recycle every connection after 5 minutes regardless of

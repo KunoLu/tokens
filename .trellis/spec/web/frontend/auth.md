@@ -127,7 +127,7 @@ No web unit-test runner. Gates: `bun run lint`, `typecheck`, `build`,
   `lower((email)::text)`; `email_verification_tokens` exists.
 - Build route table includes the six auth POSTs and **omits**
   `/api/auth/github*`.
-- `rg VerifiedBadge|socialVerification|verifiedExpr web/src web/worker.ts`
+- `rg VerifiedBadge|socialVerification|verifiedExpr web/src`
   is empty.
 - BDD: `features/email-auth.feature` (Chinese scenario text, English
   keywords). CLI device-flow scenario is `@todo` unless actually run.
@@ -172,8 +172,5 @@ resend-verification, not register-rollback.
 ## Don't
 
 - Do not add npm auth/email dependencies.
-- Do not put `/login` (or other auth pages) in `worker.ts` `PAGE_CACHEABLE`.
 - Do not delete `githubSocials.ts`, `isValidGitHubUsername`, `users.github_id`,
   or `ProfileSocialLinks` — they are profile/social-link, not login.
-- Do not implement invitation-token cleanup until `team_invitations` exists
-  (T3). Cron may only sweep `email_verification_tokens`.

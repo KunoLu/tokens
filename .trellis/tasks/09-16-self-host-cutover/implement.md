@@ -40,3 +40,8 @@
 - 容量：池 `max=5`/进程；限流 10/60s/IP 进程内（多实例需共享存储，已记录）。
 - 回滚：重部署上一 commit；数据层两向不动（无迁移）。
 - 残余风险（owner 2026-09-16 显式接受）：cron sweep 路径无正式 repeatable e2e（一次性手动已验证，BDD @todo 在案）；外网 HTTPS + 真实域名 + 外网 CLI 端到端只能上线时验。
+
+## Independent check（CutoverCheck2，2026-09-16）
+
+- 结论：**PASS，代码零缺陷**；4 处文档/spec 缺陷全部修复——D1 self-host-deployment.md 限流段重复且矛盾、D2 auth.md 残留 worker.ts 禁令与 rg 命令、D3 upstream_policy.md 死路径（分歧表 + 两点 diff 示例）、D4 teams-auth PRD 栈表（已标注为改造前继承拓扑）。
+- 复核：lint 0 error、typecheck 干净、残留 grep 干净、R3 删除文件磁盘确认、cron 契约与限流 key 与代码一致。

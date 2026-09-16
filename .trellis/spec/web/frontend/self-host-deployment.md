@@ -49,6 +49,9 @@ Authorization: Bearer $CRON_SECRET
   invitation expiry). 200 with per-job counts only when all succeeded; 500
   when any failed — the scheduler retries on non-2xx. All three are
   idempotent sweeps, so retries are safe.
+
+## Rate limiting
+
 `authRateLimitAllowed` is an in-process fixed window (10 requests / 60s per
 client IP) on register, login, forgot-password, and resend-verification. The
 client key is `X-Forwarded-For` ONLY, and only because the reverse proxy
@@ -56,13 +59,6 @@ overwrites it — never honor `CF-Connecting-IP` on this path, or a direct
 client can forge its way into fresh buckets. Counters are per-process —
 horizontal scaling needs a shared store.
 
-## Rate limiting
-
-`authRateLimitAllowed` is an in-process fixed window (10 requests / 60s per
-client IP) on register, login, forgot-password, and resend-verification. The
-client key reads `CF-Connecting-IP` then `X-Forwarded-For`; the reverse proxy
-must set/overwrite XFF or clients can spoof it. Counters are per-process —
-horizontal scaling needs a shared store.
 
 ## Caching
 

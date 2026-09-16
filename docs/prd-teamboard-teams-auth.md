@@ -34,7 +34,8 @@ tokens/
 └── scripts/
 ```
 
-### 2.2 Web 技术栈（改造前）
+### 2.2 Web 技术栈（改造前；运行时与数据库行为上游继承拓扑，已在 2026-09-16 的 self-host cutover 中替换为自建 Node + 自建 Postgres，见 `docs/deploy/self-host-production.md`）
+
 
 | 层 | 技术 | 版本 / 说明 |
 |---|---|---|
