@@ -13,7 +13,7 @@
 - **DDIA Data Design Review**: `confirmed`（SOT 不变；R2/DO/边缘缓存均为可重建派生缓存；无迁移/回填）。**修订（cron 可靠性 blocker）**：HTTP cron 不再 `void work` 后台跑——三个 sweep（refreshAllSocialLinks / deleteExpiredEmailTokens / expireInvitations）逐个 catch 后全部 await；任一失败返回 500 让调度器重试，全成功返回 200 + 计数。调度器走同机 loopback（system cron + curl），不经公网反代以避开 proxy 超时。
 - **DDD**: 未触发——无领域歧义
 - **BDD**: `traceable`——cron 接口契约变更落了 `web/features/maintenance-cron.feature`（401 自动化；200/失败场景 @todo，因 refreshAllSocialLinks 对每个用户请求 GitHub 且改写共享库快照）。200 与失败路径已一次性手动实证（见下）。
-- **Release Readiness**: 见末节
+- **Release Readiness**: `ready`（两项残余风险由 owner 于 2026-09-16 显式接受）
 
 ## 关键事实
 
@@ -39,4 +39,4 @@
 - 失败模式：库不可达 → 500（fail-closed 已验证）；cron 失败 → 500 + 任务清单，调度器重试；邮件失败只打日志。
 - 容量：池 `max=5`/进程；限流 10/60s/IP 进程内（多实例需共享存储，已记录）。
 - 回滚：重部署上一 commit；数据层两向不动（无迁移）。
-- 残余风险：cron sweep 路径无正式 repeatable e2e（一次性手动已验证，BDD @todo 在案）；外网 HTTPS + 真实域名 + 外网 CLI 端到端只能上线时验。
+- 残余风险（owner 2026-09-16 显式接受）：cron sweep 路径无正式 repeatable e2e（一次性手动已验证，BDD @todo 在案）；外网 HTTPS + 真实域名 + 外网 CLI 端到端只能上线时验。
