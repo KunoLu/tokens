@@ -24,7 +24,7 @@
 `authRateLimitAllowed(request)` 签名不变，四个调用点（register/login/forgot-password/resend-verification）零改动：
 
 - 进程内固定窗口：每 IP 10 次 / 60s。
-- Key 顺序：`CF-Connecting-IP` → `X-Forwarded-For` 第一段 → `0.0.0.0`。反代必须覆写 XFF，否则客户端可伪造绕过——部署文档已记。
+- Key 只用 `X-Forwarded-For` 第一段（缺省 `0.0.0.0`）。反代必须覆写 XFF，否则客户端可伪造绕过；**绝不认 `CF-Connecting-IP`**——自建路径没有 Cloudflare，直连客户端可伪造它轮换新桶。部署文档已记。
 - ponytail 上限：计数是单进程的；水平扩容需共享存储（在 rateLimit.ts 注释与部署文档标注）。
 
 ## 4. Cron 重试契约（替代 Worker 定时器）

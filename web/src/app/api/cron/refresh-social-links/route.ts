@@ -42,7 +42,11 @@ export async function POST(request: Request) {
 
   const [socialLinks, emailTokens, invitations] = await Promise.all([
     refreshAllSocialLinks()
-      .then(({ users }) => ({ ok: true as const, refreshedUsers: users }))
+      .then(({ users, failed }) =>
+        failed === 0
+          ? { ok: true as const, refreshedUsers: users }
+          : { ok: false as const, refreshedUsers: users, failedRefreshes: failed },
+      )
       .catch((error: unknown) => {
         console.error("[cron] refreshAllSocialLinks failed", error);
         return { ok: false as const };
@@ -62,8 +66,13 @@ export async function POST(request: Request) {
   ]);
 
   if (!socialLinks.ok || !emailTokens.ok || !invitations.ok) {
+    const failedJobs = [
+      ...(!socialLinks.ok ? ["socialLinks"] : []),
+      ...(!emailTokens.ok ? ["emailTokens"] : []),
+      ...(!invitations.ok ? ["invitations"] : []),
+    ];
     return NextResponse.json(
-      { error: "One or more cron jobs failed" },
+      { error: "One or more cron jobs failed", failedJobs },
       { status: 500 },
     );
   }

@@ -46,8 +46,8 @@ Per `docs/upstream_policy.md`:
   `app/u/[username]/ProfilePageClient.tsx` takes `initialData` from the RSC
   page; `components/profile/ProfileMembership.tsx` renders Team/Group names
   from that data and computes leave-button ownership at render from
-  `GET /api/auth/session` vs the profile username (PROFILE_CACHEABLE `/u/*`
-  must not bake `isOwner` into HTML). `components/leaderboard/Leaderboard.tsx`
+  `GET /api/auth/session` vs the profile username (shared cached `/u/*` HTML
+  must not bake `isOwner` into it). `components/leaderboard/Leaderboard.tsx`
   and `components/teamboard/Teamboard.tsx` sync filters to the URL via
   `useRouter` + `useSearchParams`. Displayed Teamboard sort follows the URL
   `sortBy` param even if a pending RSC has not landed.

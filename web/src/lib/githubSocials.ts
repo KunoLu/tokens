@@ -73,9 +73,16 @@ function isHttpUrl(value: string): boolean {
   }
 }
 
+interface GitHubSocialFetch {
+  links: ProfileSocialLink[];
+  /** Both GitHub requests fulfilled with 2xx; false means the data is partial. */
+  complete: boolean;
+}
+
 async function fetchGitHubSocialLinks(
   username: string,
-): Promise<ProfileSocialLink[]> {
+): Promise<GitHubSocialFetch> {
+
   const headers = buildHeaders();
   const encoded = encodeURIComponent(username);
 
@@ -134,23 +141,44 @@ async function fetchGitHubSocialLinks(
     }
   }
 
-  return links;
+  // A 404 means the username has no GitHub profile — a successfully refreshed
+  // *empty* snapshot, not a failure. Only transport errors and non-404 non-OK
+  // responses (5xx, rate limits) make the fetch incomplete.
+  const usable = (r: PromiseSettledResult<Response>) =>
+    r.status === "fulfilled" && (r.value.ok || r.value.status === 404);
+  const complete = usable(profileResult) && usable(socialResult);
+
+  return { links, complete };
+
+
 }
 
 async function persistSocialLinks(
   username: string,
   links: ProfileSocialLink[],
 ): Promise<void> {
-  try {
-    await db
-      .update(users)
-      .set({ socialLinks: links, socialLinksSyncedAt: new Date() })
-      .where(usernameEqualsIgnoreCase(username));
-  } catch {
-    // The snapshot powers the profile page's social-links row; failing to
-    // refresh it must never break the caller.
-  }
+  await db
+    .update(users)
+    .set({ socialLinks: links, socialLinksSyncedAt: new Date() })
+    .where(usernameEqualsIgnoreCase(username));
 }
+
+/**
+ * Strict variant for the maintenance cron: throws when either GitHub request
+ * failed or the snapshot write failed, so a scheduled run can tell a real
+ * refresh from silently stale data.
+ */
+export async function syncGitHubSocialLinksStrict(
+  username: string,
+): Promise<ProfileSocialLink[]> {
+  const { links, complete } = await fetchGitHubSocialLinks(username);
+  if (!complete) {
+    throw new Error(`GitHub social fetch incomplete for ${username}`);
+  }
+  await persistSocialLinks(username, links);
+  return links;
+}
+
 
 /**
  * Fetch the user's current social links from GitHub and persist the snapshot
@@ -160,7 +188,8 @@ export async function syncGitHubSocialLinks(
   username: string,
 ): Promise<ProfileSocialLink[]> {
   try {
-    const links = await fetchGitHubSocialLinks(username);
+    const { links } = await fetchGitHubSocialLinks(username);
+
     await persistSocialLinks(username, links);
     return links;
   } catch {

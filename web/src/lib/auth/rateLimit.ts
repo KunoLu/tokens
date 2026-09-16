@@ -23,23 +23,26 @@ function clientKey(request: Request): string {
   return forwarded || "0.0.0.0";
 }
 
+const MAX_BUCKETS = 10_000;
+
 export async function authRateLimitAllowed(request: Request): Promise<boolean> {
   const now = Date.now();
   const key = clientKey(request);
   let bucket = buckets.get(key);
   if (!bucket || bucket.resetAt <= now) {
+    if (buckets.size >= MAX_BUCKETS) {
+      // At capacity: evict expired entries, and if the map is still full fail
+      // closed rather than grow without bound — a flood of distinct IPs must
+      // not grow memory or turn every request into a full-map scan.
+      for (const [k, b] of buckets) {
+        if (b.resetAt <= now) buckets.delete(k);
+      }
+      if (buckets.size >= MAX_BUCKETS) return false;
+    }
     bucket = { count: 0, resetAt: now + WINDOW_MS };
     buckets.set(key, bucket);
   }
   bucket.count += 1;
-
-  // Bound the map: sweep expired buckets only past a threshold so steady-state
-  // traffic never pays for the scan.
-  if (buckets.size > 10_000) {
-    for (const [k, b] of buckets) {
-      if (b.resetAt <= now) buckets.delete(k);
-    }
-  }
 
   return bucket.count <= LIMIT;
 }

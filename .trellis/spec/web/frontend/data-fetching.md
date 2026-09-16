@@ -24,7 +24,7 @@ One function serves both the API route and the page:
   `Promise.all` as profile/devices/social. Page-only (D-4): do not add
   Team/Group to `getPublicProfileResponse` / `GET /api/users/[username]`.
   Leave buttons are client `GET /api/auth/session` vs profile username because
-  `/u/*` is PROFILE_CACHEABLE for everyone.
+  `/u/*` HTML is shared across visitors within its 60s revalidate window.
 
 
 **Why not HTTP self-fetch:** server-side fetches to our own routes break
@@ -63,8 +63,8 @@ Client components fetch when the user acts, not to render:
 - `components/layout/Navigation.tsx`, `app/device/DeviceClient.tsx`,
   `components/profile/ProfileMembership.tsx` — `GET /api/auth/session` for
   auth state. ProfileMembership compares session username to the profile
-  username at render (leave buttons must not be baked into PROFILE_CACHEABLE
-  `/u/*` HTML). DeviceClient distinguishes load failure from signed-out.
+  username at render (leave buttons must not be baked into the shared,
+  cached `/u/*` HTML). DeviceClient distinguishes load failure from signed-out.
 
 ## Parallelism
 

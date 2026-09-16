@@ -45,3 +45,10 @@
 
 - 结论：**PASS，代码零缺陷**；4 处文档/spec 缺陷全部修复——D1 self-host-deployment.md 限流段重复且矛盾、D2 auth.md 残留 worker.ts 禁令与 rg 命令、D3 upstream_policy.md 死路径（分歧表 + 两点 diff 示例）、D4 teams-auth PRD 栈表（已标注为改造前继承拓扑）。
 - 复核：lint 0 error、typecheck 干净、残留 grep 干净、R3 删除文件磁盘确认、cron 契约与限流 key 与代码一致。
+
+## Review remediation（2026-09-16，评审 request-changes 后）
+
+- **限流硬顶**：桶表到 10,000 上限时先清过期项，仍满则对新 key fail-closed（429），不再无限增长；harness 实测「超上限新 IP 被拒、既有桶不受影响」。
+- **cron 失败传播**：`fetchGitHubSocialLinks` 返回 `{ links, complete }`（404 = 该用户名无 GitHub 档案，算成功的空快照；只有传输错误或非 404 的非 2xx 才算 incomplete）；新增 `syncGitHubSocialLinksStrict`（incomplete 或快照写失败即 throw）；`refreshAllSocialLinks` 逐用户计数失败并返回 `{ users, failed }`；social 分支 `failed > 0` → 任务失败 → 500 + `failedJobs`。展示路径 `syncGitHubSocialLinks` 契约不变（永不 throw）。
+- **文档准确性**：deploy 清单的 submit 验收补上 `TOKENS_API_URL`；归档 design.md 限流 key 改为 XFF-only；task.json package 改为 `web`；auth.md 邮件契约改 fire-and-forget、删掉过时「Bound limiter throws」行、per-isolate → per-process；`PROFILE_CACHEABLE` 死引用从 data-fetching/component-guidelines/ProfileMembership 注释清除。
+- 验证：lint 0 error、typecheck 干净、429 XFF 回归探针通过、限流硬顶 harness 通过、cron dev 库 200（GitHub 404 = 成功的空快照，保持既有语义）、停库瞬时失败 500 + `failedJobs`、恢复后 200、`/u/kunolu` 200。

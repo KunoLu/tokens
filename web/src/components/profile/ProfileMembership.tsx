@@ -11,8 +11,8 @@ import type { ProfileMembership } from "@/lib/teams/profileMembership";
 /**
  * Team/Group block on the public profile. Names render for everyone from
  * server data; the leave buttons appear only after the client session check
- * proves the viewer owns this profile — /u/* HTML is cached for all visitors
- * (PROFILE_CACHEABLE), so ownership can never be baked into it.
+ * proves the viewer owns this profile — /u/* HTML is shared across visitors
+ * (cached 60s), so ownership can never be baked into it.
  */
 export function ProfileMembership({
   username,

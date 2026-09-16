@@ -75,7 +75,7 @@ TOKENS_API_URL=https://你的域名 tokens submit
 ## 验收（外网，不是 localhost）
 
 - [ ] `TOKENS_API_URL=https://域名 tokens login` 打印 `https://域名/device` 链接和 user code，浏览器输入 code 授权后拿到本库 `tt_` token
-- [ ] `tokens submit` 返回成功，本站 Leaderboard 出现该用户用量
+- [ ] `TOKENS_API_URL=https://域名 tokens submit` 返回成功，本站 Leaderboard 出现该用户用量（与 login 同 shell 则需整段 export，CLI 凭据不存 API 基址）
 - [ ] 未验证邮箱的用户按邮箱被邀请时接受被拒（403），验证后接受成功（配了 Resend 的前提下）
 - [ ] 用户名邀请全流程（建团 → 邀请 → 接受 → Teamboard 选人 → 榜列显示 Team/Group）
 - [ ] 过期邀请被定时任务标记 expired（cron 返回 200 且 `expiredInvitations` 计数正确）

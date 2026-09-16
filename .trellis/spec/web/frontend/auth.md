@@ -37,7 +37,8 @@
   `sessions`; verify: set `email_verified_at`); the route hashes the password
   BEFORE the transactional call.
 - `sendVerificationEmail` / `sendPasswordResetEmail` in `lib/email/send.ts` —
-  Resend HTTP `fetch`, `waitUntil`, never throws, never rolls back rows.
+  Resend HTTP `fetch`, fire-and-forget in the long-lived Node process, never
+  throws, never rolls back rows.
 - `avatarUrlFor({ username, avatarUrl })` in `lib/avatar.ts` — stored URL or
   initials SVG data URI. Never `github.com/<user>.png`.
 - `POST /api/auth/{register,login,forgot-password,reset-password,verify-email,resend-verification}`
@@ -70,7 +71,7 @@ Cloudflare `AUTH_RATE_LIMITER` binding in the self-host cutover.)
 
 
 Login with no user or no `password_hash` (legacy OAuth account) still runs
-PBKDF2 against a constant dummy hash derived once per isolate, so timing does
+PBKDF2 against a constant dummy hash derived once per process, so timing does
 not reveal registered emails; the 401 string is identical either way.
 
 **Env (environment secrets, never in git):** `RESEND_API_KEY`,
@@ -90,7 +91,6 @@ that the emailed link was followed.
 |---|---|---|
 | Bad Origin | 403 | `{ error: "Forbidden" }` |
 | Rate limited | 429 | `{ error: "Too many requests" }` |
-| Bound limiter throws | 429 | `{ error: "Too many requests" }` (fail-closed; log `[auth] AUTH_RATE_LIMITER.limit failed`) |
 | Weak password | 400 | `{ error, details }` |
 | Bad username / email | 400 | `{ error }` |
 | Duplicate email/username | 409 | `{ error }` |
