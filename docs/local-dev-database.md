@@ -1,54 +1,66 @@
-# 本地开发数据库
+# 本地开发数据库与 Web
 
-生产数据库是 **Neon PostgreSQL**，Worker 经 **Cloudflare Hyperdrive** 访问。本仓库没有独立 backend 包；API / Drizzle schema 在 `web/`。
+本仓库没有独立 backend 包；API / Drizzle schema 在 `web/`。
 
-本地开发与 `bun run test:migrations` **不要用 Homebrew PostgreSQL**。约定用 OrbStack 管理的 Docker Compose 容器。
+**本 fork 本地库是自建 Postgres**（OrbStack Compose，`docs/deploy/local-orbstack-compose.md`）。云服务器自建是计划，切流 pending：`web/wrangler.jsonc` 仍有 `HYPERDRIVE` 绑定。**Neon + Hyperdrive 是直接上游 `missuo/tokens` 的线上拓扑，不是本 fork 已落地的云上部署。**云上自建的必要条件与验收清单见 `docs/deploy/self-host-production.md`。
+
+
+
+本地开发与 `bun run test:migrations` **不要用 Homebrew PostgreSQL**。启停与 rsync 以 `docs/deploy/local-orbstack-compose.md` 为准。
+
+
 
 ## 位置
 
 | 项 | 路径 / 值 |
 |---|---|
 | Compose 文件 | `/Users/lusonglin/docker-compose/tokens/docker-compose.yml` |
-| 数据目录 | `/Users/lusonglin/docker-compose/tokens/postgres/data/`（容器卷，勿提交） |
-| 引擎 | PostgreSQL 16（`postgres:16`） |
-| 容器名 | `tokens-postgres` |
-| 端口 | `127.0.0.1:5433`（容器内仍是 5432）。本机 5432 已被 `keyboy-play-local-db` 占用，不抢。 |
+| Postgres 数据 | `.../tokens/postgres/data/` |
+| 源码副本 | `.../tokens/app/`（从 git checkout rsync，不直接挂仓库） |
+| 仓库根 `node_modules` | `.../tokens/node_modules/` |
+| `web/node_modules` | `.../tokens/web_node_modules/` |
+| `web/.next` | `.../tokens/next/` |
+| 容器名 | `tokens-postgres`、`tokens-web` |
+| Postgres 端口 | `127.0.0.1:5433`（容器内仍是 5432）。本机 5432 已被 `keyboy-play-local-db` 占用，不抢。 |
+| Web 端口 | `127.0.0.1:3000`（容器内 Next `next dev` 听 `0.0.0.0:3000`） |
 | 库 / 用户 / 密码 | `tokens` / `tokens` / `tokens`（仅本机，非生产） |
-| `DATABASE_URL` | `postgresql://tokens:tokens@127.0.0.1:5433/tokens` |
-| TLS | 关（本地容器无 TLS） |
+| 宿主机 `DATABASE_URL` | `postgresql://tokens:tokens@127.0.0.1:5433/tokens` |
+| Web 容器 `DATABASE_URL` | `postgresql://tokens:tokens@postgres:5432/tokens`（服务名，不要写 `127.0.0.1`） |
+| TLS | 关（本地容器无 TLS；Web 设 `DATABASE_SSL=disable`） |
 
-生产：Neon + Hyperdrive binding `HYPERDRIVE`。不要把 Hyperdrive 叠在 Neon 的 PgBouncer pooler 上。
+`web/` 仍带上游 Hyperdrive 绑定：`next dev` 会读 `web/wrangler.jsonc` 的 `localConnectionString`。Compose 用 `CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE` 指到本机 `postgres:5432`，**不是**在用 Neon。安装用 `bun install --frozen-lockfile`，不改仓库 `bun.lock`。
 
-## 启停（OrbStack）
+Web 容器跑的是 **`next dev`**，不是 OpenNext / wrangler preview。浏览器打开 `http://localhost:3000` 验 UI。邮件未配 `RESEND_API_KEY` 时只打日志。
 
-OrbStack 提供本机 `docker`。在 compose 目录：
 
-```bash
-cd /Users/lusonglin/docker-compose/tokens
-docker compose up -d
-docker compose ps
-docker compose down          # 停容器，保留 ./postgres/data
-docker compose down -v       # 会删数据，需明确确认
-```
 
-端口必须写成 `127.0.0.1:5433:5432`，不要 `5433:5432` / `5432:5432`（会绑到 `0.0.0.0`）。
+## 启停
 
-健康检查通过后再跑迁移：
+步骤与命令见 `docs/deploy/local-orbstack-compose.md`。不要把 git checkout 直接写进 Compose `volumes:`。
+
+
+端口必须写成 `127.0.0.1:5433:5432` 和 `127.0.0.1:3000:3000`，不要省略 `127.0.0.1`（会绑到 `0.0.0.0`）。
+
+本机若已有 `bun run dev` 占用 3000，先停掉再起容器。
+
+健康检查通过后再跑迁移（在**宿主机**，连映射端口）：
 
 ```bash
 cd /Users/lusonglin/github/tokens/web
 DATABASE_URL=postgresql://tokens:tokens@127.0.0.1:5433/tokens bun run test:migrations
 ```
 
-`web/.env` / `.env.local` 可写同一 `DATABASE_URL`；不要提交真实生产连接串。
+`web/.env` / `.env.local` 可写同一宿主机 `DATABASE_URL`；不要提交真实生产连接串。
+
 
 ## 禁止
 
 - 不要为跑迁移再 `brew install postgresql@*`。
 - 不要 `brew services start postgresql@*`（登录自启）。
 - 不要把本机 Homebrew cluster 当项目运行时。
-- 不要对生产 Neon 跑 `test:migrations`。
-- 不要把容器密码用于生产。
+- 不要对未授权的远程库跑 `test:migrations`（含上游 Neon、尚未交付的云上库）。只打本机 `127.0.0.1:5433`。
+- 不要把 Compose 里的 `tokens/tokens` 密码用到云上自建库。
+
 
 ## Homebrew 残留（已按授权清理）
 

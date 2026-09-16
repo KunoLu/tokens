@@ -78,7 +78,7 @@ T9 核对（2026-09-15）：`git diff --stat upstream/main HEAD -- web cli packa
 |---|---|---|---|
 | CLI | 完整 TUI 面板 + 报表命令 | 无 TUI 与 `models` / `monthly` / `hourly` / `graph` / `wrapped` / `pricing` 等报表命令；保留提交、账户管理、后台提交、导入与各 provider 集成命令（顶层 `Commands` 共 15 个：`login`、`logout`、`whoami`、`status`、`import`、`submit`、`serve`、`autosubmit`、`headless`、`codex`、`cursor`、`antigravity`、`trae`、`warp`、`delete-submitted-data`） | 与直接上游一致，**且本次改造也不打算改动** |
 | 报表 | 终端内 | Web 端 | 与直接上游一致 |
-| 托管 | 自建 Docker + 同机 Postgres | Cloudflare Workers（OpenNext）+ Neon Postgres（经 Hyperdrive）；Worker 定点到数据库所在区域 `aws:us-west-2` | 与直接上游一致 |
+| 托管 | 自建 Docker + 同机 Postgres | Cloudflare Workers（OpenNext）+ Neon Postgres（经 Hyperdrive）；Worker 定点到数据库所在区域 `aws:us-west-2` | **本地**：OrbStack Compose 自建 Postgres 16（`docs/deploy/local-orbstack-compose.md`）。**计划**：云服务器自建 Postgres。Neon+Hyperdrive 只描述直接上游线上，不是本 fork 目标。当前 `web/` 仍带上游 Hyperdrive 绑定；本地用 env 把连接串指到 Compose Postgres |
 | 缓存 | — | R2 渲染页 + Durable Objects 标签失效；`/api/og` 与 SVG 图片端点另有显式 edge cache | 与直接上游一致；页面缓存 key 另含 `__locale` |
 | 前端 | 上游自有组件 | 重建于 shadcn/ui | 与直接上游一致（组件栈）；文案走 `web/src/lib/i18n/` 字典 |
 | SEO / 元数据 | — | 多个页面各自声明 per-page Open Graph card | 与直接上游一致 |
