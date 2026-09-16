@@ -2,7 +2,8 @@ import type { Metadata } from "next";
 import { cookies } from "next/headers";
 import { CONTAINER } from "@/components/layout/Container";
 import { PageHeader } from "@/components/layout/PageHeader";
-import { Button } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button";
+
 import { Card, CardContent } from "@/components/ui/card";
 import { getSession } from "@/lib/auth/session";
 import { LOCALE_COOKIE, parseLocale, t } from "@/lib/i18n";
@@ -34,11 +35,14 @@ export default async function TeamsPage() {
               <p className="text-sm text-muted-foreground">
                 {t(locale, "teams.gateDesc")}
               </p>
-              <Button
-                render={<a href={`/login?returnTo=${encodeURIComponent("/teams")}`} />}
+              <a
+                href={`/login?returnTo=${encodeURIComponent("/teams")}`}
+                className={buttonVariants()}
               >
                 {t(locale, "nav.signIn")}
-              </Button>
+              </a>
+
+
             </CardContent>
           </Card>
         </div>

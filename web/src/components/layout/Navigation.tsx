@@ -14,7 +14,8 @@ import {
   UserIcon,
 } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
+
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -311,15 +312,17 @@ export function Navigation() {
           ) : user ? (
             <UserMenu user={user} onSignOut={signOut} />
           ) : (
-            <Button
-              size="sm"
-              className="h-8"
-              render={
-                <a href={`/login?returnTo=${encodeURIComponent(returnTo)}`} />
-              }
+            <a
+              href={`/login?returnTo=${encodeURIComponent(returnTo)}`}
+              className={cn(
+                buttonVariants({ size: "sm" }),
+                "h-8 bg-[#7C3AED] text-white hover:bg-[#7C3AED]/90"
+              )}
             >
               {t("nav.signIn")}
-            </Button>
+            </a>
+
+
           )}
 
           {/* Mobile navigation lives behind a menu; the links do not fit. */}

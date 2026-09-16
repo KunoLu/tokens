@@ -2,7 +2,8 @@
 
 import { useEffect } from "react";
 import Link from "next/link";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
+
 import { CONTAINER } from "@/components/layout/Container";
 import { cn } from "@/lib/utils";
 import { useI18n } from "@/lib/i18n";
@@ -44,9 +45,14 @@ export default function RootError({
         <Button size="sm" onClick={reset}>
           {t("error.retry")}
         </Button>
-        <Button variant="outline" size="sm" render={<Link href="/leaderboard" />}>
+        <Link
+          href="/leaderboard"
+          className={buttonVariants({ variant: "outline", size: "sm" })}
+        >
           {t("error.leaderboard")}
-        </Button>
+        </Link>
+
+
       </div>
 
       {/* The digest is the only handle support has on a specific failure, and

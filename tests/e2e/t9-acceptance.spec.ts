@@ -8,6 +8,14 @@ test("/shame is 404 and Hall of Shame is gone from the nav", async ({ page }) =>
   await expect(page.getByRole("link", { name: "Teamboard" })).toBeVisible();
 });
 
+test("未登录导航 Sign in 是带回跳的登录链接", async ({ page }) => {
+  await page.goto("/leaderboard");
+  await expect(
+    page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Sign in" })
+  ).toHaveAttribute("href", `/login?returnTo=${encodeURIComponent("/leaderboard")}`);
+});
+
+
 test("Leaderboard column order is # Developer Team Group Tokens Cost", async ({
   page,
 }) => {
