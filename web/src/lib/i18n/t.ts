@@ -410,10 +410,7 @@ const en = {
   "footer.privacy": "Privacy",
   "footer.terms": "Terms",
   "footer.builtOn": "Built on Tokscale",
-  "footer.poweredBy": "Powered by",
-  "footer.workers": "Workers",
-  "footer.serverSponsored": "Server sponsored by",
-  "footer.dbSponsored": "Database sponsored by",
+
   "device.loading": "Loading...",
   "device.invalidCode": "Invalid code",
   "device.title": "Authorize CLI",
@@ -1295,10 +1292,7 @@ const zh: Record<keyof typeof en, string> = {
   "footer.privacy": "隐私",
   "footer.terms": "条款",
   "footer.builtOn": "基于 Tokscale",
-  "footer.poweredBy": "运行于",
-  "footer.workers": "Workers",
-  "footer.serverSponsored": "服务器由",
-  "footer.dbSponsored": "数据库由",
+
   "device.loading": "加载中...",
   "device.invalidCode": "无效代码",
   "device.title": "授权 CLI",

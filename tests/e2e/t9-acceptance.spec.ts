@@ -27,6 +27,16 @@ test("Docs 页安装入口指向本站", async ({ page }) => {
   await expect(page.getByText(/pre-install-tokens\.ps1/).first()).toBeVisible();
 });
 
+test("页脚只保留版权与署名行", async ({ page }) => {
+  await page.goto("/leaderboard");
+  const footer = page.locator("footer");
+  await expect(footer.getByText("Built on Tokscale")).toBeVisible();
+  await expect(footer.getByText("Workers")).toHaveCount(0);
+  await expect(footer.getByText("V.PS")).toHaveCount(0);
+  await expect(footer.getByText("Neon")).toHaveCount(0);
+});
+
+
 test("Leaderboard column order is # Developer Team Group Tokens Cost", async ({
   page,
 }) => {

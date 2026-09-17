@@ -87,5 +87,4 @@ TOKENS_API_URL=https://你的域名 tokens submit
 
 1. **CLI endpoint profile / `TOKENS_CONFIG_DIR` 双站方案**：允许 tokens.ci 与自建站并存。目前是单凭据单基址。
 2. **生产容器化资产**：Dockerfile / compose / systemd，仓内尚无。
-3. **页脚文案**：Workers/Neon/V.PS 为上游历史事实，应删改（已建议只留 `Privacy · Terms · Built on Tokscale`）。
-4. **`tokens.ci` 硬编码品牌清理**（本次只扫了 metadata 层）：`privacy/terms` 页正文链接、`CONTACT_EMAIL`（hi@tokens.ci）、`/api/og` 与 embed/badge SVG 里的 "tokens.ci" 文案、`teamboard` 与 `u/[username]` 的 `og:url`、`requestSession.ts` 的 CSRF 默认 origin、i18n `terms.software.p1` 文案。上线前逐处决定替换为站点域名还是删改。
+3. **`tokens.ci` 硬编码品牌清理**（已扫 metadata 层与页脚）：`privacy/terms` 页正文链接、`CONTACT_EMAIL`（hi@tokens.ci）、`/api/og` 与 embed/badge SVG 里的 "tokens.ci" 文案、`teamboard` 与 `u/[username]` 的 `og:url`、`requestSession.ts` 的 CSRF 默认 origin、i18n `terms.software.p1` 文案。上线前逐处决定替换为站点域名还是删改。

@@ -35,11 +35,10 @@ export const metadata: Metadata = {
   icons: {
     icon: [
       // SVG first so capable browsers get the theme-aware mark; the .ico stays
-      // for the ones that do not support SVG favicons.
-      { url: "/brand/tokens-favicon.svg", type: "image/svg+xml" },
-      { url: "/favicon.ico?v=2", sizes: "48x48", type: "image/x-icon" },
-      { url: "/favicon-16x16.png?v=2", sizes: "16x16", type: "image/png" },
-      { url: "/favicon-32x32.png?v=2", sizes: "32x32", type: "image/png" },
+      { url: "/brand/tokens-favicon.svg?v=3", type: "image/svg+xml" },
+      { url: "/favicon.ico?v=3", sizes: "48x48", type: "image/x-icon" },
+      { url: "/favicon-16x16.png?v=3", sizes: "16x16", type: "image/png" },
+      { url: "/favicon-32x32.png?v=3", sizes: "32x32", type: "image/png" },
     ],
     apple: "/brand/tokens-app-icon-180.png",
   },
