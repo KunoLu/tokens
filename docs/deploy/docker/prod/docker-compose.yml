@@ -1,0 +1,43 @@
+name: tokens-prod
+
+# Production stack: internal Postgres 16 + the web image built from
+# ./Dockerfile (build context is the repo root). Copy .env.example to .env
+# beside this file and fill in real values before `docker compose up -d`.
+#
+# The web port binds loopback only — put your own HTTPS reverse proxy
+# (nginx/caddy/…) in front; the proxy MUST overwrite X-Forwarded-For.
+# Override the host port with WEB_PORT (e.g. WEB_PORT=3001) when 3000 is
+# taken, e.g. by a local dev stack.
+
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    # No host port mapping: the database is reachable only on the internal
+    # compose network, never from the host or the outside.
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-tokens}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-tokens}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  web:
+    build:
+      context: ../../../..
+      dockerfile: docs/deploy/docker/prod/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${WEB_PORT:-3000}:3000"
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  pgdata:

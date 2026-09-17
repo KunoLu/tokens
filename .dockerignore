@@ -1,0 +1,20 @@
+# Build context for docs/deploy/docker/prod/Dockerfile is the repo root.
+# Keep the image free of local secrets, VCS data, and build caches.
+
+.git
+.trellis
+
+# Dependencies and build output are recreated inside the image.
+**/node_modules
+web/.next
+**/target
+
+# Local secrets never enter the image, at any depth (compose injects env at runtime).
+**/.env*
+
+# Docs and test artifacts are irrelevant to the web build.
+docs
+test-results
+web/test-results
+tests/e2e/reports
+web/playwright-report*

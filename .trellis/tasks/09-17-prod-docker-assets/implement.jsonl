@@ -1,0 +1,2 @@
+{"file": "docs/deploy/self-host-production.md", "reason": "P1 gap this task resolves; env vars and blockers the prod assets must honor"}
+{"file": ".trellis/spec/web/frontend/self-host-deployment.md", "reason": "self-host runtime facts the Dockerfile must match"}

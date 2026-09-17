@@ -2,7 +2,7 @@
 
 本 fork 的部署：**自建 Postgres + Node 跑本仓 `web/`**。Cloudflare Workers 层（`wrangler.jsonc`、`worker.ts`、OpenNext 配置与依赖）已在 self-host cutover 中整层删除；Neon + Hyperdrive 是直接上游 `missuo/tokens` 的历史拓扑。
 
-相关：本地开发栈 `docs/local-dev-database.md`、`docs/deploy/local-orbstack-compose.md`（OrbStack Compose，仅本地 dev）。**仓内目前没有生产 Dockerfile / compose / 编排**；本文件是上线前必须满足的条件清单。
+相关：本地开发栈 `docs/local-dev-database.md`、`docs/deploy/local-orbstack-compose.md`（OrbStack Compose，仅本地 dev）。生产容器化资产在 `docs/deploy/docker/prod/`（Dockerfile + compose + runbook，编排可重复化）；本文件是上线前必须满足的条件清单，两者配合使用。
 
 ## 结论
 
@@ -68,7 +68,7 @@ TOKENS_API_URL=https://你的域名 tokens submit
 1. 云服务器装 Postgres 16，建库建号；不要用 Compose 的 `tokens/tokens` 口令。
 2. 跑本仓迁移到 0026：**生产库只执行 `DATABASE_URL=… bun run db:migrate`（`drizzle-kit migrate`）**。不要对云上库跑 `bun run test:migrations`——它会执行 `scripts/check-migrations.ts`（在事务里插入回放数据，虽 ROLLBACK，但会拿锁、跑断言，是验证工具不是迁移工具）。`test:migrations` 只对本地 Compose 或一次性隔离验证库执行。
 3. 反代 HTTPS；环境：`NODE_ENV=production`、`NEXT_PUBLIC_URL=https://你的域名`、`DATABASE_URL=…`、`DATABASE_SSL` 按 TLS 实配（无 TLS 用 `disable`）、`CRON_SECRET`（随机长串）。反代必须覆写 `X-Forwarded-For`。可选：`CONTACT_EMAIL`（法律页联系邮箱；未配置则法律页只显示站点链接，不渲染 mailto）、`RESEND_API_KEY`/`EMAIL_FROM`（验证与邀请邮件）。
-4. `next build && next start`（或容器化等效）。
+4. `next build && next start`，或用 `docs/deploy/docker/prod/` 的 compose 栈（`up -d --build` 后在 web 容器内 `bun run --cwd web db:migrate` 跑迁移，runbook 见该目录 README）。
 5. 系统 cron（同机 loopback）：`curl -fsS -X POST http://127.0.0.1:3000/api/cron/refresh-social-links -H "Authorization: Bearer $CRON_SECRET"`，非 2xx 时告警/重试。
 6. 端到端验收（见下）。
 
@@ -86,4 +86,3 @@ TOKENS_API_URL=https://你的域名 tokens submit
 ## 待开发项（不属于部署，属于缺口）
 
 1. **CLI endpoint profile / `TOKENS_CONFIG_DIR` 双站方案**：允许 tokens.ci 与自建站并存。目前是单凭据单基址。
-2. **生产容器化资产**：Dockerfile / compose / systemd，仓内尚无。

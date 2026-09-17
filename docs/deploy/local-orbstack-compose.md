@@ -2,7 +2,7 @@
 
 本 fork **本地**数据库是这份 OrbStack Compose 里的自建 Postgres，云服务器同法自建。Workers/Hyperdrive 层已在 self-host cutover 中删除；Neon + Hyperdrive 是直接上游 `missuo/tokens` 的历史拓扑。
 
-模板本体在仓库里：`docs/deploy/docker/docker-compose.yml`（净化参考副本，说明见同目录 README.md）。运行副本在开发机的 compose 目录。
+模板本体在仓库里：`docs/deploy/docker/dev/docker-compose.yml`（净化参考副本，说明见同目录 README.md）。运行副本在开发机的 compose 目录。
 
 本地 UI 验证用 Compose，**不**挂 git checkout。仓库改完必须先 rsync 再起 web。
 
