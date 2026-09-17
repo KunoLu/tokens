@@ -1,62 +1,114 @@
 <div align="center">
   <img src="web/public/brand/tokens-mark-rounded.png" width="76" alt="" />
   <h1>Tokens</h1>
-  <p><strong>The leaderboard for AI coding usage.</strong></p>
+  <p><strong>The leaderboard for AI coding usage — self-hosted.</strong></p>
   <p>
-    <a href="https://tokens.ci/leaderboard">Leaderboard</a> ·
-    <a href="https://tokens.ci/teamboard">Teamboard</a> ·
-    <a href="https://tokens.ci/docs">Docs</a>
+    <a href="./README_zh.md">中文文档</a> ·
+    <a href="./docs/deploy/self-host-production.md">Deploy</a> ·
+    <a href="./docs/deploy/tokens-cli-usage.md">CLI guide</a>
   </p>
 </div>
 
 ---
 
-You already burn tokens all day. **[tokens.ci](https://tokens.ci)** turns that into
-a public standing: how much you ran through today, how it splits across clients
-and models, and where you rank against everyone else doing the same thing.
+You burn tokens all day. Tokens turns that into a public standing — how much
+you ran through today, how it splits across clients and models, and where you
+rank against your team and everyone else doing the same thing.
 
-```sh
-bunx tokens-cli@latest login
-```
+This is a self-hosted fork: you run the web app and the Postgres yourself, on
+your own server, under your own domain. There is no hosted instance to sign up
+for — deployment is a first-class, documented path, not an afterthought.
 
-## Why this repository is public
+## What it is
 
-So you can check what we send.
+A leaderboard and teamboard for AI coding usage. The CLI scans the AI clients
+already on your machine, totals usage locally, and submits only the totals. The
+web app ranks developers globally and within Teams/Groups, with per-person
+profiles, contribution graphs, and embeddable cards.
+
+## This fork vs upstream
+
+Fork chain: [junhoyeo/tokscale](https://github.com/junhoyeo/tokscale) →
+[missuo/tokens](https://github.com/missuo/tokens) → this repository. The CLI is
+unchanged from upstream; everything about the site has diverged:
+
+| | Upstream (missuo/tokens) | This fork |
+|---|---|---|
+| Auth | GitHub OAuth | Email + password (PBKDF2); no GitHub sign-in |
+| Organization | Single global leaderboard | Team / Group levels; Teamboard with team-single + group-multi filters |
+| UI copy | English only | Full English/中文 i18n with a language switcher |
+| Brand | Upstream blue | Brand purple `#7C3AED` |
+| Deployment | Cloudflare Workers + Neon Postgres via Hyperdrive | Self-hosted Node (`next start`) + your own Postgres, with production Docker assets |
+| Anti-cheat | Cross-device dedup, monotonicity checks, public Hall of Shame | Same guards; the public shame page is removed, bans still apply |
+
+**Upstream sync policy** lives in
+[docs/upstream_policy.md](./docs/upstream_policy.md): data capabilities and
+correctness fixes come in; UI implementations do not.
+
+## Privacy
 
 The CLI reads the session files your AI clients already write to disk, totals
 them locally, and uploads **only the totals** — token counts, model names,
 client names, timestamps. Prompts, completions, file contents and paths never
-leave your machine.
+leave your machine. `tokens submit --dry-run` prints exactly what would be
+uploaded. The whole pipeline is readable in `cli/tokens-core/src/sessions/`
+(per-client parsers) and `cli/tokens-cli/src/commands/` (the submit path).
 
-You do not have to take that on faith. The whole pipeline is here:
+Because you self-host, the data sits in your own Postgres as well.
 
-- `cli/tokens-core/src/sessions/` — one parser per client, showing exactly which
-  fields are read out of each session file
-- `cli/tokens-core/src/aggregator.rs` — how those reads become daily totals
-- `cli/tokens-cli/src/commands/` — the submit path, including the exact payload
+## Install the CLI and point it at your site
 
-`tokens submit --dry-run` prints what would be uploaded without uploading it.
+**macOS**
 
-We are not asking anyone to run their own copy. This repo exists to be read.
+```sh
+brew install owo-network/brew/tokens
+```
+
+**Linux**
+
+```sh
+curl -fsSL https://<your-domain>/install.sh | sh
+```
+
+**Windows** (or a one-off anywhere with Bun/Node 18+)
+
+```sh
+npm i -g tokens-cli        # or: bunx tokens-cli@latest <command>
+```
+
+Then, on any platform:
+
+```sh
+tokens logout                                     # clears any credentials from another site
+TOKENS_API_URL=https://<your-domain> tokens login  # browser opens <your-domain>/device
+TOKENS_API_URL=https://<your-domain> tokens submit
+```
+
+`TOKENS_API_URL` must be set on every command (or exported once per shell) —
+the CLI defaults to the upstream site and credentials do not record which site
+they belong to. The repo root also carries `pre-install-tokens.sh` /
+`pre-install-tokens.ps1`, one-step onboarding scripts that install the CLI,
+clear old credentials, and pin it to your site. See
+[docs/deploy/tokens-cli-usage.md](./docs/deploy/tokens-cli-usage.md).
+
+## Self-host the site
+
+Production is a Node server plus a Postgres database, both yours:
+
+- **Deploy checklist** — [docs/deploy/self-host-production.md](./docs/deploy/self-host-production.md)
+  (blockers, env vars, acceptance)
+- **Production Docker assets** — [docs/deploy/docker/prod/](./docs/deploy/docker/prod/)
+  (multi-stage Dockerfile, compose, runbook; `docker compose up -d --build`
+  deploys and redeploys)
+- **Local dev stack** — [docs/deploy/docker/dev/](./docs/deploy/docker/dev/)
+  (OrbStack/Docker Compose reference copy)
 
 ## Supported clients
 
-All 41 are detected automatically — if it is installed and has
-written sessions, it is counted.
-
-|  |  |  |  |
-|---|---|---|---|
-| <img src=".github/assets/client-amp.png" width="16" height="16" alt="" /> Amp | <img src=".github/assets/client-antigravity.png" width="16" height="16" alt="" /> Antigravity | <img src=".github/assets/client-antigravity.png" width="16" height="16" alt="" /> Antigravity CLI | <img src=".github/assets/client-claude.jpg" width="16" height="16" alt="" /> Claude Code |
-| <img src=".github/assets/client-cline.png" width="16" height="16" alt="" /> Cline | <img src=".github/assets/client-codebuddy.png" width="16" height="16" alt="" /> CodeBuddy | <img src=".github/assets/client-codebuff.png" width="16" height="16" alt="" /> Codebuff | <img src=".github/assets/client-openai.jpg" width="16" height="16" alt="" /> Codex CLI |
-| <img src=".github/assets/client-commandcode.png" width="16" height="16" alt="" /> Command Code | <img src=".github/assets/client-copilot.jpg" width="16" height="16" alt="" /> Copilot | <img src=".github/assets/client-crush.png" width="16" height="16" alt="" /> Crush | <img src=".github/assets/client-cursor.jpg" width="16" height="16" alt="" /> Cursor |
-| <img src=".github/assets/client-devin.jpg" width="16" height="16" alt="" /> Devin CLI | <img src=".github/assets/client-devin.jpg" width="16" height="16" alt="" /> Devin Desktop | <img src=".github/assets/client-droid.png" width="16" height="16" alt="" /> Droid | <img src=".github/assets/client-fx.png" width="16" height="16" alt="" /> Fx | <img src=".github/assets/client-generic.svg" width="16" height="16" alt="" /> Gajae Code |
-| <img src=".github/assets/client-gemini.png" width="16" height="16" alt="" /> Gemini CLI | <img src=".github/assets/client-goose.png" width="16" height="16" alt="" /> Goose | <img src=".github/assets/client-grok.png" width="16" height="16" alt="" /> Grok Build | <img src=".github/assets/client-hermes.png" width="16" height="16" alt="" /> Hermes Agent |
-| <img src=".github/assets/client-jcode.png" width="16" height="16" alt="" /> Jcode | <img src=".github/assets/client-junie.png" width="16" height="16" alt="" /> Junie | <img src=".github/assets/client-kilocode.png" width="16" height="16" alt="" /> Kilo | <img src=".github/assets/client-generic.svg" width="16" height="16" alt="" /> Kilo CLI |
-| <img src=".github/assets/client-kimi.png" width="16" height="16" alt="" /> Kimi | <img src=".github/assets/client-kiro.jpg" width="16" height="16" alt="" /> Kiro | <img src=".github/assets/client-micode.jpg" width="16" height="16" alt="" /> MiMo Code | <img src=".github/assets/client-mux.png" width="16" height="16" alt="" /> Mux |
-| <img src=".github/assets/client-openclaw.jpg" width="16" height="16" alt="" /> OpenClaw | <img src=".github/assets/client-opencode.png" width="16" height="16" alt="" /> OpenCode | <img src=".github/assets/client-opencodereview.png" width="16" height="16" alt="" /> OpenCodeReview | <img src=".github/assets/client-orca.png" width="16" height="16" alt="" /> Orca |
-| <img src=".github/assets/client-pi.png" width="16" height="16" alt="" /> Pi | <img src=".github/assets/client-qwen.png" width="16" height="16" alt="" /> Qwen | <img src=".github/assets/client-generic.svg" width="16" height="16" alt="" /> Reasonix | <img src=".github/assets/client-roocode.png" width="16" height="16" alt="" /> Roo Code |
-| <img src=".github/assets/client-trae.png" width="16" height="16" alt="" /> Trae |   |   |   |
-| <img src=".github/assets/client-warp.png" width="16" height="16" alt="" /> Warp | <img src=".github/assets/client-workbuddy.png" width="16" height="16" alt="" /> WorkBuddy | <img src=".github/assets/client-zcode.png" width="16" height="16" alt="" /> ZCode | <img src=".github/assets/client-zed.webp" width="16" height="16" alt="" /> Zed Agent |
+All 41 are detected automatically — if it is installed and has written
+sessions, it is counted. The CLI core is unchanged from upstream, so every
+parser, pricing feed, and correctness fix that lands upstream keeps working
+here.
 
 <details>
 <summary>Where each one stores its data</summary>
@@ -99,96 +151,28 @@ Clients that expose usage only through an account API need a sync step first —
 `tokens cursor sync`, `tokens antigravity sync`, `tokens trae sync`,
 `tokens warp sync` — after which they submit like everything else.
 
-Pricing comes from a combination of
-[LiteLLM](https://github.com/BerriAI/litellm),
+Pricing comes from [LiteLLM](https://github.com/BerriAI/litellm),
 [OpenRouter](https://openrouter.ai) and
-[models.dev](https://github.com/anomalyco/models.dev),
-with the best matching rate used per model. Built-in overrides handle tiered
-rates and cache discounts where the upstream feeds do not.
+[models.dev](https://github.com/anomalyco/models.dev), with the best matching
+rate used per model.
 
-## What makes it different
+## Repository layout
 
-**One number, across everything.** Most usage tools are scoped to a single
-client. This one merges every client you run into one total, deduplicated per
-client-day, so switching from Claude Code to Codex mid-afternoon does not split
-your day into two half-stories.
-
-**Built to be gamed against.** A public leaderboard attracts inflated numbers.
-Submissions are checked for cross-device duplicates and monotonic regressions,
-accounts caught faking totals are banned. Ranking is worth nothing if nobody
-polices it.
-
-**A profile worth linking.** Your page carries your split by client and model,
-your contribution graph, and embeddable SVG cards for a README — ten templates,
-both themes, rendered server-side.
-
-**Small on your machine.** The CLI is one job: scan, total, submit. It runs as a
-background service and otherwise stays out of the way.
-
-## Differences from Tokscale
-
-This project is a fork of [Tokscale](https://github.com/junhoyeo/tokscale). The
-data-collection core is shared and we keep pulling upstream's parser, pricing
-and correctness fixes. Everything above that has diverged:
-
-| | Tokscale | Tokens |
-|---|---|---|
-| CLI surface | Full TUI dashboard plus report commands (`models`, `monthly`, `hourly`, `graph`, `wrapped`, `pricing`, …) | Submit only — `login`, `submit`, `serve`, `status`. The TUI and every report command are removed, ~11k lines and 15 dependencies with them |
-| Reporting | In the terminal | On the web, where it can be linked and compared |
-| Anti-cheat | — | Cross-device duplicate guard, resubmit monotonicity checks, account bans |
-| Identity | Username | Email and password; social links on the profile, no verified badge |
-| Groups | Team/group leaderboards | Team and Group on the web leaderboard and Teamboard |
-| Frontend | Upstream's components | Rebuilt on shadcn/ui with its own brand marks and per-page Open Graph cards |
-
-**Upstream sync policy:** data capabilities and correctness fixes come in; UI
-implementations do not. The site keeps its own component set so the design stays
-consistent across updates.
-
-## Install
-
-**macOS**
-
-```sh
-brew install owo-network/brew/tokens
-tokens login
-brew services start tokens        # keeps submitting in the background
+```text
+cli/                 Rust workspace — the tokens CLI (unchanged from upstream)
+web/                 Next.js app — leaderboard, teamboard, auth, profiles, embeds
+packages/            npm distribution packages (CLI + platform binaries)
+docs/deploy/         Self-host deployment (checklist, Docker assets, CLI guide)
+docs/upstream_policy.md   How upstream changes are evaluated and merged
+web/features/        BDD behavior specs (Chinese scenarios, English keywords)
+tests/e2e/           Playwright end-to-end tests
 ```
-
-**Linux**
-
-```sh
-curl -fsSL https://tokens.ci/install.sh | sh
-tokens login
-```
-
-The installer sets up a systemd user service, so submission keeps running after
-you close the terminal.
-
-**Windows, or a one-off anywhere** (Bun or Node 18+)
-
-```sh
-bunx tokens-cli@latest login      # or: npx tokens-cli@latest login
-bunx tokens-cli@latest submit
-```
-
-## Who pays for this
-
-<div align="center">
-  <a href="https://neon.com">
-    <img src="web/public/icons/neon.svg" width="64" height="64" alt="Neon" />
-  </a>
-  <p><strong><a href="https://neon.com">Neon</a></strong> sponsor the Postgres behind <a href="https://tokens.ci">tokens.ci</a>.</p>
-</div>
-
-Tokens is free to use and free to self-host, and the leaderboard reads each page
-from Postgres rather than from a cache of a cache. That is what keeps the numbers
-honest, and it is also the expensive way to do it. Neon cover that cost, so the
-board does not have to go behind a paywall or get thinner to fit a budget.
 
 ## License
 
 MIT — see [LICENSE](./LICENSE).
 
 Built on [Tokscale](https://github.com/junhoyeo/tokscale) by
-[Junho Yeo](https://github.com/junhoyeo); credit for the original design and
-implementation goes to the upstream author and contributors.
+[Junho Yeo](https://github.com/junhoyeo), via
+[missuo/tokens](https://github.com/missuo/tokens). Credit for the original
+design and implementation goes to the upstream authors and contributors.
