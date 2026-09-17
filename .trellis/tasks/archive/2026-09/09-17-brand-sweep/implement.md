@@ -65,7 +65,7 @@ Observability and repair: 无新增；若 NEXT_PUBLIC_URL 配错，OG/embed/法�
 Required tests: e2e 站点身份场景（/privacy /terms /leaderboard /api/og 零 tokens.ci 且显示本站 host）；CONTACT_EMAIL 未配置时 /privacy 无 mailto。
 ```
 
-- Release Readiness：planned——本任务改动生产可见行为（法律页内容、OG/embed API 输出、CSRF 默认源），收尾前跑正式 review。
+- Release Readiness：`ready`（2026-09-17）。证据：lint/tsc/build 绿；Compose 冒烟 4 页零 tokens.ci；e2e 17/17（最终报告 `tests/e2e/reports/html/playwright-report-site-identity-feature_teamboard-teams-auth-2026_09_17-19_11_42.*`）；CONTACT_EMAIL 双向验证（未配置无 mailto；配置 `ops@localhost.dev` 后 privacy 10 条 / terms 7 条 mailto、无 mailto:undefined、零 tokens.ci）；独立 trellis-check PASS + 3 minor findings 已修复复验。残余风险：/api/og 为 PNG，host 文案只能断言不含 tokens.ci（SVG embed 端点已断言含 host）。
 
 
 ## 偏差记录（2026-09-17 check 回填）
