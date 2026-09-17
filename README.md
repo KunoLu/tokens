@@ -88,8 +88,14 @@ TOKENS_API_URL=https://<your-domain> tokens submit
 the CLI defaults to the upstream site and credentials do not record which site
 they belong to. The repo root also carries `pre-install-tokens.sh` /
 `pre-install-tokens.ps1`, one-step onboarding scripts that install the CLI,
-clear old credentials, and pin it to your site. See
-[docs/deploy/tokens-cli-usage.md](./docs/deploy/tokens-cli-usage.md).
+clear old credentials, and pin it to your site — runnable straight from the
+repo's public GitHub (pinned to a reviewed commit, never a moving branch):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/KunoLu/tokens/4921ccbed1f4286e75c35f676c400ec8f83012a6/pre-install-tokens.sh | bash -s -- https://<your-domain>
+```
+
+See [docs/deploy/tokens-cli-usage.md](./docs/deploy/tokens-cli-usage.md).
 
 ## Self-host the site
 

@@ -149,8 +149,13 @@ export default async function DocsPage() {
   const locale = parseLocale((await cookies()).get(LOCALE_COOKIE)?.value);
   // The install commands must point at the site serving this page.
   const siteUrl = SITE_URL;
-  const preinstallSh = `curl -fsSL ${siteUrl}/pre-install-tokens.sh | bash -s -- ${siteUrl}`;
-  const preinstallPs1 = `iex "& { $(irm ${siteUrl}/pre-install-tokens.ps1) } -Site ${siteUrl}"`;
+  // Pre-install scripts execute straight from this repo's public GitHub root,
+  // pinned to the immutable commit where they were reviewed — never a moving
+  // branch. Bump the SHA deliberately when the scripts change.
+  const preinstallRaw = "https://raw.githubusercontent.com/KunoLu/tokens/4921ccbed1f4286e75c35f676c400ec8f83012a6";
+  const preinstallSh = `curl -fsSL ${preinstallRaw}/pre-install-tokens.sh | bash -s -- ${siteUrl}`;
+  const preinstallPs1 = `iex "& { $(irm ${preinstallRaw}/pre-install-tokens.ps1) } -Site ${siteUrl}"`;
+
   return (
     <main
       className={cn(CONTAINER, "pb-24 pt-10 sm:pt-14")}

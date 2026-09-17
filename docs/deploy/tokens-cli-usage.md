@@ -105,6 +105,19 @@ TOKENS_API_URL=https://<线上域名> tokens submit
 
 脚本支持先看后跑：`--dry-run`（sh）/ `-DryRun`（ps1）只打印将要做的安装、logout 和配置写入，不改动任何东西。
 
+**推荐：无需 clone 仓库，直接远程执行钉住版本的脚本**
+
+```bash
+# macOS / Linux（钉住 commit，不跟随分支漂移）
+curl -fsSL https://raw.githubusercontent.com/KunoLu/tokens/4921ccbed1f4286e75c35f676c400ec8f83012a6/pre-install-tokens.sh | bash -s -- https://<线上域名>
+
+# Windows
+iex "& { $(irm https://raw.githubusercontent.com/KunoLu/tokens/4921ccbed1f4286e75c35f676c400ec8f83012a6/pre-install-tokens.ps1) } -Site https://<线上域名>"
+```
+
+脚本有更新时，把钉住的 commit SHA 换成审过的新版本（文档页与本手册同步更新）。脚本也会被站点 build 复制到 `https://<线上域名>/pre-install-tokens.sh` 作为备选下载路径。
+
+**本地文件形式：**
 
 ```bash
 # macOS / Linux（站点地址作为参数显式传入，脚本无默认域名、拒绝占位符）
