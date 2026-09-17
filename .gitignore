@@ -143,6 +143,10 @@ tests/e2e/**/*.trace.zip
 .maestro/tmp/
 .maestro/runs/
 .maestro/reports/
+# ---------- Deploy ----------
+# prod compose 的固定路径持久化目录（compose 文件旁），数据绝不入库
+docs/deploy/docker/prod/postgres/
+
 
 # ---------- AI Tools ----------
 .worktrees/

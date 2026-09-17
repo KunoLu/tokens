@@ -20,7 +20,9 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
       POSTGRES_DB: ${POSTGRES_DB:-tokens}
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      # Fixed path so backups/migrations are just file operations on the host.
+      # The postgres image chowns this dir on first boot.
+      - ./postgres/data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
@@ -39,5 +41,4 @@ services:
       postgres:
         condition: service_healthy
 
-volumes:
-  pgdata:
+

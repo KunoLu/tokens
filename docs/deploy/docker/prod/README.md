@@ -6,7 +6,7 @@
 
 ## 拓扑
 
-- `postgres`：`postgres:16`，命名卷 `pgdata`，**不映射宿主端口**（只在 compose 内网可达）；`pg_isready` 健康检查。
+- `postgres`：`postgres:16`，数据持久化到**固定路径** `./postgres/data`（compose 文件旁，位置可指；Postgres 镜像首启会处理属主），**不映射宿主端口**（只在 compose 内网可达）；`pg_isready` 健康检查。备份用 `pg_dump` / `pg_basebackup`，或停库后冷拷目录——**不要**对活动数据目录做 tar/rsync。
 - `web`：从 `Dockerfile` 构建（`next build` + `next start`，构建期不需要 `DATABASE_URL`）；`127.0.0.1:${WEB_PORT:-3000}:3000` 只绑 loopback，供本机反代转发；`restart: unless-stopped`；依赖 postgres 健康后启动。
 - compose 项目名固定 `tokens-prod`，与本地 dev 栈（`tokens-local`）不冲突。
 
@@ -45,7 +45,7 @@ cd docs/deploy/docker/prod
 docker compose up -d --build
 ```
 
-`pgdata` 命名卷不动，数据保留。**注意**：只适用于无破坏性迁移的回退；若两版本之间跑过后向不兼容的库迁移，先按迁移内容评估再回滚。
+`./postgres/data` 目录不动，数据保留。**注意**：只适用于无破坏性迁移的回退；若两版本之间跑过后向不兼容的库迁移，先按迁移内容评估再回滚。
 
 ## cron（每日维护）
 
