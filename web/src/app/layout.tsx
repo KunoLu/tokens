@@ -10,6 +10,7 @@ import "./globals.css";
 import "react-toastify/dist/ReactToastify.css";
 import { cn } from "@/lib/utils";
 import { htmlLang, LOCALE_COOKIE, parseLocale, t } from "@/lib/i18n";
+import { SITE_URL } from "@/lib/site";
 // Geist carries interface text and JetBrains Mono carries every figure, so
 // numeric columns stay aligned when scanned down the page.
 const geist = Geist({
@@ -24,7 +25,6 @@ const jetbrainsMono = JetBrains_Mono({
   display: "swap",
 });
 
-const SITE_URL = (process.env.NEXT_PUBLIC_URL || "http://localhost:3000").replace(/\/+$/, "");
 
 export const metadata: Metadata = {
   title: "Tokens - AI Token Usage Tracker & Leaderboard",

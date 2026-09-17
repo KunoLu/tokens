@@ -1,5 +1,6 @@
 import { ImageResponse } from "next/og";
 import { formatCurrency, formatNumber } from "@/lib/format";
+import { SITE_HOST } from "@/lib/site";
 
 /**
  * Open Graph card renderer.
@@ -173,7 +174,7 @@ export async function GET(request: Request) {
           </div>
         ) : (
           <span style={{ fontSize: 30, color: MUTED, letterSpacing: -0.3 }}>
-            tokens.ci
+            {SITE_HOST}
           </span>
         )}
       </div>

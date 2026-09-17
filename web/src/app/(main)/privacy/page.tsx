@@ -7,6 +7,7 @@ import {
   LegalPage,
 } from "@/components/legal/LegalPage";
 import { LOCALE_COOKIE, parseLocale, t } from "@/lib/i18n";
+import { SITE_HOST, SITE_URL } from "@/lib/site";
 
 export const metadata: Metadata = {
   title: "Privacy Policy - Tokens",
@@ -37,9 +38,16 @@ export default async function PrivacyPage() {
 
       <Clause heading={t(locale, "privacy.h.who")}>
         <p>
-          Tokens (<a href="https://tokens.ci">tokens.ci</a>){" "}
-          {t(locale, "privacy.who.p1")}{" "}
-          <a href={`mailto:${CONTACT_EMAIL}`}>{CONTACT_EMAIL}</a>.
+          Tokens (<a href={SITE_URL}>{SITE_HOST}</a>)
+          {CONTACT_EMAIL ? (
+            <>
+              {" "}
+              {t(locale, "privacy.who.p1")}{" "}
+              <a href={`mailto:${CONTACT_EMAIL}`}>{CONTACT_EMAIL}</a>.
+            </>
+          ) : (
+            "."
+          )}
         </p>
       </Clause>
 
@@ -192,21 +200,37 @@ export default async function PrivacyPage() {
         </p>
         <p>{t(locale, "privacy.ca.p3")}</p>
         <p>
-          {t(locale, "privacy.ca.p4a")}{" "}
-          <a href={`mailto:${CONTACT_EMAIL}`}>{CONTACT_EMAIL}</a>
-          {t(locale, "privacy.ca.p4b")}
+          {CONTACT_EMAIL ? (
+            <>
+              {t(locale, "privacy.ca.p4a")}{" "}
+              <a href={`mailto:${CONTACT_EMAIL}`}>{CONTACT_EMAIL}</a>
+              {t(locale, "privacy.ca.p4b")}
+            </>
+          ) : (
+            t(locale, "privacy.ca.p4NoEmail", { host: SITE_HOST })
+          )}
         </p>
       </Clause>
 
       <Clause heading={t(locale, "privacy.h.states")}>
-        <p>{t(locale, "privacy.states.p1")}</p>
+        <p>
+          {CONTACT_EMAIL
+            ? t(locale, "privacy.states.p1")
+            : t(locale, "privacy.states.p1NoEmail", { host: SITE_HOST })}
+        </p>
       </Clause>
 
       <Clause heading={t(locale, "privacy.h.children")}>
         <p>
-          {t(locale, "privacy.children.p1a")}{" "}
-          <a href={`mailto:${CONTACT_EMAIL}`}>{CONTACT_EMAIL}</a>{" "}
-          {t(locale, "privacy.children.p1b")}
+          {CONTACT_EMAIL ? (
+            <>
+              {t(locale, "privacy.children.p1a")}{" "}
+              <a href={`mailto:${CONTACT_EMAIL}`}>{CONTACT_EMAIL}</a>{" "}
+              {t(locale, "privacy.children.p1b")}
+            </>
+          ) : (
+            t(locale, "privacy.children.p1NoEmail", { host: SITE_HOST })
+          )}
         </p>
       </Clause>
 
@@ -220,7 +244,11 @@ export default async function PrivacyPage() {
 
       <Clause heading={t(locale, "privacy.h.contact")}>
         <p>
-          <a href={`mailto:${CONTACT_EMAIL}`}>{CONTACT_EMAIL}</a>
+          {CONTACT_EMAIL ? (
+            <a href={`mailto:${CONTACT_EMAIL}`}>{CONTACT_EMAIL}</a>
+          ) : (
+            <a href={SITE_URL}>{SITE_HOST}</a>
+          )}
         </p>
       </Clause>
     </LegalPage>

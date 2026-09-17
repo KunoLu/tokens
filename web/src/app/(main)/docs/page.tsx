@@ -13,9 +13,8 @@ import { PageHeader } from "@/components/layout/PageHeader";
 import { LOCALE_COOKIE, parseLocale, t, type Locale, type TranslationKey } from "@/lib/i18n";
 import { cookies } from "next/headers";
 import { cn } from "@/lib/utils";
-// Site origin for everything user-facing on this page (metadata + install
-// commands) — never a hardcoded tokens.ci.
-const SITE_URL = (process.env.NEXT_PUBLIC_URL || "http://localhost:3000").replace(/\/+$/, "");
+import { SITE_URL } from "@/lib/site";
+
 
 export const metadata: Metadata = {
   title: "Docs - Tokens",
@@ -62,8 +61,8 @@ const MACOS = [
   { command: "brew services start tokens", note: "docs.note.submitAuto" },
 ] as const;
 
-// URL-bearing rows are computed in the component from NEXT_PUBLIC_URL so the
-// docs page always points at the site it is served from (never tokens.ci).
+// URL-bearing rows are computed in the component from the site origin so the
+// docs page always points at the deployment it is served from.
 const LINUX = [
   { command: "tokens login", note: "docs.note.signIn" },
   { command: "tokens serve", note: "docs.note.submitAuto" },

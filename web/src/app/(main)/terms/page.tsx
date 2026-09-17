@@ -7,6 +7,7 @@ import {
   LegalPage,
 } from "@/components/legal/LegalPage";
 import { LOCALE_COOKIE, parseLocale, t } from "@/lib/i18n";
+import { SITE_HOST, SITE_URL } from "@/lib/site";
 
 export const metadata: Metadata = {
   title: "Terms of Service - Tokens",
@@ -27,7 +28,7 @@ export default async function TermsPage() {
       <Clause heading={t(locale, "terms.h.agreement")}>
         <p>
           {t(locale, "terms.agreement.p1a")}
-          <a href="https://tokens.ci">tokens.ci</a>
+          <a href={SITE_URL}>{SITE_HOST}</a>
           {t(locale, "terms.agreement.p1b")}
         </p>
       </Clause>
@@ -72,9 +73,15 @@ export default async function TermsPage() {
           ]}
         />
         <p>
-          {t(locale, "terms.other.p1a")}{" "}
-          <a href={`mailto:${CONTACT_EMAIL}`}>{CONTACT_EMAIL}</a>{" "}
-          {t(locale, "terms.other.p1b")}
+          {CONTACT_EMAIL ? (
+            <>
+              {t(locale, "terms.other.p1a")}{" "}
+              <a href={`mailto:${CONTACT_EMAIL}`}>{CONTACT_EMAIL}</a>{" "}
+              {t(locale, "terms.other.p1b")}
+            </>
+          ) : (
+            t(locale, "terms.other.p1NoEmail", { host: SITE_HOST })
+          )}
         </p>
       </Clause>
 
@@ -82,9 +89,15 @@ export default async function TermsPage() {
         <p>{t(locale, "terms.enforce.p1")}</p>
         <p>{t(locale, "terms.enforce.p2")}</p>
         <p>
-          {t(locale, "terms.enforce.p3a")}{" "}
-          <a href={`mailto:${CONTACT_EMAIL}`}>{CONTACT_EMAIL}</a>{" "}
-          {t(locale, "terms.enforce.p3b")}
+          {CONTACT_EMAIL ? (
+            <>
+              {t(locale, "terms.enforce.p3a")}{" "}
+              <a href={`mailto:${CONTACT_EMAIL}`}>{CONTACT_EMAIL}</a>{" "}
+              {t(locale, "terms.enforce.p3b")}
+            </>
+          ) : (
+            t(locale, "terms.enforce.p3NoEmail", { host: SITE_HOST })
+          )}
         </p>
       </Clause>
 
@@ -93,7 +106,7 @@ export default async function TermsPage() {
       </Clause>
 
       <Clause heading={t(locale, "terms.h.software")}>
-        <p>{t(locale, "terms.software.p1")}</p>
+        <p>{t(locale, "terms.software.p1", { host: SITE_HOST })}</p>
       </Clause>
 
       <Clause heading={t(locale, "terms.h.avail")}>
@@ -128,7 +141,11 @@ export default async function TermsPage() {
 
       <Clause heading={t(locale, "terms.h.contact")}>
         <p>
-          <a href={`mailto:${CONTACT_EMAIL}`}>{CONTACT_EMAIL}</a>
+          {CONTACT_EMAIL ? (
+            <a href={`mailto:${CONTACT_EMAIL}`}>{CONTACT_EMAIL}</a>
+          ) : (
+            <a href={SITE_URL}>{SITE_HOST}</a>
+          )}
         </p>
       </Clause>
     </LegalPage>

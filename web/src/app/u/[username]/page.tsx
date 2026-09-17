@@ -7,6 +7,7 @@ import { loadPublicProfileDevicesForPage } from '@/lib/publicProfileDevices';
 import { loadPublicProfileForPage } from '@/lib/publicProfileData';
 import { loadProfileMembershipForPage } from '@/lib/teams/profileMembership';
 import { LOCALE_COOKIE, parseLocale } from '@/lib/i18n';
+import { SITE_URL } from '@/lib/site';
 import ProfilePageClient, { type ProfileData } from './ProfilePageClient';
 import BannedProfileView, { type BannedProfileData } from './BannedProfileView';
 
@@ -113,7 +114,7 @@ export async function generateMetadata({ params }: { params: Promise<{ username:
         ? `${username} has used ${stats.totalTokens.toLocaleString("en-US")} tokens across their AI coding clients.`
         : `AI coding token usage for ${username}.`,
       type: "profile",
-      url: `https://tokens.ci/u/${username}`,
+      url: `${SITE_URL}/u/${username}`,
       siteName: "Tokens",
       images: [{ url: image, width: 1200, height: 630, alt: `@${username} on Tokens` }],
     },

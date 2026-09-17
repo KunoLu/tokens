@@ -15,6 +15,7 @@ import {
 } from "@/lib/leaderboard/constants";
 import { isValidDateString, parseCustomDateRange } from "@/lib/leaderboard/dateRange";
 import type { Period, SortBy } from "@/lib/leaderboard/types";
+import { SITE_URL } from "@/lib/site";
 import { TeamboardClient } from "@/components/teamboard/Teamboard";
 
 // Reads searchParams on every request; `revalidate` + searchParams flaps on
@@ -27,7 +28,7 @@ export const metadata: Metadata = {
   openGraph: {
     title: "Teamboard — Tokens",
     description: "Token usage ranked within a team, filtered by group.",
-    url: "https://tokens.ci/teamboard",
+    url: `${SITE_URL}/teamboard`,
     siteName: "Tokens",
     images: [
       {

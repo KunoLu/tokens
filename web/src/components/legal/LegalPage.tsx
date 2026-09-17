@@ -4,7 +4,8 @@ import { PageHeader } from "@/components/layout/PageHeader";
 import { intlTag, LOCALE_COOKIE, parseLocale, t, type Locale } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
-export const CONTACT_EMAIL = "hi@tokens.ci";
+/** 联系邮箱由部署方配置；未配置时法律页不渲染 mailto 链接（不造假地址）。 */
+export const CONTACT_EMAIL = process.env.CONTACT_EMAIL || undefined;
 
 function formatUpdated(updated: string, locale: Locale): string {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(updated)) return updated;
