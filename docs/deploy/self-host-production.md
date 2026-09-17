@@ -81,7 +81,7 @@ TOKENS_API_URL=https://你的域名 tokens submit
 - [ ] 过期邀请被定时任务标记 expired（cron 返回 200 且 `expiredInvitations` 计数正确）
 - [ ] `tokens.ci` 老用户未 logout 直接 submit → 本站 401（确认拦截，不是误收上游数据）
 - [ ] 登录接口同一 IP 第 11 次请求起 429
-- [ ] 页脚 Workers/Neon/V.PS 文案与真实拓扑一致，或已按产品决定移除
+
 
 ## 待开发项（不属于部署，属于缺口）
 
