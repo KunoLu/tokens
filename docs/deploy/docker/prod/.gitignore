@@ -1,0 +1,2 @@
+# prod 栈原地运行时，Postgres 数据落在本目录的 postgres/ 下；数据绝不入库。
+postgres/
