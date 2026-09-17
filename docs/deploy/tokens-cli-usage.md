@@ -103,6 +103,7 @@ TOKENS_API_URL=https://<线上域名> tokens submit
 
 **用法：**
 
+
 ```bash
 # macOS / Linux（站点地址作为参数显式传入，脚本无默认域名、拒绝占位符）
 bash pre-install-tokens.sh https://<线上域名>

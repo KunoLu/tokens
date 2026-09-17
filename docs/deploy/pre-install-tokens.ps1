@@ -11,10 +11,12 @@
 # 用法（站点地址必须显式传，脚本没有默认域名）：
 #   powershell -ExecutionPolicy Bypass -File pre-install-tokens.ps1 -Site https://tokens.example.com
 #   $env:TOKENS_SITE = 'https://tokens.example.com'; .\pre-install-tokens.ps1
+# 先看会做什么再实跑：加 -DryRun
 # 本地联调可用 loopback：-Site http://localhost:3000
 
 param(
-    [string]$Site = $env:TOKENS_SITE
+    [string]$Site = $env:TOKENS_SITE,
+    [switch]$DryRun
 )
 
 $ErrorActionPreference = 'Stop'
@@ -38,11 +40,12 @@ if ($Site -notmatch '^https://[A-Za-z0-9.-]+(:[0-9]+)?$' -and $Site -notmatch '^
 # 在任何改动（logout / profile 写入）之前，先让用户看到目标站点。
 Write-Host "==> 目标站点：$Site"
 
-
 # --- 1. 检测 / 安装 tokens CLI -------------------------------------------
 $tokensCmd = Get-Command tokens -CommandType Application -ErrorAction SilentlyContinue
 if ($tokensCmd) {
     Write-Host "✓ tokens CLI 已安装：$($tokensCmd.Source)"
+} elseif ($DryRun) {
+    Write-Host "[dry-run] tokens CLI 未安装；实跑将执行 npm i -g tokens-cli"
 } else {
     Write-Host "==> tokens CLI 未安装，用 npm 全局安装（tokens-cli 包，含平台二进制）"
     if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
@@ -56,34 +59,44 @@ if ($tokensCmd) {
 }
 
 # --- 2. 退出既有登录（未登录也无害） --------------------------------------
-try { & $tokensCmd.Source logout | Out-Null } catch {}
-Write-Host "✓ 已退出既有登录"
+if ($DryRun) {
+    Write-Host "[dry-run] 将执行 tokens logout（清掉当前凭据）"
+} else {
+    try { & $tokensCmd.Source logout | Out-Null } catch {}
+    Write-Host "✓ 已退出既有登录"
+}
 
 # --- 3. 写入 PowerShell function（覆盖默认 tokens 命令） -------------------
 # 注意：function 里固化的是当前解析到的二进制路径；以后 npm 重装换了路径，
 # 重跑本脚本即可刷新。
+$targetBinary = if ($tokensCmd) { $tokensCmd.Source } else { 'tokens' }
 $funcLines = @(
     '# tokens CLI 默认指向自建站（pre-install-tokens.ps1 写入）',
     'function tokens {',
     "    `$env:TOKENS_API_URL = '$Site'",
-    "    & '$($tokensCmd.Source)' @args",
+    "    & '$targetBinary' @args",
     '}'
 )
 $funcBlock = $funcLines -join "`n"
 
-$profileDir = Split-Path $PROFILE -Parent
-New-Item -ItemType Directory -Force -Path $profileDir | Out-Null
-if (-not (Test-Path $PROFILE)) { New-Item -ItemType File -Force -Path $PROFILE | Out-Null }
-
-$existing = Get-Content $PROFILE -Raw -ErrorAction SilentlyContinue
-if ($existing -and ($existing -match '(?ms)^function tokens \{.*?\r?\n\}')) {
-    # 幂等：已有 function tokens 就整块替换（换域名/路径重跑脚本即可更新）
-    $updated = [regex]::Replace($existing, '(?ms)^function tokens \{.*?\r?\n\}', ($funcLines[1..4] -join "`n"))
-    Set-Content -Path $PROFILE -Value $updated -NoNewline
-    Write-Host "✓ 已更新 $PROFILE 里的 tokens function"
+if ($DryRun) {
+    Write-Host "[dry-run] 将写入/更新 $PROFILE："
+    Write-Host $funcBlock
 } else {
-    Add-Content -Path $PROFILE -Value "`n$funcBlock"
-    Write-Host "✓ 已写入 $PROFILE"
+    $profileDir = Split-Path $PROFILE -Parent
+    New-Item -ItemType Directory -Force -Path $profileDir | Out-Null
+    if (-not (Test-Path $PROFILE)) { New-Item -ItemType File -Force -Path $PROFILE | Out-Null }
+
+    $existing = Get-Content $PROFILE -Raw -ErrorAction SilentlyContinue
+    if ($existing -and ($existing -match '(?ms)^function tokens \{.*?\r?\n\}')) {
+        # 幂等：已有 function tokens 就整块替换（换域名/路径重跑脚本即可更新）
+        $updated = [regex]::Replace($existing, '(?ms)^function tokens \{.*?\r?\n\}', ($funcLines[1..4] -join "`n"))
+        Set-Content -Path $PROFILE -Value $updated -NoNewline
+        Write-Host "✓ 已更新 $PROFILE 里的 tokens function"
+    } else {
+        Add-Content -Path $PROFILE -Value "`n$funcBlock"
+        Write-Host "✓ 已写入 $PROFILE"
+    }
 }
 
 Write-Host ""

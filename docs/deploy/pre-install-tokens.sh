@@ -12,6 +12,7 @@
 # 用法（站点地址必须显式传，脚本没有默认域名）：
 #   bash pre-install-tokens.sh https://tokens.example.com
 #   TOKENS_SITE=https://tokens.example.com bash pre-install-tokens.sh
+# 先看会做什么再实跑：bash pre-install-tokens.sh --dry-run https://...
 # 本地联调可用 loopback：bash pre-install-tokens.sh http://localhost:3000
 
 set -euo pipefail
@@ -19,6 +20,9 @@ set -euo pipefail
 info() { printf "==> %s\n" "$*"; }
 ok()   { printf "✓ %s\n" "$*"; }
 die()  { printf "✗ %s\n" "$*" >&2; exit 1; }
+
+DRY_RUN=0
+if [ "${1:-}" = "--dry-run" ]; then DRY_RUN=1; shift; fi
 
 # --- 站点地址：必须显式传；只接受纯 origin（https://host[:port]）或精确的
 # --- loopback http。地址会写进 shell 配置，绝不能含引号/空白/路径。 ---
@@ -33,7 +37,6 @@ if ! printf '%s' "$TOKENS_SITE" | grep -Eq '^https://[A-Za-z0-9.-]+(:[0-9]+)?$' 
   die "站点地址只接受 https://<域名>[:端口]（本地联调仅 http://localhost / 127.0.0.1 / [::1]），收到：$TOKENS_SITE"
 fi
 
-
 # 在任何改动（logout / rc 写入）之前，先让用户看到目标站点。
 info "目标站点：$TOKENS_SITE"
 
@@ -42,6 +45,8 @@ OS="$(uname -s)"
 # --- 1. 检测 / 安装 tokens CLI -------------------------------------------
 if command -v tokens >/dev/null 2>&1; then
   ok "tokens CLI 已安装"
+elif [ "$DRY_RUN" = 1 ]; then
+  info "[dry-run] tokens CLI 未安装；实跑将按平台安装（macOS: brew；Linux: install.sh 且 TOKENS_NO_SERVICE=1）"
 else
   info "tokens CLI 未安装，开始安装"
   case "$OS" in
@@ -66,25 +71,41 @@ fi
 # 已有常驻上报服务会直接绕过 shell alias 打上游，停掉它。
 if [ "$OS" = "Linux" ] && command -v systemctl >/dev/null 2>&1; then
   if systemctl --user is-enabled tokens.service >/dev/null 2>&1; then
-    systemctl --user disable --now tokens.service >/dev/null 2>&1 || true
-    info "已停用既有 tokens.service（它不会读 shell alias，见使用手册第 2 章）"
+    if [ "$DRY_RUN" = 1 ]; then
+      info "[dry-run] 将停用既有 tokens.service"
+    else
+      systemctl --user disable --now tokens.service >/dev/null 2>&1 || true
+      info "已停用既有 tokens.service（它不会读 shell alias，见使用手册第 2 章）"
+    fi
   fi
 elif [ "$OS" = "Darwin" ] && command -v brew >/dev/null 2>&1; then
   if brew services list 2>/dev/null | grep -q '^tokens.*started'; then
-    brew services stop tokens >/dev/null 2>&1 || true
-    info "已停用 brew services 的 tokens 常驻服务（它不会读 shell alias）"
+    if [ "$DRY_RUN" = 1 ]; then
+      info "[dry-run] 将停用 brew services 的 tokens 常驻服务"
+    else
+      brew services stop tokens >/dev/null 2>&1 || true
+      info "已停用 brew services 的 tokens 常驻服务（它不会读 shell alias）"
+    fi
   fi
 fi
 
 # --- 2. 退出既有登录（未登录也无害） --------------------------------------
-tokens logout >/dev/null 2>&1 || true
-ok "已退出既有登录"
+if [ "$DRY_RUN" = 1 ]; then
+  info "[dry-run] 将执行 tokens logout（清掉当前凭据）"
+else
+  tokens logout >/dev/null 2>&1 || true
+  ok "已退出既有登录"
+fi
 
 # --- 3. 写入全局 alias（覆盖默认 tokens 命令） -----------------------------
 ALIAS_LINE="alias tokens='TOKENS_API_URL=${TOKENS_SITE} tokens'"
 
 write_alias() {
   local rc="$1"
+  if [ "$DRY_RUN" = 1 ]; then
+    info "[dry-run] 将写入/更新 ${rc}：${ALIAS_LINE}"
+    return
+  fi
   touch "$rc"
   if grep -q '^alias tokens=' "$rc"; then
     # 幂等：已存在就整行替换（换域名重跑脚本即可更新）
