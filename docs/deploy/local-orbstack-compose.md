@@ -49,6 +49,14 @@
 
 Web 是 **`next dev`**，不是 wrangler preview。本机若已有进程占 3000，先停掉。云上自建库尚未落地，不要把这份 Compose 密码当云上配置。
 
+**邮件**：未配 `RESEND_API_KEY` 时只打一行跳过日志（**不含验证链接**；token 原文不落库，只存哈希）。所以本地测不了「点链接验证邮箱」流程——要测就配 Resend；只想测「已验证账号」的下游行为（如按邮箱邀请的接受），直接置位：
+
+```bash
+docker compose exec postgres psql -U tokens -d tokens \
+  -c "UPDATE users SET email_verified_at = now() WHERE lower(email) = lower('<邮箱>');"
+```
+
+
 
 ## 仓库改动后（Agent 必做）
 
