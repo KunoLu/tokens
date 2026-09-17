@@ -15,7 +15,7 @@
 | # | 条件 | 依据 | 不满足的后果 |
 |---|---|---|---|
 | 1 | 公网 **HTTPS** 反代 + 证书 | CLI device flow 只接受 HTTPS；HTTP 仅 loopback（`cli/tokens-cli/src/auth.rs:246-249`）。生产会话 cookie 仅 `NODE_ENV=production` 标 `Secure`（`web/src/lib/auth/session.ts`） | CLI 拒绝打开 verification URL；HTTP 下会话 cookie 落不了 |
-| 2 | `NEXT_PUBLIC_URL=https://你的域名` | device `verificationUrl`、验证信、邀请链接都按它拼，默认 `http://localhost:3000`（`web/src/app/api/auth/device/route.ts`、`web/src/lib/auth/emailTokens.ts`、`web/src/lib/teams/service.ts`）；CSRF 也按它放行本站 Origin（`web/src/lib/auth/requestSession.ts`） | CLI 打印的授权链接指向 localhost；邮件/邀请链接错 |
+| 2 | `NEXT_PUBLIC_URL=https://你的域名` | device `verificationUrl`、验证信、邀请链接都按它拼，默认 `http://localhost:3000`（`web/src/app/api/auth/device/route.ts`、`web/src/lib/auth/emailTokens.ts`、`web/src/lib/teams/service.ts`）；CSRF 也按它放行本站 Origin（`web/src/lib/auth/requestSession.ts`）；自品牌清理起，OG 卡片、embed 徽章、法律页与 og:url 的站点身份也全部由它派生（`web/src/lib/site.ts`） | CLI 打印的授权链接指向 localhost；邮件/邀请链接错；OG 卡片与 embed 徽章显示错误域名 |
 | 3 | 用户侧 `TOKENS_API_URL=https://你的域名` | 默认固定 `https://tokens.ci`（`auth.rs:215-217`） | login / submit 仍进上游，本站榜是空的 |
 | 4 | 既有 `tokens.ci` 用户**先退出再登录** | `credentials.json` 只存 `token`/`username`，不存 API 基址；`tokens login` 发现凭据直接返回（`auth.rs:338-351`） | 带上游 token 打本站 `/api/submit` → **401** |
 | 5 | 自建库跑本 fork 迁移到 **0026** | `0024` 邮箱密码认证、`0025` teams/groups、`0026` 邀请 `group_id`（`web/src/lib/db/migrations/`） | 没有邮箱认证和 Team 表 |
@@ -67,7 +67,7 @@ TOKENS_API_URL=https://你的域名 tokens submit
 
 1. 云服务器装 Postgres 16，建库建号；不要用 Compose 的 `tokens/tokens` 口令。
 2. 跑本仓迁移到 0026：**生产库只执行 `DATABASE_URL=… bun run db:migrate`（`drizzle-kit migrate`）**。不要对云上库跑 `bun run test:migrations`——它会执行 `scripts/check-migrations.ts`（在事务里插入回放数据，虽 ROLLBACK，但会拿锁、跑断言，是验证工具不是迁移工具）。`test:migrations` 只对本地 Compose 或一次性隔离验证库执行。
-3. 反代 HTTPS；环境：`NODE_ENV=production`、`NEXT_PUBLIC_URL=https://你的域名`、`DATABASE_URL=…`、`DATABASE_SSL` 按 TLS 实配（无 TLS 用 `disable`）、`CRON_SECRET`（随机长串）。反代必须覆写 `X-Forwarded-For`。
+3. 反代 HTTPS；环境：`NODE_ENV=production`、`NEXT_PUBLIC_URL=https://你的域名`、`DATABASE_URL=…`、`DATABASE_SSL` 按 TLS 实配（无 TLS 用 `disable`）、`CRON_SECRET`（随机长串）。反代必须覆写 `X-Forwarded-For`。可选：`CONTACT_EMAIL`（法律页联系邮箱；未配置则法律页只显示站点链接，不渲染 mailto）、`RESEND_API_KEY`/`EMAIL_FROM`（验证与邀请邮件）。
 4. `next build && next start`（或容器化等效）。
 5. 系统 cron（同机 loopback）：`curl -fsS -X POST http://127.0.0.1:3000/api/cron/refresh-social-links -H "Authorization: Bearer $CRON_SECRET"`，非 2xx 时告警/重试。
 6. 端到端验收（见下）。
