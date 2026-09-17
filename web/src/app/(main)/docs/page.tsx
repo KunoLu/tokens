@@ -13,6 +13,9 @@ import { PageHeader } from "@/components/layout/PageHeader";
 import { LOCALE_COOKIE, parseLocale, t, type Locale, type TranslationKey } from "@/lib/i18n";
 import { cookies } from "next/headers";
 import { cn } from "@/lib/utils";
+// Site origin for everything user-facing on this page (metadata + install
+// commands) — never a hardcoded tokens.ci.
+const SITE_URL = (process.env.NEXT_PUBLIC_URL || "http://localhost:3000").replace(/\/+$/, "");
 
 export const metadata: Metadata = {
   title: "Docs - Tokens",
@@ -20,7 +23,7 @@ export const metadata: Metadata = {
   openGraph: {
     title: "Docs — Tokens",
     description: "Install the Tokens CLI.",
-    url: "https://tokens.ci",
+    url: `${SITE_URL}/docs`,
     siteName: "Tokens",
     images: [
       {
@@ -59,11 +62,13 @@ const MACOS = [
   { command: "brew services start tokens", note: "docs.note.submitAuto" },
 ] as const;
 
+// URL-bearing rows are computed in the component from NEXT_PUBLIC_URL so the
+// docs page always points at the site it is served from (never tokens.ci).
 const LINUX = [
-  { command: "curl -fsSL https://tokens.ci/install.sh | sh", note: "docs.note.install" },
   { command: "tokens login", note: "docs.note.signIn" },
   { command: "tokens serve", note: "docs.note.submitAuto" },
 ] as const;
+
 
 const WINDOWS = [
   { command: "bunx tokens-cli@latest login", note: "docs.note.signIn" },
@@ -143,6 +148,10 @@ function Section({
 
 export default async function DocsPage() {
   const locale = parseLocale((await cookies()).get(LOCALE_COOKIE)?.value);
+  // The install commands must point at the site serving this page.
+  const siteUrl = SITE_URL;
+  const preinstallSh = `curl -fsSL ${siteUrl}/pre-install-tokens.sh | bash -s -- ${siteUrl}`;
+  const preinstallPs1 = `iex "& { $(irm ${siteUrl}/pre-install-tokens.ps1) } -Site ${siteUrl}"`;
   return (
     <main
       className={cn(CONTAINER, "pb-24 pt-10 sm:pt-14")}
@@ -179,7 +188,12 @@ export default async function DocsPage() {
             </TabsList>
 
             <TabsContent value="macos" className="mt-4 flex flex-col gap-3">
-              <CommandBlock commands={localize(locale, MACOS)} />
+              <CommandBlock
+                commands={[
+                  ...localize(locale, MACOS),
+                  { command: preinstallSh, note: t(locale, "docs.note.preinstall") },
+                ]}
+              />
               <p className="text-sm leading-relaxed text-muted-foreground">
                 <code className="font-mono text-[13px]">brew services</code>{" "}
                 {t(locale, "docs.macosNote")}
@@ -187,7 +201,13 @@ export default async function DocsPage() {
             </TabsContent>
 
             <TabsContent value="linux" className="mt-4 flex flex-col gap-3">
-              <CommandBlock commands={localize(locale, LINUX)} />
+              <CommandBlock
+                commands={[
+                  { command: `curl -fsSL ${siteUrl}/install.sh | sh`, note: t(locale, "docs.note.install") },
+                  ...localize(locale, LINUX),
+                  { command: preinstallSh, note: t(locale, "docs.note.preinstall") },
+                ]}
+              />
               <p className="text-sm leading-relaxed text-muted-foreground">
                 <code className="font-mono text-[13px]">tokens serve</code>{" "}
                 {t(locale, "docs.linuxNote")}
@@ -195,7 +215,12 @@ export default async function DocsPage() {
             </TabsContent>
 
             <TabsContent value="windows" className="mt-4 flex flex-col gap-3">
-              <CommandBlock commands={localize(locale, WINDOWS)} />
+              <CommandBlock
+                commands={[
+                  ...localize(locale, WINDOWS),
+                  { command: preinstallPs1, note: t(locale, "docs.note.preinstall") },
+                ]}
+              />
               <p className="text-sm leading-relaxed text-muted-foreground">
                 {t(locale, "docs.windowsNote")}
               </p>

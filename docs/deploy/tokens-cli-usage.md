@@ -93,7 +93,7 @@ TOKENS_API_URL=https://<线上域名> tokens submit
 
 ## 3. 预安装脚本说明（pre-install-tokens）
 
-`docs/deploy/pre-install-tokens.sh`（macOS / Linux）和 `docs/deploy/pre-install-tokens.ps1`（Windows）把第 2 章的前置步骤自动化，降低用户理解和操作成本。
+仓库根目录的 `pre-install-tokens.sh`（macOS / Linux）和 `pre-install-tokens.ps1`（Windows）把第 2 章的前置步骤自动化，降低用户理解和操作成本。它们与 `install.sh` 同级；站点 build 时会被复制到 `public/`，即用户也可以从 `https://<线上域名>/pre-install-tokens.sh` 直接下载。
 
 **脚本做三件事：**
 

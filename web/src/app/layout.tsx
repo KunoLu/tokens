@@ -24,10 +24,14 @@ const jetbrainsMono = JetBrains_Mono({
   display: "swap",
 });
 
+const SITE_URL = (process.env.NEXT_PUBLIC_URL || "http://localhost:3000").replace(/\/+$/, "");
+
 export const metadata: Metadata = {
   title: "Tokens - AI Token Usage Tracker & Leaderboard",
   description: "Track, visualize, and compete on AI coding assistant token usage across Claude Code, Cursor, OpenCode, Codex, Gemini, Kimi, and Qwen. The Kardashev Scale for AI Devs.",
-  metadataBase: new URL("https://tokens.ci"),
+  // Everything relative below (OG images, icons) resolves against this base —
+  // the deployment's own origin, never a hardcoded upstream domain.
+  metadataBase: new URL(SITE_URL),
   icons: {
     icon: [
       // SVG first so capable browsers get the theme-aware mark; the .ico stays
@@ -44,13 +48,13 @@ export const metadata: Metadata = {
     title: "Tokens - AI Token Usage Tracker & Leaderboard",
     description: "Track, visualize, and compete on AI coding assistant token usage across Claude Code, Cursor, OpenCode, Codex, Gemini, Kimi, and Qwen. The Kardashev Scale for AI Devs.",
     type: "website",
-    url: "https://tokens.ci",
+    url: SITE_URL,
     siteName: "Tokens",
     // The dynamic renderer, not a static file: it draws the current mark, so
     // the share card cannot drift from the brand the way a checked-in PNG did.
     images: [
       {
-        url: "https://tokens.ci/api/og?title=Tokens&subtitle=The%20leaderboard%20for%20AI%20coding%20usage",
+        url: "/api/og?title=Tokens&subtitle=The%20leaderboard%20for%20AI%20coding%20usage",
         width: 1200,
         height: 630,
         alt: "Tokens - AI Token Usage Tracker",
@@ -61,7 +65,7 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     title: "Tokens - AI Token Usage Tracker & Leaderboard",
     description: "Track, visualize, and compete on AI coding assistant token usage across Claude Code, Cursor, OpenCode, Codex, Gemini, Kimi, and Qwen.",
-    images: ["https://tokens.ci/api/og?title=Tokens&subtitle=The%20leaderboard%20for%20AI%20coding%20usage"],
+    images: ["/api/og?title=Tokens&subtitle=The%20leaderboard%20for%20AI%20coding%20usage"],
   },
 };
 

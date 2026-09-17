@@ -45,6 +45,8 @@ next-env.d.ts
 
 # Copied from the repo root at build time by `prebuild:assets`.
 public/install.sh
+public/pre-install-tokens.sh
+public/pre-install-tokens.ps1
 
 # Copied from .github/assets at build time.
 public/clients/

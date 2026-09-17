@@ -16,6 +16,17 @@ test("未登录导航 Sign in 是带回跳的登录链接", async ({ page }) => 
 });
 
 
+
+test("Docs 页安装入口指向本站", async ({ page }) => {
+  const response = await page.goto("/docs");
+  expect(response?.status()).toBe(200);
+  const html = await page.content();
+  expect(html).not.toContain("tokens.ci");
+  await expect(page.getByText(/pre-install-tokens\.sh/).first()).toBeVisible();
+  await page.getByRole("tab", { name: /windows/i }).click();
+  await expect(page.getByText(/pre-install-tokens\.ps1/).first()).toBeVisible();
+});
+
 test("Leaderboard column order is # Developer Team Group Tokens Cost", async ({
   page,
 }) => {
