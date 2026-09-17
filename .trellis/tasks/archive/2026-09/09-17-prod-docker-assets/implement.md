@@ -52,4 +52,4 @@ docs/deploy/docker/
 - Refactoring Review：proceed（目录移动 + 新增文件，不改既有代码）
 - Legacy Change Safety：not-required（不修既有行为）
 - DDIA：confirmed——无 schema/迁移；compose 卷的持久化语义（pgdata 命名卷）与回滚路径（checkout + rebuild）明确
-- Release Readiness：planned——部署资产本身就是发布路径，收尾前跑正式 review
+- Release Readiness：`ready`（2026-09-17）。证据：镜像本机构建成功（加固后重建 sha256:ce9a6100，111s）；prod 栈独立项目名/端口拉起（不撞 dev 栈）；`/leaderboard` 200；伪造 token submit 401；停库 500、恢复 200；容器内迁移到 0026；lint/tsc 无回退；独立 trellis-check PASS（零必修缺陷，2 条 .dockerignore 加固已应用并重建验证）。回滚：checkout 上一版本 → `up --build`，pgdata 保留。残余风险：镜像未跑过 HTTPS 反代后的真实外网（上线时按 `self-host-production.md` 验收）。
