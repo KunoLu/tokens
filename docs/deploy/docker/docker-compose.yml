@@ -1,0 +1,61 @@
+name: tokens-local
+
+# Local self-hosted Postgres + Next.js for this fork (OrbStack or any Docker).
+# This is the reference copy of the local dev stack; see README.md beside it
+# and docs/deploy/local-orbstack-compose.md for the full runbook.
+#
+# Every volumes: source is relative to this compose file's directory. Refresh
+# ./app with rsync from the git checkout before `docker compose up`.
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: tokens-postgres
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5433:5432"
+    environment:
+      # Dev-only placeholders, never reuse them outside localhost.
+      POSTGRES_USER: tokens
+      POSTGRES_PASSWORD: tokens
+      POSTGRES_DB: tokens
+      TZ: Asia/Shanghai
+    volumes:
+      - ./postgres/data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tokens -d tokens"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  web:
+    image: oven/bun:1
+    container_name: tokens-web
+    restart: unless-stopped
+    working_dir: /app
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment:
+      DATABASE_URL: postgresql://tokens:tokens@postgres:5432/tokens
+      DATABASE_SSL: disable
+      NEXT_PUBLIC_URL: http://localhost:3000
+      NODE_ENV: development
+      WATCHPACK_POLLING: "true"
+      CHOKIDAR_USEPOLLING: "true"
+      # Dev-only guard for the daily maintenance endpoint; the cron e2e uses
+      # the same value. Production uses its own secret.
+      CRON_SECRET: local-cron-secret
+    volumes:
+      # ./app is an rsync'd copy of the repo (see the runbook), NOT a live
+      # mount of the checkout.
+      - ./app:/app
+      - ./node_modules:/app/node_modules
+      - ./web_node_modules:/app/web/node_modules
+      - ./next:/app/web/.next
+    command:
+      - sh
+      - -c
+      - bun install --frozen-lockfile && bun run --cwd web dev -- --hostname 0.0.0.0 --port 3000
+    depends_on:
+      postgres:
+        condition: service_healthy
