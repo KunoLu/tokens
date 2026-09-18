@@ -74,6 +74,8 @@ TOKENS_API_URL=https://<你的域名> tokens submit
 curl -fsSL https://raw.githubusercontent.com/KunoLu/tokens/4921ccbed1f4286e75c35f676c400ec8f83012a6/pre-install-tokens.sh | bash -s -- https://<你的域名>
 ```
 
+预装完成后，`enable-tokens-service.sh`（Linux）与 `register-tokens-submit-task.ps1`（Windows）可配置常驻自动提交——同款钉版下载模式，详见手册。
+
 详见 [docs/deploy/tokens-cli-usage.md](./docs/deploy/tokens-cli-usage.md)。
 
 ## 自托管站点

@@ -2,6 +2,7 @@
 
 # Production image for the web app. Build context MUST be the repo root —
 # the web build script copies install.sh / pre-install-tokens.* /
+# enable-tokens-service.sh / register-tokens-submit-task.ps1 /
 # .github/assets/client-* into web/public before `next build`.
 #
 #   docker build -f docs/deploy/docker/prod/Dockerfile .

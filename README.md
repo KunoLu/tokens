@@ -95,6 +95,10 @@ repo's public GitHub (pinned to a reviewed tag or commit, never a moving branch)
 curl -fsSL https://raw.githubusercontent.com/KunoLu/tokens/4921ccbed1f4286e75c35f676c400ec8f83012a6/pre-install-tokens.sh | bash -s -- https://<your-domain>
 ```
 
+After onboarding, `enable-tokens-service.sh` (Linux) and
+`register-tokens-submit-task.ps1` (Windows) set up resident auto-submission —
+same pinned download model, details in the manual.
+
 See [docs/deploy/tokens-cli-usage.md](./docs/deploy/tokens-cli-usage.md).
 
 ## Self-host the site
