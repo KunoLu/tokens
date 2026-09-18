@@ -72,8 +72,8 @@ const LINUX = [
 
 
 const WINDOWS = [
-  { command: "bunx tokens-cli@latest login", note: "docs.note.signIn" },
-  { command: "bunx tokens-cli@latest submit", note: "docs.note.submitUsage" },
+  { command: "tokens login", note: "docs.note.signIn" },
+  { command: "tokens submit", note: "docs.note.submitUsage" },
 ] as const;
 
 const EVERYDAY = [
@@ -202,6 +202,9 @@ export default async function DocsPage() {
                 ]}
               />
               <p className="text-sm leading-relaxed text-muted-foreground">
+                {t(locale, "docs.reloadNote")}
+              </p>
+              <p className="text-sm leading-relaxed text-muted-foreground">
                 <code className="font-mono text-[13px]">tokens serve</code>{" "}
                 {t(locale, "docs.macosNote", { site: siteUrl })}{" "}
                 <a
@@ -224,6 +227,9 @@ export default async function DocsPage() {
                 ]}
               />
               <p className="text-sm leading-relaxed text-muted-foreground">
+                {t(locale, "docs.reloadNote")}
+              </p>
+              <p className="text-sm leading-relaxed text-muted-foreground">
                 <code className="font-mono text-[13px]">tokens serve</code>{" "}
                 {t(locale, "docs.linuxNote")}
               </p>
@@ -236,6 +242,9 @@ export default async function DocsPage() {
                   ...localize(locale, WINDOWS),
                 ]}
               />
+              <p className="text-sm leading-relaxed text-muted-foreground">
+                {t(locale, "docs.reloadNote")}
+              </p>
               <p className="text-sm leading-relaxed text-muted-foreground">
                 {t(locale, "docs.windowsNote")}
               </p>

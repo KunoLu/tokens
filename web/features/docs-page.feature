@@ -17,3 +17,5 @@ Feature: 文档页的安装入口
       And macOS 的 serve 说明写明 TOKENS_API_URL 是本站源地址，并动态显示本站实际地址
       And macOS 的 serve 说明文字带「CLI 手册」跳转链接
       And macOS 平台不出现 brew services（常驻服务读不到 shell alias）
+      And Windows 的登录与提交使用预安装脚本装好的 tokens 命令（不用 bunx 直跑，确保指向本站）
+      And 各平台在命令列表下方始终展示「重开终端（Windows 可执行 `. $PROFILE`）后再登录」的说明（含移动端视口）

@@ -23,6 +23,7 @@ test("Docs 页安装入口指向本站", async ({ page }) => {
   const html = await page.content();
   expect(html).not.toContain("tokens.ci");
   await expect(page.getByText(/raw\.githubusercontent\.com\/KunoLu\/tokens\/[0-9a-f]{40}\/pre-install-tokens\.sh/).first()).toBeVisible();
+  expect(html).toContain("reopen the terminal");
   const brewPos = html.indexOf("brew install");
   const piPos = html.indexOf("pre-install-tokens.sh");
   const loginPos = html.indexOf("tokens login");
@@ -34,6 +35,13 @@ test("Docs 页安装入口指向本站", async ({ page }) => {
   expect(html).toContain("site's origin (http://localhost:3000)");
   await page.getByRole("tab", { name: /windows/i }).click();
   await expect(page.getByText(/pre-install-tokens\.ps1/).first()).toBeVisible();
+  expect(await page.content()).not.toContain("bunx tokens-cli");
+  const windowsPanel = page.getByRole("tabpanel");
+  await expect(windowsPanel.getByText(/\. \$PROFILE/)).toBeVisible();
+  await expect(windowsPanel.getByRole("code").filter({ hasText: "tokens login" })).toBeVisible();
+  await expect(windowsPanel.getByRole("code").filter({ hasText: "tokens submit" })).toBeVisible();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(windowsPanel.getByText(/\. \$PROFILE/)).toBeVisible();
 });
 
 test("页脚只保留版权与署名行", async ({ page }) => {
