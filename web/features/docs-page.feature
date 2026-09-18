@@ -14,5 +14,6 @@ Feature: 文档页的安装入口
       Then 每个平台都有一条预安装脚本命令
       And 该命令从本仓库 GitHub 公开地址（钉住 commit，不跟随分支漂移）下载脚本，并以本站地址为参数执行
       And 安装命令排在各平台命令列表的第一位，预安装命令在其后，登录命令在预安装之后
+      And macOS 的 serve 说明写明 TOKENS_API_URL 是本站源地址，并动态显示本站实际地址
       And macOS 的 serve 说明文字带「CLI 手册」跳转链接
       And macOS 平台不出现 brew services（常驻服务读不到 shell alias）

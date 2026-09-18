@@ -203,9 +203,9 @@ export default async function DocsPage() {
               />
               <p className="text-sm leading-relaxed text-muted-foreground">
                 <code className="font-mono text-[13px]">tokens serve</code>{" "}
-                {t(locale, "docs.macosNote")}{" "}
+                {t(locale, "docs.macosNote", { site: siteUrl })}{" "}
                 <a
-                  href="https://github.com/KunoLu/tokens/blob/main/docs/deploy/tokens-cli-usage.md"
+                  href="https://github.com/KunoLu/tokens/blob/4921ccbed1f4286e75c35f676c400ec8f83012a6/docs/deploy/tokens-cli-usage.md"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="text-foreground underline underline-offset-4"

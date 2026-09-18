@@ -31,6 +31,7 @@ test("Docs 页安装入口指向本站", async ({ page }) => {
   expect(piPos).toBeLessThan(loginPos);
   expect(html).not.toContain("brew services");
   expect(html).toContain("docs/deploy/tokens-cli-usage.md");
+  expect(html).toContain("site's origin (http://localhost:3000)");
   await page.getByRole("tab", { name: /windows/i }).click();
   await expect(page.getByText(/pre-install-tokens\.ps1/).first()).toBeVisible();
 });
