@@ -58,7 +58,9 @@ const CLIENT_GRID: ReadonlyArray<{ id: string; name: string; logo: string }> = [
 const MACOS = [
   { command: BREW_INSTALL_COMMAND, note: "docs.note.install" },
   { command: "tokens login", note: "docs.note.signIn" },
-  { command: "brew services start tokens", note: "docs.note.submitAuto" },
+  // brew services start tokens would bypass the shell alias and submit
+  // upstream; serve in the foreground honors TOKENS_API_URL.
+  { command: "tokens serve", note: "docs.note.submitAuto" },
 ] as const;
 
 // URL-bearing rows are computed in the component from the site origin so the
@@ -194,12 +196,12 @@ export default async function DocsPage() {
             <TabsContent value="macos" className="mt-4 flex flex-col gap-3">
               <CommandBlock
                 commands={[
-                  ...localize(locale, MACOS),
                   { command: preinstallSh, note: t(locale, "docs.note.preinstall") },
+                  ...localize(locale, MACOS),
                 ]}
               />
               <p className="text-sm leading-relaxed text-muted-foreground">
-                <code className="font-mono text-[13px]">brew services</code>{" "}
+                <code className="font-mono text-[13px]">tokens serve</code>{" "}
                 {t(locale, "docs.macosNote")}
               </p>
             </TabsContent>
@@ -207,9 +209,9 @@ export default async function DocsPage() {
             <TabsContent value="linux" className="mt-4 flex flex-col gap-3">
               <CommandBlock
                 commands={[
+                  { command: preinstallSh, note: t(locale, "docs.note.preinstall") },
                   { command: `curl -fsSL ${siteUrl}/install.sh | sh`, note: t(locale, "docs.note.install") },
                   ...localize(locale, LINUX),
-                  { command: preinstallSh, note: t(locale, "docs.note.preinstall") },
                 ]}
               />
               <p className="text-sm leading-relaxed text-muted-foreground">
@@ -221,8 +223,8 @@ export default async function DocsPage() {
             <TabsContent value="windows" className="mt-4 flex flex-col gap-3">
               <CommandBlock
                 commands={[
-                  ...localize(locale, WINDOWS),
                   { command: preinstallPs1, note: t(locale, "docs.note.preinstall") },
+                  ...localize(locale, WINDOWS),
                 ]}
               />
               <p className="text-sm leading-relaxed text-muted-foreground">

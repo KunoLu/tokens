@@ -23,6 +23,8 @@ test("Docs 页安装入口指向本站", async ({ page }) => {
   const html = await page.content();
   expect(html).not.toContain("tokens.ci");
   await expect(page.getByText(/raw\.githubusercontent\.com\/KunoLu\/tokens\/[0-9a-f]{40}\/pre-install-tokens\.sh/).first()).toBeVisible();
+  expect(html.indexOf("pre-install-tokens.sh")).toBeLessThan(html.indexOf("tokens login"));
+  expect(html).not.toContain("brew services");
   await page.getByRole("tab", { name: /windows/i }).click();
   await expect(page.getByText(/pre-install-tokens\.ps1/).first()).toBeVisible();
 });
