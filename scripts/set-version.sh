@@ -12,6 +12,23 @@ VERSION="${1:?usage: set-version.sh <version>}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${ROOT}"
 
+# Preflight the docs scripts ref advance BEFORE touching any manifest: a
+# fail-closed exit must not leave versions bumped without the ref moved.
+# A tag without the preinstall scripts must never become the ref — its raw
+# URLs would 404 (v27.0.0/v27.0.1 predate the scripts).
+for script in pre-install-tokens.sh pre-install-tokens.ps1; do
+  [ -f "${script}" ] || { echo "ERROR: ${script} missing; refusing to advance scripts ref" >&2; exit 1; }
+done
+NEW_REF="v${VERSION}"
+CUR_REF=$(grep -oE 'PINNED_SCRIPTS_REF = "[^"]+"' web/src/lib/scriptsRef.ts | cut -d'"' -f2)
+[ -n "${CUR_REF}" ] || { echo "ERROR: cannot read PINNED_SCRIPTS_REF from web/src/lib/scriptsRef.ts" >&2; exit 1; }
+REF_FILES="web/src/lib/scriptsRef.ts README.md README_zh.md docs/deploy/tokens-cli-usage.md"
+if [ "${CUR_REF}" != "${NEW_REF}" ]; then
+  for f in ${REF_FILES}; do
+    grep -q "${CUR_REF}" "${f}" || { echo "ERROR: ${f} has no occurrence of ${CUR_REF}" >&2; exit 1; }
+  done
+fi
+
 # Rust workspace.
 perl -0pi -e "s/^(\[workspace\.package\](?:.|\n)*?^version = )\"[^\"]+\"/\${1}\"${VERSION}\"/m" cli/Cargo.toml
 grep -q "version = \"${VERSION}\"" cli/Cargo.toml || { echo "ERROR: cli/Cargo.toml not updated" >&2; exit 1; }
@@ -43,5 +60,16 @@ for (const dir of dirs) {
   console.log(`  ${file} -> ${version}`);
 }
 NODE
+
+# Docs scripts ref: point the docs page, manual and READMEs at the tag about
+# to be created (set-version -> commit -> tag -> deploy). Preconditions were
+# validated above, before any manifest write.
+if [ "${CUR_REF}" != "${NEW_REF}" ]; then
+  for f in ${REF_FILES}; do
+    count=$(grep -c "${CUR_REF}" "${f}")
+    perl -pi -e "s/\Q${CUR_REF}\E/${NEW_REF}/g" "${f}"
+    echo "  ${f}: ${CUR_REF} -> ${NEW_REF} (${count})"
+  done
+fi
 
 echo "set-version: ${VERSION}"

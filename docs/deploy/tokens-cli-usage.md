@@ -115,7 +115,7 @@ curl -fsSL https://raw.githubusercontent.com/KunoLu/tokens/4921ccbed1f4286e75c35
 iex "& { $(irm https://raw.githubusercontent.com/KunoLu/tokens/4921ccbed1f4286e75c35f676c400ec8f83012a6/pre-install-tokens.ps1) } -Site https://<线上域名>"
 ```
 
-脚本有更新时，把钉住的 commit SHA 换成审过的新版本（文档页与本手册同步更新）。脚本也会被站点 build 复制到 `https://<线上域名>/pre-install-tokens.sh` 作为备选下载路径。
+脚本 URL 指向不可变 ref（tag 或钉版 commit，永不跟随分支）。发版时 `scripts/set-version.sh <version>` 会先把 `web/src/lib/scriptsRef.ts` 的 `PINNED_SCRIPTS_REF` 推进为即将创建的 `v<version>`，并同步替换本手册与 README 的旧 ref——顺序固定为 set-version → commit → tag → deploy。不做 tag 扫描：历史 tag（v27.0.0/v27.0.1）不含 pre-install 脚本，扫到就是 404。部署侧紧急覆盖可用 `TOKENS_SCRIPTS_REF` env（只接受 `vX.Y.Z[-prerelease]` 或 40 位 SHA，非法值回退钉版）。脚本也会被站点 build 复制到 `https://<线上域名>/pre-install-tokens.sh` 作为备选下载路径。
 
 **本地文件形式：**
 
@@ -134,3 +134,17 @@ powershell -ExecutionPolicy Bypass -File pre-install-tokens.ps1 -Site https://<�
 - 不动系统服务的内容——只是把（可能存在的）常驻上报服务停掉；用户若想要常驻自动上报，需按第 2 章注意事项给服务配上 `TOKENS_API_URL` 再手动启用。
 
 脚本是幂等的：域名变了用新地址重跑一遍，alias/function 会被原地更新。
+
+**常驻自动化脚本（完成 preinstall + login 之后）：**
+
+```bash
+# Linux：systemd 用户服务常驻上报（写 drop-in override.conf 指向本站，不动 base unit）
+curl -fsSL https://<线上域名>/enable-tokens-service.sh | bash -s -- https://<线上域名>
+```
+
+```powershell
+# Windows：计划任务定时提交（默认每 30 分钟；runner 内显式设 TOKENS_API_URL）
+iex "& { $(irm https://<线上域名>/register-tokens-submit-task.ps1) } -Site https://<线上域名>"
+```
+
+两个脚本都只配置常驻提交与站点指向：不登录、不 logout，凭据直接复用。Linux 上 `tokens serve` 与常驻服务二选一，别同时跑。卸载：Linux `systemctl --user disable --now tokens`；Windows 重跑脚本加 `-Remove`。

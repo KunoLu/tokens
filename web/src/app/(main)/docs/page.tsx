@@ -14,6 +14,7 @@ import { LOCALE_COOKIE, parseLocale, t, type Locale, type TranslationKey } from 
 import { cookies } from "next/headers";
 import { cn } from "@/lib/utils";
 import { SITE_URL } from "@/lib/site";
+import { SCRIPTS_RAW_BASE, SCRIPTS_BLOB_BASE } from "@/lib/scriptsRef";
 
 
 export const metadata: Metadata = {
@@ -151,12 +152,16 @@ export default async function DocsPage() {
   const locale = parseLocale((await cookies()).get(LOCALE_COOKIE)?.value);
   // The install commands must point at the site serving this page.
   const siteUrl = SITE_URL;
-  // Pre-install scripts execute straight from this repo's public GitHub root,
-  // pinned to the immutable commit where they were reviewed — never a moving
-  // branch. Bump the SHA deliberately when the scripts change.
-  const preinstallRaw = "https://raw.githubusercontent.com/KunoLu/tokens/4921ccbed1f4286e75c35f676c400ec8f83012a6";
+  // Pre-install scripts execute straight from this repo's public GitHub at an
+  // immutable ref — a release tag or the pinned commit fallback, never a moving
+  // branch. Resolution (env override, release-advanced constant) lives in
+  // @/lib/scriptsRef.
+  const preinstallRaw = SCRIPTS_RAW_BASE;
   const preinstallSh = `curl -fsSL ${preinstallRaw}/pre-install-tokens.sh | bash -s -- ${siteUrl}`;
   const preinstallPs1 = `iex "& { $(irm ${preinstallRaw}/pre-install-tokens.ps1) } -Site ${siteUrl}"`;
+  // Resident-submission setup, served from this site like install.sh.
+  const enableServiceSh = `curl -fsSL ${siteUrl}/enable-tokens-service.sh | bash -s -- ${siteUrl}`;
+  const registerTaskPs1 = `iex "& { $(irm ${siteUrl}/register-tokens-submit-task.ps1) } -Site ${siteUrl}"`;
 
   return (
     <main
@@ -208,7 +213,7 @@ export default async function DocsPage() {
                 <code className="font-mono text-[13px]">tokens serve</code>{" "}
                 {t(locale, "docs.macosNote", { site: siteUrl })}{" "}
                 <a
-                  href="https://github.com/KunoLu/tokens/blob/4921ccbed1f4286e75c35f676c400ec8f83012a6/docs/deploy/tokens-cli-usage.md"
+                  href={`${SCRIPTS_BLOB_BASE}/docs/deploy/tokens-cli-usage.md`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="text-foreground underline underline-offset-4"
@@ -223,7 +228,9 @@ export default async function DocsPage() {
                 commands={[
                   { command: `curl -fsSL ${siteUrl}/install.sh | sh`, note: t(locale, "docs.note.install") },
                   { command: preinstallSh, note: t(locale, "docs.note.preinstall") },
-                  ...localize(locale, LINUX),
+                  ...localize(locale, [LINUX[0]]),
+                  { command: enableServiceSh, note: t(locale, "docs.note.setupService") },
+                  ...localize(locale, LINUX.slice(1)),
                 ]}
               />
               <p className="text-sm leading-relaxed text-muted-foreground">
@@ -240,6 +247,7 @@ export default async function DocsPage() {
                 commands={[
                   { command: preinstallPs1, note: t(locale, "docs.note.preinstall") },
                   ...localize(locale, WINDOWS),
+                  { command: registerTaskPs1, note: t(locale, "docs.note.setupTask") },
                 ]}
               />
               <p className="text-sm leading-relaxed text-muted-foreground">

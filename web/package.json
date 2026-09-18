@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "cp ../install.sh public/install.sh && cp ../pre-install-tokens.sh ../pre-install-tokens.ps1 public/ && mkdir -p public/clients && cp ../.github/assets/client-* public/clients/ && next build",
+    "build": "cp ../install.sh public/install.sh && cp ../pre-install-tokens.sh ../pre-install-tokens.ps1 ../enable-tokens-service.sh ../register-tokens-submit-task.ps1 public/ && mkdir -p public/clients && cp ../.github/assets/client-* public/clients/ && next build",
     "start": "next start",
     "lint": "eslint",
     "test:e2e": "playwright test",

@@ -22,7 +22,7 @@ test("Docs 页安装入口指向本站", async ({ page }) => {
   expect(response?.status()).toBe(200);
   const html = await page.content();
   expect(html).not.toContain("tokens.ci");
-  await expect(page.getByText(/raw\.githubusercontent\.com\/KunoLu\/tokens\/[0-9a-f]{40}\/pre-install-tokens\.sh/).first()).toBeVisible();
+  await expect(page.getByText(/raw\.githubusercontent\.com\/KunoLu\/tokens\/(?:v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?|[0-9a-f]{40})\/pre-install-tokens\.sh/).first()).toBeVisible();
   expect(html).toContain("reopen the terminal");
   const brewPos = html.indexOf("brew install");
   const piPos = html.indexOf("pre-install-tokens.sh");
@@ -40,8 +40,11 @@ test("Docs 页安装入口指向本站", async ({ page }) => {
   await expect(windowsPanel.getByText(/\. \$PROFILE/)).toBeVisible();
   await expect(windowsPanel.getByRole("code").filter({ hasText: "tokens login" })).toBeVisible();
   await expect(windowsPanel.getByRole("code").filter({ hasText: "tokens submit" })).toBeVisible();
+  await expect(windowsPanel.getByRole("code").filter({ hasText: "localhost:3000/register-tokens-submit-task.ps1" })).toBeVisible();
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(windowsPanel.getByText(/\. \$PROFILE/)).toBeVisible();
+  await page.getByRole("tab", { name: /linux/i }).click();
+  await expect(page.getByRole("tabpanel").getByRole("code").filter({ hasText: "localhost:3000/enable-tokens-service.sh" })).toBeVisible();
 });
 
 test("页脚只保留版权与署名行", async ({ page }) => {

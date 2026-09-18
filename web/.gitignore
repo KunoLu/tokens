@@ -47,6 +47,8 @@ next-env.d.ts
 public/install.sh
 public/pre-install-tokens.sh
 public/pre-install-tokens.ps1
+public/enable-tokens-service.sh
+public/register-tokens-submit-task.ps1
 
 # Copied from .github/assets at build time.
 public/clients/
