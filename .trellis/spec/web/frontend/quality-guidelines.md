@@ -1,8 +1,8 @@
 # Quality Guidelines
 
 > Hard rules for `web/`. There are **no web unit tests** — verification is
-> lint, typecheck, build, and the migration check. Quality is enforced by
-> convention and review.
+> lint, typecheck, build, the migration check, and (when UI behavior is in
+> scope) Playwright E2E. Quality is enforced by convention and review.
 
 ---
 
@@ -11,16 +11,22 @@
 | Command | Gate |
 |---------|------|
 | `bun run lint` | ESLint (next core-web-vitals + typescript) |
-| `bun run typecheck` | `wrangler types` → `cloudflare-env.d.ts` + `tsc --noEmit` |
+| `bun run typecheck` | `tsc --noEmit` |
 | `bun run build` | asset copies + `next build` |
 | `bun run test:migrations` | `drizzle-kit migrate` + `scripts/check-migrations.ts` |
+| `bun run test:teams` | T4 domain invariants + T7 FR-2 Teamboard pagination / multi-value `groupIds` + T8 `listMyInvitations` + T9 §12 (creator admin, rename/avatar, subadmin cap **and** remaining Team/Group ops, public→private Teamboard, delete-after-disband) (`scripts/check-teams-invariants.ts`). Needs `DATABASE_URL` (local OrbStack `tokens-postgres` is `postgresql://tokens:tokens@127.0.0.1:5433/tokens`). |
+| `bun run test:e2e` | Playwright LocaleToggle, full-page copy, Privacy/Terms English-precedence, Teamboard, Profile membership, maintenance-cron auth (`tests/e2e/cron.spec.ts`, `web/features/maintenance-cron.feature`), and T9 acceptance (`tests/e2e/t9-acceptance.spec.ts`: `/shame` 404, Leaderboard column order, Docs remaining vs removed sections, banned profile + login 403, unsigned Settings→login, embed/badge SVG 200, archive POST 401). Specs live at repo-root `tests/e2e/`; config is `web/playwright.config.ts`. Owner approved 2026-09-14. Locale copy coverage is `tests/e2e/i18n-locale.spec.ts` (`web/features/i18n.feature`). Leaderboard `thead th` includes a mobile `Usage` cell (`sm:hidden`); column-order assertions use `thead th:visible` under the Desktop Chrome project — do not delete that header or filter it out of the expected sequence. |
 
-Do not add a unit-test setup without a team decision — the upstream tests were
-deliberately removed (`docs/upstream_policy.md`), and the current safety net
-is the four commands above plus code review. Small testability affordances
-exist (e.g. `formatRelativeTime` takes an injectable `now`,
-`scripts/migrate-retry.ts` is extracted for testability), but no `*.test.ts`
-files exist under `web/`.
+Do not add a general **unit-test** framework without a team decision — the upstream tests were
+deliberately removed (`docs/upstream_policy.md`). `test:teams` is the T4 exception
+for INV/permission checks, the T7 exception for Teamboard loader regressions
+(51-member pagination, multi-value `groupIds`), the T8 exception for `listMyInvitations`,
+and the T9 exception for §12 domain evidence (subadmin positive ops need more than
+cap/forbid/disband). Playwright E2E is the T7/T8/T9/T10/T11 exception for user-visible
+browser journeys; do not add `*.test.ts` under `web/`. Reports under
+`tests/e2e/reports/` are gitignored runner output. Formal Playwright HTML is a
+named `playwright-report-*.html` next to the same-stem `.md` under
+`tests/e2e/reports/html/`.
 
 ## Hard rules
 
@@ -43,12 +49,41 @@ files exist under `web/`.
 6. **Migrations are additive and hand-reviewed** — see
    [Database Guidelines](./database-guidelines.md).
 
+## UI copy (i18n)
+
+User-visible JSX, `aria-label`, toast, empty/error, and form labels go through
+`web/src/lib/i18n/t.ts`.
+
+- Client: `useI18n().t(key, vars?)`.
+- Server: `parseLocale((await cookies()).get(LOCALE_COOKIE)?.value)` then
+  `t(locale, key, vars?)`.
+- `zh` is typed `Record<keyof typeof en, string>` so missing keys fail
+  `bun run typecheck`.
+- English dictionary values match the previous rendered English copy
+  verbatim. Do not invent `getDictionary`, next-intl, or URL locale prefixes.
+- Email templates stay English. Do not add `users.locale`.
+- Leave CLI commands, vendor/product identifiers, format masks
+  (`XXXX-XXXX`), and generated embed/SVG output literal.
+- Privacy / Terms Chinese pages must keep `legal.enPrevails`
+  (「本页内容以英文版本为准。」).
+- Dates and numbers follow `tt_locale` through `intlTag` or `useFormat`.
+  Do not call bare `toLocaleDateString()` / `toLocaleString()` without a
+  locale tag. Shared `formatCurrency` / `formatNumber` from `@/lib/utils`
+  take `locale` as the last argument; `useFormat()` already binds locale
+  and its second argument is compact, not locale. Leave embed/SVG/OG
+  output on the English default. `format.ts` must not import `t.ts`:
+  embed/SVG/OG renderers import `format.ts` for compact numbers and XML
+  escape. Dictionary-backed relative time lives in
+  `formatRelativeTime.ts`. Do not re-export it from `format.ts` or `utils.ts`.
+
+
 ## Upstream policy (Tokscale fork)
 
 `docs/upstream_policy.md` is the rulebook for merging from upstream:
 
 - **Never merge**: branding/naming/copy (`tokscale` strings, logos), frontend
-  styling/components/layout, TUI/report-command features, groups, tests.
+  styling/components/layout, TUI/report-command features, upstream `groups`
+  tables (this fork's `groups` belong to `teams`), tests.
 - **Always merge**: new providers/client scanners, parser fixes, submit
   pipeline and correctness fixes.
 - **Frontend data capability: merge the capability, rewrite the
@@ -68,10 +103,8 @@ files exist under `web/`.
 | Anti-pattern | Correct pattern |
 |--------------|-----------------|
 | Server-side `fetch` to own `/api/*` from RSC | Shared `lib/` function (`loadPublicProfileForPage`) |
-| Hyperdrive stacked on Neon's PgBouncer pooler | Point Hyperdrive at the direct endpoint |
-| DB pool reused across CF requests | Per-request client keyed by `ctx` (WeakMap in `lib/db/index.ts`) |
-| `revalidate` + `searchParams` on Workers | `export const dynamic = 'force-dynamic'` |
+| `revalidate` + `searchParams` on a page | `export const dynamic = 'force-dynamic'` |
 | HeroUI / styled-components | shadcn + Tailwind tokens + `tw()` leftover only |
-| `next/image` optimization on Workers | Disabled; static assets + plain `<img>` |
+| `next/image` optimization | Disabled; static assets + plain `<img>` |
 | Assuming `@/hooks` exists | Hooks live in `lib/use*.ts` |
 | Runtime-string Tailwind variants inside `tw()` | Normal component with `cva`/`cn()` |

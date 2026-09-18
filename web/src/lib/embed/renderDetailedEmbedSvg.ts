@@ -7,6 +7,7 @@
 import type { UserEmbedStats, EmbedTodayUsage, EmbedTodayClient } from "./getUserEmbedStats";
 import type { ClientType } from "../types";
 import { formatNumber, formatCurrency } from "../format";
+import { SITE_HOST } from "../site";
 import { SOURCE_DISPLAY_NAMES, SOURCE_COLORS } from "../constants";
 import { clientLogoSvg } from "./clientLogoSvg";
 import {
@@ -170,7 +171,7 @@ export function renderDetailedEmbedSvg(
   const footerY = height - 14;
   add(`  <rect x="${PAD}" y="${footerY - 20}" width="${INNER}" height="1" fill="url(#dt-divider)"/>`);
   add(`  <text x="${PAD}" y="${footerY}" fill="${palette.muted}" font-size="11" font-family="${FIGTREE_FONT_STACK}">${updated}</text>`);
-  add(`  <text x="${W - PAD}" y="${footerY}" fill="${palette.muted}" font-size="11" text-anchor="end" font-family="${FIGTREE_FONT_STACK}">tokens.ci/u/${escapeXml(data.user.username)}</text>`);
+  add(`  <text x="${W - PAD}" y="${footerY}" fill="${palette.muted}" font-size="11" text-anchor="end" font-family="${FIGTREE_FONT_STACK}">${SITE_HOST}/u/${escapeXml(data.user.username)}</text>`);
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <svg width="${W}" height="${height}" viewBox="0 0 ${W} ${height}" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Tokens daily usage detail for ${escapeXml(username)}">

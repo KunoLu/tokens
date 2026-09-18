@@ -8,6 +8,7 @@
  * contribution-grid layout, and small SVG building blocks.
  */
 import { escapeXml, formatCurrency, formatNumber } from "../format";
+import { SITE_HOST } from "../site";
 import {
   colorPalettes,
   DEFAULT_PALETTE,
@@ -664,7 +665,7 @@ export function cardFooter(options: {
       fontSize: 10,
     }),
     fittedText({
-      text: "tokens.ci",
+      text: SITE_HOST,
       x: options.right,
       y: options.y,
       maxWidth: 78,

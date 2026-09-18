@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { CheckIcon, CopyIcon } from "lucide-react";
+import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 export interface DocCommand {
@@ -21,6 +22,7 @@ export interface DocCommand {
  * copying is an ordinary button beside it.
  */
 export function CommandBlock({ commands }: { commands: readonly DocCommand[] }) {
+  const { t } = useI18n();
   const [copied, setCopied] = useState<number | null>(null);
 
   const copy = async (text: string, index: number) => {
@@ -63,7 +65,7 @@ export function CommandBlock({ commands }: { commands: readonly DocCommand[] }) 
           <button
             type="button"
             onClick={() => copy(entry.command, index)}
-            aria-label={`Copy command: ${entry.command}`}
+          aria-label={t("docs.copyCommand", { command: entry.command })}
             className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             {copied === index ? (
@@ -76,7 +78,7 @@ export function CommandBlock({ commands }: { commands: readonly DocCommand[] }) 
           {/* Announced rather than only shown: the icon swap alone told a
               screen-reader user nothing about whether the copy worked. */}
           <span role="status" aria-live="polite" className="sr-only">
-            {copied === index ? `Copied ${entry.command}` : ""}
+            {copied === index ? t("docs.copied", { command: entry.command }) : ""}
           </span>
         </div>
       ))}

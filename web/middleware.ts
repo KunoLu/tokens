@@ -20,8 +20,8 @@ export function middleware(request: NextRequest) {
   const sessionToken = request.cookies.get("tt_session")?.value;
 
   if (!sessionToken) {
-    // Redirect to login
-    const loginUrl = new URL("/api/auth/github", request.url);
+    // Redirect to the email sign-in page, back here afterwards.
+    const loginUrl = new URL("/login", request.url);
     loginUrl.searchParams.set("returnTo", pathname);
     return NextResponse.redirect(loginUrl);
   }

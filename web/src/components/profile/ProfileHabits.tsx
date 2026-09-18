@@ -4,26 +4,10 @@ import type { DailyContribution } from "@/lib/types";
 import { formatCurrency, formatDateFull, formatNumber } from "@/lib/utils";
 import { tw } from "@/lib/tw";
 import { cn } from "@/lib/utils";
+import { intlTag, useI18n } from "@/lib/i18n";
 
-const WEEKDAY_NAMES = [
-  "Sunday",
-  "Monday",
-  "Tuesday",
-  "Wednesday",
-  "Thursday",
-  "Friday",
-  "Saturday",
-] as const;
-
-const WEEKDAY_ORDER = [
-  { index: 1, short: "Mo" },
-  { index: 2, short: "Tu" },
-  { index: 3, short: "We" },
-  { index: 4, short: "Th" },
-  { index: 5, short: "Fr" },
-  { index: 6, short: "Sa" },
-  { index: 0, short: "Su" },
-] as const;
+// Bar order is fixed Monday-first; the labels come from the dictionary.
+const WEEKDAY_ORDER = [1, 2, 3, 4, 5, 6, 0] as const;
 
 function weekdayIndex(date: string): number {
   const [year, month, day] = date.split("-").map(Number);
@@ -35,6 +19,9 @@ export interface ProfileHabitsProps {
 }
 
 export function ProfileHabits({ contributions }: ProfileHabitsProps) {
+  const { t, locale } = useI18n();
+  const weekdayNames = t("profile.habits.weekdays").split(",");
+  const weekdayShorts = t("profile.habits.weekdaysShort").split(",");
   const weekdayTokens = [0, 0, 0, 0, 0, 0, 0];
   let totalTokens = 0;
   let biggestDay: DailyContribution | null = null;
@@ -58,34 +45,33 @@ export function ProfileHabits({ contributions }: ProfileHabitsProps) {
   return (
     <Panel aria-labelledby="profile-habits-title">
       <Header>
-        <Title id="profile-habits-title">Coding patterns</Title>
-        <Range>Latest 12 months</Range>
+        <Title id="profile-habits-title">{t("profile.habits.title")}</Title>
+        <Range>{t("profile.habits.range")}</Range>
       </Header>
 
       <Highlights>
         <Highlight>
-          <Label>Most productive day</Label>
-          <Value>{WEEKDAY_NAMES[topWeekdayIndex]}</Value>
-          <Meta title={topWeekdayTokens.toLocaleString("en-US")}>
-            {formatNumber(topWeekdayTokens)} tokens · {topWeekdayShare.toFixed(0)}%
-            of total
+          <Label>{t("profile.habits.mostProductive")}</Label>
+          <Value>{weekdayNames[topWeekdayIndex]}</Value>
+          <Meta title={topWeekdayTokens.toLocaleString(intlTag(locale))}>
+            {t("profile.habits.ofTotal", { tokens: formatNumber(topWeekdayTokens, locale), share: topWeekdayShare.toFixed(0) })}
           </Meta>
         </Highlight>
         <Highlight>
-          <Label>Biggest day</Label>
-          <Value $accent title={biggestDay.totals.tokens.toLocaleString("en-US")}>
-            {formatNumber(biggestDay.totals.tokens)} tokens
+          <Label>{t("profile.habits.biggestDay")}</Label>
+          <Value $accent title={biggestDay.totals.tokens.toLocaleString(intlTag(locale))}>
+            {t("tokens.count", { n: formatNumber(biggestDay.totals.tokens, locale) })}
           </Value>
           <Meta>
-            {formatDateFull(biggestDay.date)} · {formatCurrency(biggestDay.totals.cost)}
+            {formatDateFull(biggestDay.date, locale)} · {formatCurrency(biggestDay.totals.cost, locale)}
           </Meta>
         </Highlight>
       </Highlights>
 
       <Distribution>
-        <Label>Tokens by weekday</Label>
+        <Label>{t("profile.habits.byWeekday")}</Label>
         <Bars>
-          {WEEKDAY_ORDER.map(({ index, short }) => {
+          {WEEKDAY_ORDER.map((index) => {
             const tokens = weekdayTokens[index];
             const isTop = index === topWeekdayIndex;
             const height = topWeekdayTokens > 0
@@ -97,10 +83,10 @@ export function ProfileHabits({ contributions }: ProfileHabitsProps) {
                   <Bar
                     $height={height}
                     $top={isTop}
-                    title={`${WEEKDAY_NAMES[index]}: ${formatNumber(tokens)} tokens`}
+                    title={t("profile.habits.weekdayTitle", { weekday: weekdayNames[index], tokens: formatNumber(tokens, locale) })}
                   />
                 </BarTrack>
-                <BarLabel $top={isTop}>{short}</BarLabel>
+                <BarLabel $top={isTop}>{weekdayShorts[index]}</BarLabel>
               </BarColumn>
             );
           })}

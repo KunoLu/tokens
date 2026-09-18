@@ -14,38 +14,43 @@ web/
 │   │   ├── layout.tsx            # Root layout: fonts, Providers, Navigation
 │   │   ├── error.tsx             # Root error boundary (client)
 │   │   ├── globals.css           # Tailwind v4 + shadcn theme tokens (@theme)
-│   │   ├── (main)/               # Leaderboard home, shame, docs, legal
+│   │   ├── (main)/               # Leaderboard home, teamboard, docs, legal
 │   │   ├── u/[username]/         # Public profile: RSC page + ProfilePageClient
 │   │   ├── settings/             # Thin RSC page → SettingsClient
-│   │   ├── device/, local/       # OAuth / device-link client flows
+│   │   ├── login/, register/, forgot-password/, reset-password/, verify-email/
+│   │   ├── device/, local/       # Device-link / local client flows (not GitHub OAuth)
 │   │   └── api/                  # Route handlers: JSON, SVG embeds, OG images
 │   ├── components/
 │   │   ├── ui/                   # Vendored shadcn primitives (button, card, table, …)
 │   │   ├── layout/               # Navigation, Container (CONTAINER), PageHeader, footer
 │   │   ├── profile/              # Profile feature components + barrel index.tsx
 │   │   ├── leaderboard/          # Leaderboard table + skeleton
-│   │   ├── shame/, docs/, legal/ # Feature folders per route
+│   │   ├── teamboard/            # Teamboard table + URL filters (no Team column)
+│   │   ├── docs/, legal/         # Feature folders per route
 │   │   └── Graph*.tsx            # Shared visualization components
 │   ├── lib/                      # Server + shared client logic
 │   │   ├── db/                   # Drizzle: schema.ts, migrations/, usernameLookup.ts, index.ts
-│   │   ├── auth/                 # Session, tokens, bearer
+│   │   ├── auth/                 # Session, tokens, bearer, password, emailTokens, rateLimit
+│   │   ├── email/                # Resend HTTP send helpers (no SDK)
+│   │   ├── avatar.ts             # Initials SVG fallback; never github.com png
 │   │   ├── leaderboard/          # getLeaderboard.ts, types, constants, dateRange
+│   │   ├── teamboard/            # getTeamboard.ts (reuses leaderboard ranking helpers)
+│   │   ├── teams/                # Team/Group domain (types, visibility, service, profileMembership page-only)
 │   │   ├── validation/           # Zod submission schemas (submission.ts)
 │   │   ├── embed/                # SVG embed renderers + generated logos
-│   │   ├── providers/            # ThemeProvider wrapper
+│   │   ├── providers/            # ThemeProvider + I18nProvider wrapper
+│   │   ├── i18n/                 # locale cookie, dictionaries, t(), I18nProvider, useFormat
 │   │   ├── types.ts              # SUPPORTED_CLIENT_TYPES, ClientType, TokenBreakdown
 │   │   ├── utils.ts              # Domain formatters + cn()
-│   │   ├── format.ts             # Display formatting (compact numbers, XML escape)
+│   │   ├── format.ts             # Compact numbers, XML escape, duration; optional locale via intlTag; no t.ts
+│   │   ├── formatRelativeTime.ts # Dictionary relative time; UI-only — embed/SVG/OG must keep importing format.ts
 │   │   ├── tw.tsx                # tw() styled-element helper (styled-components leftover)
 │   │   └── useSettings.ts        # Cross-route client preferences hook
 │   └── types/                    # Ambient declarations (static-images.d.ts)
 ├── scripts/                      # Migration checks, codegen (excluded from tsc)
+├── playwright.config.ts          # Playwright E2E; testDir is repo-root tests/e2e
 ├── drizzle.config.ts
-├── wrangler.jsonc                # Cloudflare Worker config (production!)
-├── open-next.config.ts           # OpenNext cache topology
-├── next.config.ts                # unoptimized images, security headers,
-│                                 # initOpenNextCloudflareForDev
-└── worker.ts                     # Edge cache for OG/embed/HTML + daily cron
+└── next.config.ts                # unoptimized images, security headers
 ```
 
 ## Ownership rules
@@ -56,7 +61,7 @@ web/
   lives in route handlers (`app/api/submit/route.ts`) plus `lib/`.
 - **`components/ui/` is vendored shadcn** — edit like shadcn code, import via
   `@/components/ui/*`. Feature components live in a folder per route/domain
-  (`profile/`, `leaderboard/`, `shame/`), with a barrel `index.tsx` where the
+  (`profile/`, `leaderboard/`, `teamboard/`), with a barrel `index.tsx` where the
   surface is large (`components/profile/index.tsx`).
 - **`lib/` holds all shared logic, including hooks.** `components.json`
   declares an `@/hooks` alias but there is **no `src/hooks/` directory** —

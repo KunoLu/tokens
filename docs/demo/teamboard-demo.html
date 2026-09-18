@@ -1,0 +1,1599 @@
+<!doctype html>
+<html lang="zh-CN" class="dark">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Tokens — Teamboard / Teams / 邮箱认证 UI Demo</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+/* ==========================================================================
+   设计 token —— 直接取自 web/src/app/globals.css，与线上 tokens.ci 一致。
+   两套主题均由 token 推导，无写死 hex、无手写 dark: 分支。
+   ========================================================================== */
+:root {
+  --radius: 0.5rem;
+  --background: oklch(0.9911 0.0015 90);
+  --foreground: oklch(0.2178 0.0057 264);
+  --card: oklch(1 0 0);
+  --popover: oklch(1 0 0);
+  --primary: oklch(0.5461 0.1445 250);
+  --primary-foreground: oklch(0.9911 0.0015 90);
+  --secondary: oklch(0.9702 0.0034 90);
+  --muted: oklch(0.9702 0.0034 90);
+  --muted-foreground: oklch(0.5486 0.0122 264);
+  --accent: oklch(0.9603 0.0069 250);
+  --accent-foreground: oklch(0.2178 0.0057 264);
+  --destructive: oklch(0.5771 0.1638 27);
+  --border: oklch(0.9276 0.0058 264);
+  --input: oklch(0.9276 0.0058 264);
+  --ring: oklch(0.5461 0.1445 250);
+  --danger: #b42318;
+  --success: #16794a;
+  --font-sans: "Geist", system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.dark {
+  --background: oklch(0.1822 0.0043 264);
+  --foreground: oklch(0.9288 0.0067 264);
+  --card: oklch(0.2134 0.0049 264);
+  --popover: oklch(0.2134 0.0049 264);
+  --primary: oklch(0.6845 0.1298 245);
+  --primary-foreground: oklch(0.1822 0.0043 264);
+  --secondary: oklch(0.2591 0.0057 264);
+  --muted: oklch(0.2591 0.0057 264);
+  --muted-foreground: oklch(0.6534 0.0111 264);
+  --accent: oklch(0.2789 0.0063 264);
+  --accent-foreground: oklch(0.9288 0.0067 264);
+  --destructive: oklch(0.6605 0.1512 24);
+  --border: oklch(0.2789 0.0063 264);
+  --input: oklch(0.2789 0.0063 264);
+  --ring: oklch(0.6845 0.1298 245);
+  --danger: #e06864;
+  --success: #4ec08d;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  font-size: 16px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+.tabular {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+.container { margin: 0 auto; width: 100%; max-width: 1200px; padding: 0 16px; }
+@media (min-width: 640px) { .container { padding: 0 24px; } }
+
+/* ---------- 导航 ---------- */
+header.site {
+  position: sticky; top: 0; z-index: 40;
+  background: color-mix(in oklab, var(--background) 88%, transparent);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--border);
+}
+nav.site { display: flex; align-items: center; height: 56px; gap: 8px; }
+.brand { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 15px; text-decoration: none; color: inherit; }
+.nav-links { display: none; margin-left: 24px; gap: 2px; }
+@media (min-width: 768px) { .nav-links { display: flex; } }
+.nav-link {
+  padding: 6px 10px; border-radius: calc(var(--radius) * 0.8);
+  font-size: 14px; color: var(--muted-foreground);
+  text-decoration: none; cursor: pointer; border: 0; background: none;
+  font-family: inherit; transition: color .15s, background .15s;
+}
+.nav-link:hover { color: var(--foreground); background: var(--accent); }
+.nav-link.active { color: var(--foreground); font-weight: 500; background: var(--accent); }
+.nav-right { margin-left: auto; display: flex; align-items: center; gap: 6px; }
+
+/* ---------- 通用控件 ---------- */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  height: 32px; padding: 0 12px;
+  border-radius: calc(var(--radius) * 0.8);
+  border: 1px solid var(--border); background: transparent; color: var(--foreground);
+  font-family: inherit; font-size: 13px; font-weight: 500;
+  cursor: pointer; white-space: nowrap;
+  transition: background .15s, border-color .15s, opacity .15s;
+}
+.btn:hover { background: var(--accent); }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+.btn-primary { background: var(--primary); color: var(--primary-foreground); border-color: var(--primary); }
+.btn-primary:hover { background: color-mix(in oklab, var(--primary) 88%, black); }
+.btn-danger { color: var(--danger); border-color: color-mix(in oklab, var(--danger) 40%, var(--border)); }
+.btn-danger:hover { background: color-mix(in oklab, var(--danger) 12%, transparent); }
+.btn-icon { width: 32px; padding: 0; }
+.btn-sm { height: 28px; padding: 0 9px; font-size: 12px; }
+.btn-lg { height: 40px; padding: 0 16px; font-size: 14px; }
+.btn-block { width: 100%; }
+
+.input {
+  height: 32px; width: 100%; padding: 0 10px;
+  border-radius: calc(var(--radius) * 0.8);
+  border: 1px solid var(--input); background: var(--background); color: var(--foreground);
+  font-family: inherit; font-size: 13px;
+}
+.input:focus { outline: 2px solid color-mix(in oklab, var(--ring) 45%, transparent); outline-offset: 1px; border-color: var(--ring); }
+.input-lg { height: 40px; font-size: 14px; padding: 0 12px; }
+textarea.input { height: auto; min-height: 92px; padding: 8px 10px; resize: vertical; line-height: 1.6; font-size: 13px; }
+.label { display: block; font-size: 13px; font-weight: 500; margin-bottom: 6px; }
+.hint { font-size: 12px; color: var(--muted-foreground); margin-top: 6px; line-height: 1.5; }
+
+.badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 8px; border-radius: 999px;
+  font-size: 12px; font-weight: 500; line-height: 16px;
+  background: var(--secondary); color: var(--foreground);
+  border: 1px solid transparent; white-space: nowrap;
+}
+.badge-primary { background: color-mix(in oklab, var(--primary) 15%, transparent); color: var(--primary); }
+.badge-outline { background: transparent; border-color: var(--border); color: var(--muted-foreground); }
+.badge-danger { background: color-mix(in oklab, var(--danger) 14%, transparent); color: var(--danger); }
+.badge-success { background: color-mix(in oklab, var(--success) 15%, transparent); color: var(--success); }
+
+/* 分段控件（Period / Sort by） */
+.toggle-group { display: inline-flex; border: 1px solid var(--border); border-radius: calc(var(--radius) * 0.8); overflow: hidden; }
+.toggle-group button {
+  height: 32px; padding: 0 12px; border: 0; background: transparent;
+  color: var(--muted-foreground); font-family: inherit; font-size: 13px; cursor: pointer;
+  border-right: 1px solid var(--border); white-space: nowrap;
+}
+.toggle-group button:last-child { border-right: 0; }
+.toggle-group button:hover { background: var(--accent); color: var(--foreground); }
+.toggle-group button[aria-pressed="true"] { background: var(--accent); color: var(--foreground); font-weight: 500; }
+
+/* ---------- 页面骨架 ---------- */
+main { padding-bottom: 96px; padding-top: 40px; }
+@media (min-width: 640px) { main { padding-top: 56px; } }
+h1.page-title { font-size: 24px; line-height: 32px; font-weight: 600; letter-spacing: -0.6px; margin: 0; }
+.page-desc { color: var(--muted-foreground); font-size: 14px; margin: 6px 0 0; }
+.sep { height: 1px; background: var(--border); border: 0; margin: 20px 0 24px; }
+
+.stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 24px; }
+@media (min-width: 640px) { .stats.c3 { grid-template-columns: repeat(3, 1fr); } .stats.c4 { grid-template-columns: repeat(4, 1fr); } }
+.stat-label { font-size: 12px; font-weight: 500; text-transform: uppercase; letter-spacing: .06em; color: var(--muted-foreground); }
+.stat-value { font-size: 28px; font-weight: 600; margin-top: 2px; }
+.stat-value.accent { color: var(--primary); }
+
+.controls { margin-top: 32px; display: flex; flex-direction: column; gap: 12px; }
+@media (min-width: 640px) { .controls { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 8px; } }
+.controls-right { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+@media (min-width: 640px) { .controls-right { margin-left: auto; } }
+.search-wrap { position: relative; }
+.search-wrap svg { position: absolute; left: 9px; top: 50%; transform: translateY(-50%); color: var(--muted-foreground); pointer-events: none; }
+.search-wrap .input { padding-left: 30px; width: 100%; }
+@media (min-width: 640px) { .search-wrap .input { width: 224px; } }
+
+/* ---------- 表格 ---------- */
+.table-wrap { margin-top: 16px; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+thead th {
+  text-align: left; font-weight: 500; font-size: 12px; color: var(--muted-foreground);
+  padding: 10px 8px; border-bottom: 1px solid var(--border); white-space: nowrap;
+}
+thead th.num { text-align: right; }
+tbody td { padding: 10px 8px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+tbody tr:last-child td { border-bottom: 0; }
+tbody tr:hover { background: color-mix(in oklab, var(--accent) 55%, transparent); }
+tbody tr.is-self { background: color-mix(in oklab, var(--primary) 6%, transparent); }
+tbody tr.is-self:hover { background: color-mix(in oklab, var(--primary) 9%, transparent); }
+.col-rank { width: 48px; padding-left: 16px !important; }
+@media (min-width: 640px) { .col-rank { padding-left: 24px !important; } }
+.col-num { text-align: right; }
+.col-cost { width: 128px; padding-right: 16px !important; }
+@media (min-width: 640px) { .col-cost { padding-right: 24px !important; } }
+.col-tokens { width: 176px; }
+.rank-1 { color: var(--primary); font-weight: 600; }
+.rank-top { font-weight: 600; }
+.rank-rest { color: var(--muted-foreground); }
+
+.dev-cell { display: flex; align-items: center; gap: 12px; min-width: 0; text-decoration: none; color: inherit; }
+.avatar { width: 28px; height: 28px; border-radius: 999px; flex-shrink: 0; display: grid; place-items: center; font-size: 10px; font-weight: 600; color: #fff; }
+.avatar.lg { width: 64px; height: 64px; font-size: 20px; }
+.avatar.sq { border-radius: calc(var(--radius) * 1.2); }
+.dev-name { display: flex; flex-direction: column; line-height: 1.25; min-width: 0; }
+.dev-name b { font-size: 13px; font-weight: 500; }
+.dev-name span { font-size: 12px; color: var(--muted-foreground); }
+.mobile-meta { display: flex; gap: 4px; margin-top: 3px; }
+@media (min-width: 640px) { .mobile-meta { display: none; } }
+.metric-primary { color: var(--primary); font-weight: 500; }
+.metric-muted { color: var(--muted-foreground); }
+.bar { height: 2px; width: 100%; max-width: 128px; background: var(--border); border-radius: 999px; overflow: hidden; margin-top: 6px; margin-left: auto; }
+.bar > i { display: block; height: 100%; background: color-mix(in oklab, var(--primary) 50%, transparent); border-radius: 999px; }
+.fmt-toggle {
+  display: flex; align-items: center; justify-content: flex-end; gap: 6px;
+  width: 100%; height: 100%; padding: 10px 8px; border: 0; background: none;
+  color: var(--muted-foreground); font-family: inherit; font-size: 12px; font-weight: 500; cursor: pointer;
+}
+.fmt-toggle:hover { color: var(--foreground); }
+.fmt-toggle svg { opacity: .45; }
+.hide-sm { display: none; }
+@media (min-width: 640px) { .hide-sm { display: table-cell; } .only-sm { display: none !important; } }
+
+.pagination { margin-top: 24px; display: flex; align-items: center; justify-content: space-between; }
+.empty { padding: 48px 24px; text-align: center; }
+.empty h3 { margin: 0 0 6px; font-size: 15px; font-weight: 600; }
+.empty p { margin: 0; font-size: 13px; color: var(--muted-foreground); }
+
+/* ---------- 卡片 / 区块 ---------- */
+.card { border: 1px solid var(--border); border-radius: var(--radius); background: var(--card); }
+.card-pad { padding: 20px; }
+.section-title { font-size: 12px; font-weight: 500; text-transform: uppercase; letter-spacing: .06em; color: var(--muted-foreground); margin: 0 0 12px; }
+.row-between { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.list-row { display: flex; align-items: center; gap: 12px; padding: 12px 20px; border-bottom: 1px solid var(--border); }
+.list-row:last-child { border-bottom: 0; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 28px; padding: 0 10px; border-radius: 999px;
+  border: 1px solid var(--border); background: transparent; color: var(--muted-foreground);
+  font-family: inherit; font-size: 12px; font-weight: 500; cursor: pointer;
+}
+.chip:hover { background: var(--accent); color: var(--foreground); }
+.chip[aria-pressed="true"] { background: color-mix(in oklab, var(--primary) 15%, transparent); border-color: color-mix(in oklab, var(--primary) 40%, transparent); color: var(--primary); }
+
+/* ---------- 下拉 / 弹层 ---------- */
+.popover-host { position: relative; }
+.popover {
+  position: absolute; z-index: 50; top: calc(100% + 6px); left: 0;
+  min-width: 232px; padding: 6px;
+  background: var(--popover); border: 1px solid var(--border);
+  border-radius: var(--radius); box-shadow: 0 10px 30px rgb(0 0 0 / .18);
+}
+.popover[hidden] { display: none; }
+.popover-item {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 7px 8px; border: 0; border-radius: calc(var(--radius) * 0.7);
+  background: none; color: var(--foreground); font-family: inherit; font-size: 13px;
+  text-align: left; cursor: pointer;
+}
+.popover-item:hover { background: var(--accent); }
+.checkbox {
+  width: 15px; height: 15px; flex-shrink: 0; border-radius: 3px;
+  border: 1px solid var(--border); display: grid; place-items: center;
+}
+.checkbox[data-checked="true"] { background: var(--primary); border-color: var(--primary); color: var(--primary-foreground); }
+.checkbox svg { display: none; }
+.checkbox[data-checked="true"] svg { display: block; }
+
+/* ---------- 对话框 ---------- */
+.overlay {
+  position: fixed; inset: 0; z-index: 60; display: grid; place-items: center;
+  background: rgb(0 0 0 / .55); padding: 16px;
+}
+.overlay[hidden] { display: none; }
+.dialog {
+  width: 100%; max-width: 460px; background: var(--popover);
+  border: 1px solid var(--border); border-radius: var(--radius);
+  box-shadow: 0 24px 60px rgb(0 0 0 / .32);
+}
+.dialog-head { padding: 20px 20px 0; }
+.dialog-head h2 { margin: 0; font-size: 16px; font-weight: 600; }
+.dialog-head p { margin: 6px 0 0; font-size: 13px; color: var(--muted-foreground); line-height: 1.55; }
+.dialog-body { padding: 16px 20px; }
+.dialog-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 0 20px 20px; }
+
+/* ---------- 认证页 ---------- */
+.auth-wrap { max-width: 380px; margin: 0 auto; }
+.auth-field { margin-bottom: 16px; }
+.rules { margin: 10px 0 0; padding: 0; list-style: none; display: grid; gap: 5px; }
+.rules li { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--muted-foreground); }
+.rules li[data-ok="true"] { color: var(--success); }
+.rules .dot { width: 13px; height: 13px; border-radius: 999px; border: 1px solid currentColor; display: grid; place-items: center; flex-shrink: 0; }
+.rules .dot svg { display: none; }
+.rules li[data-ok="true"] .dot { background: var(--success); border-color: var(--success); color: #fff; }
+.rules li[data-ok="true"] .dot svg { display: block; }
+
+/* ---------- Demo 说明条 ---------- */
+.demo-bar {
+  background: color-mix(in oklab, var(--primary) 10%, transparent);
+  border-bottom: 1px solid color-mix(in oklab, var(--primary) 25%, var(--border));
+  font-size: 12px; color: var(--foreground);
+}
+.demo-bar .container { display: flex; align-items: center; gap: 10px; min-height: 38px; flex-wrap: wrap; padding-top: 6px; padding-bottom: 6px; }
+.demo-bar b { font-weight: 600; }
+.note {
+  margin-top: 16px; padding: 12px 14px; font-size: 12px; line-height: 1.65;
+  border: 1px dashed color-mix(in oklab, var(--primary) 35%, var(--border));
+  border-radius: var(--radius); color: var(--muted-foreground);
+  background: color-mix(in oklab, var(--primary) 4%, transparent);
+}
+.note b { color: var(--foreground); }
+.page[hidden] { display: none; }
+footer.site { border-top: 1px solid var(--border); padding: 24px 0; font-size: 12px; color: var(--muted-foreground); }
+.grid2 { display: grid; gap: 24px; }
+@media (min-width: 900px) { .grid2 { grid-template-columns: 1fr 320px; align-items: start; } }
+</style>
+</head>
+<body>
+
+<!-- Demo 元信息条（仅 Demo 存在，不属于产品 UI） -->
+<div class="demo-bar">
+  <div class="container">
+    <b>UI Demo</b>
+    <span>对应 <code>docs/prd-teamboard-teams-auth.md</code></span>
+    <span style="margin-left:auto;display:flex;gap:6px;align-items:center">
+      <span class="badge badge-outline">设计 token 取自线上 tokens.ci</span>
+      <button class="btn btn-sm" id="viewport-toggle">切换移动端视图</button>
+    </span>
+  </div>
+</div>
+
+<header class="site">
+  <nav class="site container">
+    <a class="brand" href="#" data-go="leaderboard">
+      <svg viewBox="0 0 64 64" width="22" height="22" aria-hidden="true">
+        <rect width="64" height="64" rx="14" fill="#7C3AED"></rect>
+        <g stroke="#fff" stroke-width="5" stroke-linecap="round" fill="none">
+          <path d="M14 15h36"></path><path d="M32 15v34"></path>
+          <path d="M22 27h20" opacity=".75"></path>
+          <path d="M24.5 37h15" opacity=".5"></path>
+          <path d="M27 47h10" opacity=".3"></path>
+        </g>
+      </svg>
+      <span>Tokens</span>
+    </a>
+    <div class="nav-links" id="nav-links"></div>
+    <div class="nav-right">
+      <!-- GitHub 图标已按 FR-4 移除；此处只剩语言切换、主题切换与账号入口 -->
+      <div class="popover-host" id="lang-host">
+        <button class="btn btn-icon" id="lang-btn" data-i18n-title="nav.language" title="Language" aria-label="Language">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"></circle><path d="M3 12h18"></path><path d="M12 3a13.6 13.6 0 0 1 0 18"></path><path d="M12 3a13.6 13.6 0 0 0 0 18"></path></svg>
+        </button>
+        <div class="popover" id="lang-menu" hidden style="left:auto;right:0">
+          <button class="popover-item" data-lang="en">English</button>
+          <button class="popover-item" data-lang="zh">中文</button>
+        </div>
+      </div>
+      <button class="btn btn-icon" id="theme-toggle" data-i18n-title="nav.theme" title="切换主题" aria-label="切换主题">
+        <svg id="theme-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M6.3 17.7l-1.4 1.4M19.1 4.9l-1.4 1.4"></path></svg>
+      </button>
+      <div class="popover-host" id="user-menu-host">
+        <button class="btn" id="user-menu-btn">
+          <span class="avatar" style="width:20px;height:20px;font-size:9px;background:#2F6FDB">SL</span>
+          <span>songlin</span>
+        </button>
+        <div class="popover" id="user-menu" hidden style="left:auto;right:0">
+          <button class="popover-item" data-go="profile" data-i18n="nav.profile">Profile</button>
+          <button class="popover-item" data-go="teams" data-i18n="nav.teams">Teams</button>
+          <button class="popover-item" data-go="login" data-i18n="nav.signout">Sign out</button>
+        </div>
+      </div>
+    </div>
+  </nav>
+</header>
+
+<main class="container">
+
+<!-- ======================================================================
+     1. LEADERBOARD —— 新增 Team / Group 两列
+     ====================================================================== -->
+<section class="page" id="page-leaderboard">
+  <h1 class="page-title" data-i18n="lb.title">Leaderboard</h1>
+  <p class="page-desc" data-i18n="lb.desc">AI coding token usage, reported by the Tokens CLI.</p>
+  <hr class="sep" />
+
+  <div class="stats c4" aria-label="Totals">
+    <div><div class="stat-label" data-i18n="stat.tokens">Tokens</div><div class="stat-value tabular">16.4B</div></div>
+    <div><div class="stat-label" data-i18n="stat.cost">Cost</div><div class="stat-value tabular">$11.3K</div></div>
+    <div><div class="stat-label" data-i18n="stat.developers">Developers</div><div class="stat-value tabular">150</div></div>
+    <div><div class="stat-label" data-i18n="stat.yourRank">Your rank</div><div class="stat-value tabular accent">#7</div></div>
+  </div>
+
+  <div class="controls">
+    <div class="toggle-group" role="group" aria-label="Period" data-toggle="lb-period">
+      <button data-i18n="period.all">All time</button><button aria-pressed="true" data-i18n="period.today">Today</button><button data-i18n="period.week">Week</button><button data-i18n="period.month">Month</button><button data-i18n="period.lastMonth">Last month</button>
+    </div>
+    <div class="controls-right">
+      <div class="toggle-group" role="group" aria-label="Sort by" data-toggle="lb-sort">
+        <button aria-pressed="true" data-i18n="sort.tokens">Tokens</button><button data-i18n="sort.cost">Cost</button>
+      </div>
+      <div class="search-wrap">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg>
+        <input class="input" placeholder="Search…" aria-label="Search developers" data-i18n-ph="lb.searchPh" />
+      </div>
+    </div>
+  </div>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th class="col-rank">#</th>
+          <th data-i18n="tbl.developer">Developer</th>
+          <!-- ▼ 新增两列，紧随 Developer 之后 -->
+          <th class="hide-sm" data-i18n="tbl.team">Team</th>
+          <th class="hide-sm" data-i18n="tbl.group">Group</th>
+          <th class="col-num only-sm" style="padding-right:16px" data-i18n="tbl.usage">Usage</th>
+          <th class="hide-sm col-tokens num" style="padding:0">
+            <button class="fmt-toggle" title="Abbreviate numbers" data-i18n-title="tbl.fmtToggleTitle"><span data-i18n="tbl.tokens">Tokens</span>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M8 3 4 7l4 4"></path><path d="M4 7h16"></path><path d="m16 21 4-4-4-4"></path><path d="M20 17H4"></path></svg>
+            </button>
+          </th>
+          <th class="hide-sm col-cost num" style="padding:0">
+            <button class="fmt-toggle" title="Abbreviate numbers" data-i18n-title="tbl.fmtToggleTitle"><span data-i18n="tbl.cost">Cost</span>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M8 3 4 7l4 4"></path><path d="M4 7h16"></path><path d="m16 21 4-4-4-4"></path><path d="M20 17H4"></path></svg>
+            </button>
+          </th>
+        </tr>
+      </thead>
+      <tbody id="lb-body"></tbody>
+    </table>
+  </div>
+
+  <nav class="pagination" aria-label="Pagination">
+    <button class="btn" disabled data-i18n="pgn.prev">Previous</button>
+    <span class="tabular" style="font-size:12px;color:var(--muted-foreground)" data-i18n="pgn.of">1 of 3</span>
+    <button class="btn" data-i18n="pgn.next">Next</button>
+  </nav>
+
+  <div class="note">
+    <b>本页改动：</b>在 <code>Developer</code> 之后新增 <code>Team</code>、<code>Group</code> 两列，值为空即留空（见第 4、6 行）。
+    <code>Tokens</code> / <code>Cost</code> 表头保持原语义——它们是<b>数字缩写切换</b>而非排序按钮，排序仍由控件行的 <code>Sort by</code> 负责。
+    移动端不占独立列，Team / Group 降级为 <code>@username</code> 下方的小徽章（可点上方"切换移动端视图"查看）。
+  </div>
+</section>
+
+<!-- ======================================================================
+     2. TEAMBOARD —— 占据原 Hall of Shame 导航位
+     ====================================================================== -->
+<section class="page" id="page-teamboard" hidden>
+  <h1 class="page-title" data-i18n="tb.title">Teamboard</h1>
+  <p class="page-desc" data-i18n="tb.desc">Token usage ranked within a team, filtered by group.</p>
+  <hr class="sep" />
+
+  <div class="stats c4" aria-label="Totals">
+    <div><div class="stat-label" data-i18n="stat.tokens">Tokens</div><div class="stat-value tabular" id="tb-tokens">—</div></div>
+    <div><div class="stat-label" data-i18n="stat.cost">Cost</div><div class="stat-value tabular" id="tb-cost">—</div></div>
+    <div><div class="stat-label" data-i18n="stat.members">Members</div><div class="stat-value tabular" id="tb-members">—</div></div>
+    <div><div class="stat-label" data-i18n="stat.yourRank">Your rank</div><div class="stat-value tabular accent" id="tb-rank">—</div></div>
+  </div>
+
+  <div class="controls">
+    <!-- Team：单选 -->
+    <div class="popover-host" id="tb-team-host">
+      <button class="btn" id="tb-team-btn" style="min-width:184px;justify-content:space-between">
+        <span id="tb-team-label">选择团队…</span>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m6 9 6 6 6-6"></path></svg>
+      </button>
+      <div class="popover" id="tb-team-menu" hidden></div>
+    </div>
+
+    <!-- Group：多选 -->
+    <div class="popover-host" id="tb-group-host">
+      <button class="btn" id="tb-group-btn" style="min-width:184px;justify-content:space-between" disabled>
+        <span id="tb-group-label">全部分组</span>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m6 9 6 6 6-6"></path></svg>
+      </button>
+      <div class="popover" id="tb-group-menu" hidden></div>
+    </div>
+
+    <div class="controls-right">
+      <div class="toggle-group" role="group" aria-label="Period" data-toggle="tb-period">
+        <button aria-pressed="true" data-i18n="period.all">All time</button><button data-i18n="period.week">Week</button><button data-i18n="period.month">Month</button>
+      </div>
+      <div class="toggle-group" role="group" aria-label="Sort by" data-toggle="tb-sort">
+        <button aria-pressed="true" data-i18n="sort.tokens">Tokens</button><button data-i18n="sort.cost">Cost</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="tb-chips" class="chips" style="margin-top:12px"></div>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th class="col-rank">#</th>
+          <th data-i18n="tbl.developer">Developer</th>
+          <!-- 无 Team 列：已按单个 Team 过滤 -->
+          <th class="hide-sm" data-i18n="tbl.group">Group</th>
+          <th class="col-num only-sm" style="padding-right:16px" data-i18n="tbl.usage">Usage</th>
+          <th class="hide-sm col-tokens num" style="padding:0">
+            <button class="fmt-toggle" title="Abbreviate numbers" data-i18n-title="tbl.fmtToggleTitle"><span data-i18n="tbl.tokens">Tokens</span>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M8 3 4 7l4 4"></path><path d="M4 7h16"></path><path d="m16 21 4-4-4-4"></path><path d="M20 17H4"></path></svg>
+            </button>
+          </th>
+          <th class="hide-sm col-cost num" style="padding:0">
+            <button class="fmt-toggle" title="Abbreviate numbers" data-i18n-title="tbl.fmtToggleTitle"><span data-i18n="tbl.cost">Cost</span>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M8 3 4 7l4 4"></path><path d="M4 7h16"></path><path d="m16 21 4-4-4-4"></path><path d="M20 17H4"></path></svg>
+            </button>
+          </th>
+        </tr>
+      </thead>
+      <tbody id="tb-body"></tbody>
+    </table>
+    <div class="empty" id="tb-empty">
+      <h3 data-i18n="tb.emptyTitle">先选择一个团队</h3>
+      <p data-i18n="tb.emptyDesc">Teamboard 一次展示一个团队。登录用户默认选中自己所属的团队；未登录访客可自行选择任意公开团队。</p>
+    </div>
+  </div>
+
+  <div class="note">
+    <b>本页改动：</b>整体布局与 Leaderboard 一致，差异只有两处——新增 <b>Team 单选</b>与 <b>Group 多选</b>两个筛选项；列中<b>不含 Team</b>（已按单团队过滤），但保留 <code>Group</code> 列。
+    试试选择 <code>Neon Ravens</code> 再勾选多个分组，观察成员列表的递进筛选。
+  </div>
+
+  <div class="note" style="border-color:var(--primary);margin-top:12px">
+    <b>团队可见范围（PRD §13 D-2 已确认）：</b>
+    <code>teams.visibility</code> 取 <code>public</code> / <code>private</code>，<b>建团时由 admin 显式选择</b>，admin 与 subadmin 事后可改，
+    数据库默认 <code>private</code>。筛选器列出「公开团队 ∪ 你自己所属的团队」——
+    <code>Atlas Guild</code> 是私有团队且你不是成员，因此<b>根本不出现在下拉里</b>；直接请求它的 id 会返回 404（用 404 而非 403，避免被用来枚举团队是否存在）。
+    <br /><br />
+    注意：Leaderboard 的 <code>Team</code> / <code>Group</code> 列是你明确要求的，<b>团队名对所有访客可见</b>，<code>private</code> 也不例外。
+    可见性控制的是「能否按团队聚合浏览完整成员名单」，不是「团队名是否公开」。
+  </div>
+</section>
+
+<!-- ======================================================================
+     3. TEAMS —— 团队与分组管理
+     ====================================================================== -->
+<section class="page" id="page-teams" hidden>
+  <h1 class="page-title" data-i18n="teams.title">Teams</h1>
+  <p class="page-desc" data-i18n="teams.desc">Create a team, group its members, and manage who can do what.</p>
+  <hr class="sep" />
+
+  <div class="grid2">
+    <div>
+      <!-- 团队头部 -->
+      <div class="card card-pad">
+        <div class="row-between">
+          <div style="display:flex;gap:14px;align-items:center;min-width:0">
+            <span class="avatar lg sq" style="background:linear-gradient(135deg,#2F6FDB,#7B4DD8)">NR</span>
+            <div style="min-width:0">
+              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                <strong style="font-size:17px">Neon Ravens</strong>
+                <span class="badge badge-primary">admin</span>
+                <span class="badge badge-success">active</span>
+                <span class="badge" id="tm-vis-badge" title="公开团队可被任何人在 Teamboard 中浏览" data-i18n-title="teams.visPublic">public</span>
+              </div>
+              <div style="font-size:13px;color:var(--muted-foreground);margin-top:3px" data-i18n="teams.meta">
+                8 位成员 · 3 个分组 · 你创建于 2026-07-02
+              </div>
+            </div>
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn" id="tm-vis-btn" data-vis data-i18n="teams.setPrivate">设为 private</button>
+            <button class="btn" data-dialog="dlg-rename" data-i18n="teams.rename">改名</button>
+            <button class="btn" data-dialog="dlg-avatar" data-i18n="teams.changeAvatar">改头像</button>
+            <button class="btn btn-primary" data-dialog="dlg-invite" data-i18n="teams.invite">邀请成员</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 分组筛选 -->
+      <div style="margin-top:24px">
+        <div class="row-between" style="margin-bottom:12px">
+          <h2 class="section-title" style="margin:0" data-i18n="teams.groupsTitle">分组（点击可递进筛选成员）</h2>
+          <button class="btn btn-sm" data-dialog="dlg-group" data-i18n="teams.newGroup">+ 新建分组</button>
+        </div>
+        <div class="chips" id="team-group-chips"></div>
+      </div>
+
+      <!-- 成员列表 -->
+      <div class="card" style="margin-top:16px">
+        <div class="list-row" style="background:color-mix(in oklab,var(--muted) 55%,transparent)">
+          <span class="section-title" style="margin:0" data-i18n="teams.membersTitle">成员</span>
+          <span class="badge badge-outline" id="member-count" style="margin-left:auto">8</span>
+        </div>
+        <div id="team-members"></div>
+      </div>
+
+      <!-- 待处理邀请 -->
+      <div style="margin-top:24px">
+        <h2 class="section-title" data-i18n="teams.pendingInvites">待处理邀请</h2>
+        <div class="card">
+          <div class="list-row">
+            <span class="avatar" style="background:#6D7179">?</span>
+            <div class="dev-name"><b>chen.wei@example.com</b><span data-i18n="teams.inviteEmail">邮箱邀请 · 3 天后过期</span></div>
+            <span class="badge badge-outline" style="margin-left:auto">pending</span>
+            <button class="btn btn-sm" data-i18n="teams.revoke">撤销</button>
+          </div>
+          <div class="list-row">
+            <span class="avatar" style="background:#9750A7">MK</span>
+            <div class="dev-name"><b>@mikoto</b><span data-i18n="teams.inviteUsername">用户名邀请 · 6 天后过期</span></div>
+            <span class="badge badge-outline" style="margin-left:auto">pending</span>
+            <button class="btn btn-sm" data-i18n="teams.revoke">撤销</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 危险操作 -->
+      <div style="margin-top:24px">
+        <h2 class="section-title" data-i18n="teams.dangerZone">危险操作</h2>
+        <div class="card card-pad" style="border-color:color-mix(in oklab,var(--danger) 35%,var(--border))">
+          <div class="row-between">
+            <div>
+              <strong style="font-size:14px" data-i18n="teams.disbandTitle">解散团队</strong>
+              <p class="hint" style="margin-top:4px;max-width:52ch" data-i18n="teams.disbandDesc">
+                把所有成员（含你自己）移出团队。团队进入 <code>disbanded</code> 状态，不可撤销。解散后你仍保留删除权。
+              </p>
+            </div>
+            <button class="btn btn-danger" data-dialog="dlg-disband" data-i18n="teams.disband">解散</button>
+          </div>
+          <hr class="sep" style="margin:16px 0" />
+          <div class="row-between">
+            <div>
+              <strong style="font-size:14px" data-i18n="teams.deleteTitle">删除团队</strong>
+              <p class="hint" style="margin-top:4px;max-width:52ch" data-i18n="teams.deleteDesc">
+                仅当团队<b>已解散</b>且<b>成员数为 0</b> 时可用。当前成员 8 人，因此按钮禁用。
+              </p>
+            </div>
+            <button class="btn btn-danger" disabled data-i18n="teams.delete">删除</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 侧栏：权限说明 -->
+    <aside>
+      <div class="card card-pad">
+        <h2 class="section-title" data-i18n="teams.yourPerms">你的权限（admin）</h2>
+        <ul style="margin:0;padding-left:18px;font-size:13px;line-height:1.95">
+          <li data-i18n="teams.perm1">改名 / 改头像 / 邀请 / 移除成员</li>
+          <li data-i18n="teams.perm2">指派 subadmin（<b>上限 2</b>，已用 <span class="tabular">1</span>）</li>
+          <li data-i18n="teams.perm3">分组的增改删与解散</li>
+          <li data-i18n="teams.perm4"><b>解散团队</b>（subadmin 不可）</li>
+          <li data-i18n="teams.perm5"><b>删除团队</b>（subadmin 不可）</li>
+        </ul>
+        <hr class="sep" style="margin:16px 0" />
+        <h2 class="section-title" data-i18n="teams.subadminDiff">subadmin 差异</h2>
+        <p style="margin:0;font-size:13px;color:var(--muted-foreground);line-height:1.7" data-i18n="teams.subadminDiffText">
+          除<b>解散</b>与<b>删除团队</b>外，权限与 admin 相同，包含对分组的全部操作。
+        </p>
+      </div>
+      <div class="note" style="margin-top:16px">
+        <b>两段式生命周期：</b>解散与删除是两步。解散清空成员，删除要求成员为 0。
+        因为解散会把 admin 也移出，删除权由 <code>teams.created_by</code> 承载——否则解散后将无人有权删除。
+      </div>
+    </aside>
+  </div>
+</section>
+
+<!-- ======================================================================
+     4. PROFILE —— 新增 Team / Group 区块与退出
+     ====================================================================== -->
+<section class="page" id="page-profile" hidden>
+  <div class="row-between">
+    <div style="display:flex;gap:16px;align-items:center">
+      <span class="avatar lg" style="background:#2F6FDB">SL</span>
+      <div>
+        <h1 class="page-title" style="font-size:22px">songlin</h1>
+        <p class="page-desc" style="margin-top:2px">@songlin</p>
+      </div>
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="btn" data-i18n="profile.embed">Embed</button>
+      <button class="btn" data-i18n="profile.share">Share</button>
+      <!-- GitHub 按钮已按 FR-4 移除 -->
+    </div>
+  </div>
+  <hr class="sep" />
+
+  <div class="stats c3">
+    <div><div class="stat-label" data-i18n="stat.tokens">Tokens</div><div class="stat-value tabular">421.8M</div></div>
+    <div><div class="stat-label" data-i18n="stat.cost">Cost</div><div class="stat-value tabular">$248.10</div></div>
+    <div><div class="stat-label" data-i18n="stat.rank">Rank</div><div class="stat-value tabular accent">#7</div></div>
+  </div>
+
+  <!-- ▼ 新增区块 -->
+  <div style="margin-top:32px">
+    <h2 class="section-title" data-i18n="profile.teamGroup">Team &amp; Group</h2>
+    <div class="card">
+      <div class="list-row">
+        <span class="avatar sq" style="background:linear-gradient(135deg,#2F6FDB,#7B4DD8)">NR</span>
+        <div class="dev-name">
+          <b>Neon Ravens</b>
+          <span data-i18n="profile.teamRole">Team · 你是 admin</span>
+        </div>
+        <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
+          <button class="btn btn-sm" data-go="teamboard" data-i18n="profile.viewInTeamboard">在 Teamboard 查看</button>
+          <button class="btn btn-sm btn-danger" data-dialog="dlg-leave-team" data-i18n="profile.leaveTeam">退出 Team</button>
+        </div>
+      </div>
+      <div class="list-row">
+        <span class="avatar" style="background:#009588">FE</span>
+        <div class="dev-name">
+          <b>frontend</b>
+          <span data-i18n="profile.groupRole">Group · 隶属 Neon Ravens</span>
+        </div>
+        <div style="margin-left:auto">
+          <button class="btn btn-sm btn-danger" data-dialog="dlg-leave-group" data-i18n="profile.leaveGroup">退出 Group</button>
+        </div>
+      </div>
+    </div>
+    <div class="note">
+      <b>本页改动：</b>新增 Team / Group 区块，两个退出按钮<b>仅本人可见</b>（需要给 profile 组件补 <code>isOwner</code>，当前实现没有这个概念）。
+      无归属时整个区块不渲染。当前用户是 admin，点"退出 Team"会被阻断并提示先移交或解散。
+    </div>
+  </div>
+</section>
+
+<!-- ======================================================================
+     7. DOCS —— 删 verified / architecture / sponsors 三节，GitHub 引用改为邮箱 / 用户名
+     ====================================================================== -->
+<section class="page" id="page-docs" hidden>
+  <h1 class="page-title" data-i18n="docs.title">Docs</h1>
+  <p class="page-desc" data-i18n="docs.desc">Install the Tokens CLI on macOS, Linux or Windows.</p>
+  <hr class="sep" />
+
+  <div style="display:grid;gap:24px;margin-top:8px">
+    <div class="card card-pad">
+      <h2 style="margin:0 0 4px;font-size:17px;font-weight:600" data-i18n="docs.cliTitle">Install the CLI</h2>
+      <p class="hint" style="margin-top:0" data-i18n="docs.cliDesc">The CLI scans the AI coding clients already installed on your machine, totals the usage locally, and submits only the totals.</p>
+      <div style="display:grid;gap:14px;margin-top:14px">
+        <div>
+          <div class="section-title" style="margin:0 0 6px">macOS</div>
+          <div class="tabular" style="font-size:13px;display:grid;gap:5px">
+            <code>brew install tokens</code>
+            <span><code>tokens login</code> <span style="color:var(--muted-foreground)" data-i18n="docs.loginNote">— sign in with email</span></span>
+            <span><code>brew services start tokens</code> <span style="color:var(--muted-foreground)" data-i18n="docs.autoNote">— submit automatically</span></span>
+          </div>
+        </div>
+        <div>
+          <div class="section-title" style="margin:0 0 6px">Linux</div>
+          <div class="tabular" style="font-size:13px;display:grid;gap:5px">
+            <code>curl -fsSL https://tokens.ci/install.sh | sh</code>
+            <span><code>tokens login</code> <span style="color:var(--muted-foreground)" data-i18n="docs.loginNote">— sign in with email</span></span>
+            <span><code>tokens serve</code> <span style="color:var(--muted-foreground)" data-i18n="docs.autoNote">— submit automatically</span></span>
+          </div>
+        </div>
+        <div>
+          <div class="section-title" style="margin:0 0 6px">Windows</div>
+          <div class="tabular" style="font-size:13px;display:grid;gap:5px">
+            <span><code>bunx tokens-cli@latest login</code> <span style="color:var(--muted-foreground)" data-i18n="docs.loginNote">— sign in with email</span></span>
+            <code>bunx tokens-cli@latest submit</code>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card card-pad">
+      <h2 style="margin:0 0 4px;font-size:17px;font-weight:600" data-i18n="docs.usageTitle">Everyday use</h2>
+      <p class="hint" style="margin-top:0" data-i18n="docs.usageDesc">Five commands cover the whole workflow.</p>
+      <div class="tabular" style="font-size:13px;display:grid;gap:5px;margin-top:12px">
+        <code>tokens login</code><code>tokens submit</code><code>tokens serve</code><code>tokens status</code><code>tokens help</code>
+      </div>
+    </div>
+
+    <div class="card card-pad">
+      <h2 style="margin:0 0 4px;font-size:17px;font-weight:600" data-i18n="docs.clientsTitle">Supported clients</h2>
+      <p class="hint" style="margin-top:0" data-i18n="docs.clientsDesc">The CLI scans whatever is already on your machine — nothing to configure per client.</p>
+      <div class="chips" style="margin-top:12px">
+        <span class="chip">Claude Code</span><span class="chip">Codex</span><span class="chip">Cursor</span><span class="chip">Gemini</span><span class="chip">Copilot</span><span class="chip">Amp</span><span class="chip">…</span>
+      </div>
+    </div>
+  </div>
+
+</section>
+
+<!-- ======================================================================
+     5. REGISTER
+     ====================================================================== -->
+<section class="page" id="page-register" hidden>
+  <div class="auth-wrap">
+    <h1 class="page-title" style="text-align:center" data-i18n="auth.regTitle">创建账号</h1>
+    <p class="page-desc" style="text-align:center" data-i18n="auth.regDesc">用邮箱注册即可开始上报用量。</p>
+
+    <div class="card card-pad" style="margin-top:28px">
+      <div class="auth-field">
+        <label class="label" for="reg-email" data-i18n="auth.email">邮箱地址</label>
+        <input class="input input-lg" id="reg-email" type="email" placeholder="you@example.com" />
+      </div>
+      <div class="auth-field">
+        <label class="label" for="reg-username" data-i18n="auth.username">用户名</label>
+        <input class="input input-lg" id="reg-username" placeholder="songlin" maxlength="39" />
+        <p class="hint" data-i18n="auth.usernameHint">公开展示于榜单，也用于接收团队邀请。最多 39 字符。</p>
+      </div>
+      <div class="auth-field">
+        <label class="label" for="reg-password" data-i18n="auth.password">密码</label>
+        <input class="input input-lg" id="reg-password" type="password" placeholder="••••••••" />
+        <ul class="rules" id="pw-rules">
+          <li data-rule="len"><span class="dot"><svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"><path d="m5 13 4 4L19 7"/></svg></span><span data-i18n="auth.ruleLen">至少 8 位</span></li>
+          <li data-rule="upper"><span class="dot"><svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"><path d="m5 13 4 4L19 7"/></svg></span><span data-i18n="auth.ruleUpper">含大写字母</span></li>
+          <li data-rule="lower"><span class="dot"><svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"><path d="m5 13 4 4L19 7"/></svg></span><span data-i18n="auth.ruleLower">含小写字母</span></li>
+          <li data-rule="special"><span class="dot"><svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"><path d="m5 13 4 4L19 7"/></svg></span><span data-i18n="auth.ruleSpecial">含至少 1 个特殊字符</span></li>
+        </ul>
+      </div>
+      <button class="btn btn-primary btn-lg btn-block" id="reg-submit" disabled data-i18n="auth.register">注册</button>
+      <p class="hint" style="text-align:center;margin-top:14px">
+        <span data-i18n="auth.haveAccount">已有账号？</span><a href="#" data-go="login" style="color:var(--primary)" data-i18n="auth.loginLink">登录</a>
+      </p>
+    </div>
+
+    <div class="note">
+      <b>本页为新增：</b>三项必填——邮箱、用户名、密码。密码规则实时校验，不满足时提交按钮保持禁用。
+      <b>页面上不存在任何 GitHub 登录入口</b>。
+    </div>
+  </div>
+</section>
+
+<!-- ======================================================================
+     6. LOGIN
+     ====================================================================== -->
+<section class="page" id="page-login" hidden>
+  <div class="auth-wrap">
+    <h1 class="page-title" style="text-align:center" data-i18n="auth.loginTitle">登录</h1>
+    <p class="page-desc" style="text-align:center" data-i18n="auth.loginDesc">使用邮箱与密码继续。</p>
+
+    <div class="card card-pad" style="margin-top:28px">
+      <div class="auth-field">
+        <label class="label" for="li-email" data-i18n="auth.email">邮箱地址</label>
+        <input class="input input-lg" id="li-email" type="email" placeholder="you@example.com" />
+      </div>
+      <div class="auth-field">
+        <div style="display:flex;justify-content:space-between;align-items:baseline">
+          <label class="label" for="li-password" data-i18n="auth.password">密码</label>
+          <a href="#" style="font-size:12px;color:var(--primary)" data-i18n="auth.forgot">忘记密码？</a>
+        </div>
+        <input class="input input-lg" id="li-password" type="password" placeholder="••••••••" />
+      </div>
+      <button class="btn btn-primary btn-lg btn-block" data-go="leaderboard" data-i18n="auth.login">登录</button>
+      <p class="hint" style="text-align:center;margin-top:14px">
+        <span data-i18n="auth.noAccount">还没有账号？</span><a href="#" data-go="register" style="color:var(--primary)" data-i18n="auth.registerLink">注册</a>
+      </p>
+    </div>
+
+    <div class="note">
+      <b>对比改造前：</b>原登录页只有一个 "Sign in with GitHub"。改造后 GitHub 相关入口全部移除。
+      会话机制不变（<code>tt_session</code> cookie + 库内存 SHA-256 + 30 天），因此 <b>CLI 的 device flow 无需任何改动</b>。
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer class="site">
+  <div class="container">
+    Tokens · UI Demo · 依据 <code>docs/prd-teamboard-teams-auth.md</code> 制作 · Hall of Shame 已移除
+  </div>
+</footer>
+
+<!-- ============================ 对话框 ============================ -->
+<div class="overlay" id="dlg-invite" hidden>
+  <div class="dialog">
+    <div class="dialog-head">
+      <h2 data-i18n="invite.title">邀请成员</h2>
+      <p data-i18n="invite.desc">搜索并勾选要邀请的成员。下拉只显示用户名与显示名，不回显绑定邮箱。同一团队对同一个人的待处理邀请会自动去重——用户名和邮箱指向同一位已注册用户时只算一条。</p>
+    </div>
+    <div class="dialog-body">
+      <div class="popover-host">
+        <input class="input input-lg" id="inv-search" data-i18n-ph="invite.searchPh" placeholder="搜索用户名、显示名或邮箱…" autocomplete="off" />
+        <div class="popover" id="inv-menu" hidden style="left:0;right:0;min-width:0;max-height:220px;overflow-y:auto"></div>
+      </div>
+      <p class="hint" id="inv-count">已选 0 人 · 邀请有效期 7 天</p>
+      <label class="label" style="margin-top:14px" data-i18n="invite.groupLabel">加入后自动归入分组（可选）</label>
+      <div class="chips">
+        <button class="chip" aria-pressed="false" data-i18n="invite.noGroup">不指定</button>
+        <button class="chip" aria-pressed="true">frontend</button>
+        <button class="chip" aria-pressed="false">backend</button>
+        <button class="chip" aria-pressed="false">infra</button>
+      </div>
+    </div>
+    <div class="dialog-foot">
+      <button class="btn" data-close data-i18n="dlg.cancel">取消</button>
+      <button class="btn btn-primary" data-close data-i18n="invite.send">发送邀请</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="dlg-rename" hidden>
+  <div class="dialog">
+    <div class="dialog-head"><h2 data-i18n="dlgRename.title">修改团队名称</h2><p data-i18n="dlgRename.desc">名称会展示在 Leaderboard 的 Team 列与 Teamboard 的筛选项中。</p></div>
+    <div class="dialog-body">
+      <label class="label" for="rn-input" data-i18n="dlgRename.label">团队名称</label>
+      <input class="input input-lg" id="rn-input" value="Neon Ravens" />
+    </div>
+    <div class="dialog-foot"><button class="btn" data-close data-i18n="dlg.cancel">取消</button><button class="btn btn-primary" data-close data-i18n="dlg.save">保存</button></div>
+  </div>
+</div>
+
+<div class="overlay" id="dlg-avatar" hidden>
+  <div class="dialog">
+    <div class="dialog-head"><h2 data-i18n="dlgAvatar.title">修改团队头像</h2><p data-i18n="dlgAvatar.desc">建议 1:1，至少 256×256。不上传时使用团队名首字母生成的占位图。</p></div>
+    <div class="dialog-body" style="text-align:center">
+      <span class="avatar lg sq" style="background:linear-gradient(135deg,#2F6FDB,#7B4DD8);margin:0 auto 16px">NR</span>
+      <button class="btn btn-block" data-i18n="dlgAvatar.choose">选择图片…</button>
+    </div>
+    <div class="dialog-foot"><button class="btn" data-close data-i18n="dlg.cancel">取消</button><button class="btn btn-primary" data-close data-i18n="dlg.save">保存</button></div>
+  </div>
+</div>
+
+<div class="overlay" id="dlg-group" hidden>
+  <div class="dialog">
+    <div class="dialog-head"><h2 data-i18n="dlgGroup.title">新建分组</h2><p data-i18n="dlgGroup.desc">分组隶属于当前团队，成员必须先是团队成员。同一团队内名称唯一。</p></div>
+    <div class="dialog-body">
+      <label class="label" for="gp-input" data-i18n="dlgGroup.label">分组名称</label>
+      <input class="input input-lg" id="gp-input" placeholder="例如 frontend" data-i18n-ph="dlgGroup.ph" />
+    </div>
+    <div class="dialog-foot"><button class="btn" data-close data-i18n="dlg.cancel">取消</button><button class="btn btn-primary" data-close data-i18n="dlgGroup.create">创建</button></div>
+  </div>
+</div>
+
+<div class="overlay" id="dlg-disband" hidden>
+  <div class="dialog">
+    <div class="dialog-head">
+      <h2 style="color:var(--danger)" data-i18n="dlgDisband.title">解散团队？</h2>
+      <p data-i18n="dlgDisband.desc">这会把 <b>8 位成员（含你自己）</b>全部移出团队，且<b>不可撤销</b>。解散后团队进入 <code>disbanded</code> 状态，你作为创建者仍可执行删除。</p>
+    </div>
+    <div class="dialog-body">
+      <label class="label" for="db-input" data-i18n="dlgDisband.label">请输入团队名称 <code>Neon Ravens</code> 以确认</label>
+      <input class="input input-lg" id="db-input" placeholder="Neon Ravens" data-confirm="Neon Ravens" data-target="db-ok" />
+    </div>
+    <div class="dialog-foot"><button class="btn" data-close data-i18n="dlg.cancel">取消</button><button class="btn btn-danger" id="db-ok" disabled data-close data-i18n="dlgDisband.confirm">解散团队</button></div>
+  </div>
+</div>
+
+<div class="overlay" id="dlg-leave-team" hidden>
+  <div class="dialog">
+    <div class="dialog-head">
+      <h2 data-i18n="dlgLeaveTeam.title">无法退出团队</h2>
+      <p data-i18n="dlgLeaveTeam.desc">你是 <b>Neon Ravens</b> 的 admin。未解散的团队必须恰有一个 admin，因此你需要先把 admin 移交给其他成员，或直接解散团队。</p>
+    </div>
+    <div class="dialog-foot"><button class="btn" data-close data-i18n="dlgLeaveTeam.ok">我知道了</button><button class="btn btn-primary" data-close data-go="teams" data-i18n="dlgLeaveTeam.transfer">去移交 admin</button></div>
+  </div>
+</div>
+
+<div class="overlay" id="dlg-leave-group" hidden>
+  <div class="dialog">
+    <div class="dialog-head"><h2 data-i18n="dlgLeaveGroup.title">退出分组 frontend？</h2><p data-i18n="dlgLeaveGroup.desc">你仍然留在 Neon Ravens 团队，只是不再属于任何分组。榜单的 Group 列会变为空。</p></div>
+    <div class="dialog-foot"><button class="btn" data-close data-i18n="dlg.cancel">取消</button><button class="btn btn-danger" data-close data-i18n="dlgLeaveGroup.confirm">退出分组</button></div>
+  </div>
+</div>
+
+<script>
+/* ==========================================================================
+   Demo 数据
+   ========================================================================== */
+const AVA = ['#2F6FDB','#009588','#C17D13','#9750A7','#4E9A52','#B4506E','#3E7F9E','#7B4DD8'];
+const avaColor = (s) => AVA[[...s].reduce((a,c)=>a+c.charCodeAt(0),0) % AVA.length];
+const initials = (s) => s.replace(/[^a-zA-Z0-9]/g,'').slice(0,2).toUpperCase() || '?';
+
+const TEAMS = {
+  ravens: { name: 'Neon Ravens', groups: ['frontend','backend','infra'], visibility: 'public'  },
+  atlas:  { name: 'Atlas Guild', groups: ['platform','data'],            visibility: 'private' },
+  solo:   { name: 'Kite Works',  groups: [],                             visibility: 'public'  },
+};
+
+// team / group 为 null 表示无归属 —— 用于验证"留空"渲染
+const USERS = [
+  { name:'NightGlow98',  handle:'NightGlowww',   team:'ravens', group:'frontend', tokens:1279867449, cost:560.23 },
+  { name:'Steven Jonson',handle:'tianweichao92',team:'atlas',  group:'platform', tokens:828492265,  cost:382.55 },
+  { name:'Ying Xiang',   handle:'geminixiang',  team:'ravens', group:'backend',  tokens:792485343,  cost:399.29 },
+  { name:'rin',          handle:'rin4096',      team:null,     group:null,       tokens:717406816,  cost:521.01 },
+  { name:'Mikoto',       handle:'mikoto',       team:'ravens', group:'frontend', tokens:604113278,  cost:311.44 },
+  { name:'lena',         handle:'lena_dev',     team:'atlas',  group:null,       tokens:519002145,  cost:287.60 },
+  { name:'songlin',      handle:'songlin',      team:'ravens', group:'frontend', tokens:421812004,  cost:248.10, self:true },
+  { name:'Chen Wei',     handle:'chenwei',      team:'ravens', group:'infra',    tokens:388204915,  cost:201.77 },
+  { name:'Aki',          handle:'aki_ops',      team:'ravens', group:'backend',  tokens:301558820,  cost:166.32 },
+  { name:'dora',         handle:'dora_m',       team:'solo',   group:null,       tokens:288110097,  cost:151.08 },
+  { name:'Priya N',      handle:'priyan',       team:'ravens', group:'infra',    tokens:245009331,  cost:130.55 },
+  { name:'kaz',          handle:'kazuma',       team:'atlas',  group:'data',     tokens:198774510,  cost:104.21 },
+];
+
+const MEMBERS = [
+  { handle:'songlin',     name:'songlin',     role:'admin',    group:'frontend' },
+  { handle:'NightGlowww', name:'NightGlow98', role:'subadmin', group:'frontend' },
+  { handle:'geminixiang', name:'Ying Xiang',  role:'member',   group:'backend'  },
+  { handle:'mikoto',      name:'Mikoto',      role:'member',   group:'frontend' },
+  { handle:'chenwei',     name:'Chen Wei',    role:'member',   group:'infra'    },
+  { handle:'aki_ops',     name:'Aki',         role:'member',   group:'backend'  },
+  { handle:'priyan',      name:'Priya N',     role:'member',   group:'infra'    },
+  { handle:'noel',        name:'Noel',        role:'member',   group:null       },
+];
+
+/* ==========================================================================
+   工具
+   ========================================================================== */
+const fmtNum = (n) => n.toLocaleString('en-US');
+const fmtAbbr = (n) => n >= 1e9 ? (n/1e9).toFixed(1)+'B' : n >= 1e6 ? (n/1e6).toFixed(1)+'M' : n >= 1e3 ? (n/1e3).toFixed(1)+'K' : String(n);
+const fmtCost = (n) => '$' + n.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+const fmtCostAbbr = (n) => n >= 1000 ? '$'+(n/1000).toFixed(1)+'K' : '$'+n.toFixed(2);
+const el = (id) => document.getElementById(id);
+
+const avatarHTML = (handle, cls='') =>
+  `<span class="avatar ${cls}" style="background:${avaColor(handle)}">${initials(handle)}</span>`;
+
+function devCell(u, opts = {}) {
+  const meta = [];
+  if (opts.showTeam && u.team) meta.push(`<span class="badge badge-outline" style="font-size:11px;padding:1px 6px">${TEAMS[u.team].name}</span>`);
+  if (u.group) meta.push(`<span class="badge badge-outline" style="font-size:11px;padding:1px 6px">${u.group}</span>`);
+  return `<a class="dev-cell" href="#" data-go="profile">
+    ${avatarHTML(u.handle)}
+    <span class="dev-name">
+      <b>${u.name}</b>
+      <span>@${u.handle}</span>
+      ${meta.length ? `<span class="mobile-meta">${meta.join('')}</span>` : ''}
+    </span>
+  </a>`;
+}
+
+function rankClass(r) { return r === 1 ? 'rank-1' : r <= 3 ? 'rank-top' : 'rank-rest'; }
+
+function numCells(u, max) {
+  const share = Math.max(u.tokens / max, 0.006) * 100;
+  return `
+    <td class="col-num only-sm" style="padding-right:16px">
+      <span class="tabular metric-primary" style="display:block;font-size:13px">${fmtAbbr(u.tokens)}</span>
+      <span class="tabular metric-muted" style="display:block;font-size:12px">${fmtCostAbbr(u.cost)}</span>
+    </td>
+    <td class="hide-sm col-tokens col-num">
+      <span class="tabular metric-primary">${fmtNum(u.tokens)}</span>
+      <div class="bar"><i style="width:${share}%"></i></div>
+    </td>
+    <td class="hide-sm col-cost col-num"><span class="tabular metric-muted">${fmtCost(u.cost)}</span></td>`;
+}
+
+/* ==========================================================================
+   Leaderboard
+   ========================================================================== */
+
+/* ==========================================================================
+   i18n：自建字典 + t()，localStorage 持久化。demo 的 .note / .demo-bar 是
+   评审辅助，不属于产品 UI，保持中文不参与切换。
+   ========================================================================== */
+const I18N = {
+  zh: {
+    'nav.leaderboard':'排行榜','nav.teamboard':'团队榜','nav.teams':'团队','nav.profile':'主页','nav.docs':'文档','nav.signout':'退出登录',
+    'nav.language':'语言','nav.theme':'切换主题',
+    'lb.title':'排行榜','lb.desc':'Tokens CLI 上报的 AI 编码 token 用量。',
+    'stat.tokens':'Tokens','stat.cost':'Cost','stat.developers':'开发者','stat.members':'成员','stat.yourRank':'你的名次','stat.rank':'名次',
+    'period.all':'全部','period.today':'今日','period.week':'本周','period.month':'本月','period.lastMonth':'上月',
+    'sort.tokens':'Tokens','sort.cost':'Cost',
+    'lb.searchPh':'搜索…',
+    'tbl.developer':'开发者','tbl.team':'团队','tbl.group':'分组','tbl.usage':'用量','tbl.tokens':'Tokens','tbl.cost':'Cost','tbl.fmtToggleTitle':'缩写数字',
+    'pgn.prev':'上一页','pgn.next':'下一页','pgn.of':'第 1 页，共 3 页',
+    'tb.title':'团队榜','tb.desc':'按团队聚合、按分组筛选的用量榜。',
+    'tb.selectTeam':'选择团队…','tb.allGroups':'全部分组','tb.nGroups':'{n} 个分组','tb.clear':'清空',
+    'tb.emptyTitle':'先选择一个团队','tb.emptyDesc':'Teamboard 一次展示一个团队。登录用户默认选中自己所属的团队；未登录访客可自行选择任意公开团队。',
+    'tb.noMatchTitle':'没有匹配的成员','tb.noMatchDesc':'当前分组筛选下没有成员提交过用量。',
+    'teams.title':'团队','teams.desc':'创建团队、编排分组成员、管理权限。',
+    'teams.setPrivate':'设为 private','teams.setPublic':'设为 public','teams.rename':'改名','teams.changeAvatar':'改头像','teams.invite':'邀请成员',
+    'teams.groupsTitle':'分组（点击可递进筛选成员）','teams.newGroup':'+ 新建分组','teams.membersTitle':'成员','teams.allMembers':'全部成员',
+    'teams.pendingInvites':'待处理邀请','teams.revoke':'撤销','teams.dangerZone':'危险操作',
+    'teams.disbandTitle':'解散团队','teams.disbandDesc':'把所有成员（含你自己）移出团队。团队进入 <code>disbanded</code> 状态，不可撤销。解散后你仍保留删除权。',
+    'teams.deleteTitle':'删除团队','teams.deleteDesc':'仅当团队<b>已解散</b>且<b>成员数为 0</b> 时可用。当前成员 8 人，因此按钮禁用。',
+    'teams.disband':'解散','teams.delete':'删除',
+    'teams.meta':'8 位成员 · 3 个分组 · 你创建于 2026-07-02',
+    'teams.yourPerms':'你的权限（admin）','teams.subadminDiff':'subadmin 差异',
+    'teams.perm1':'改名 / 改头像 / 邀请 / 移除成员','teams.perm2':'指派 subadmin（<b>上限 2</b>，已用 <span class="tabular">1</span>）','teams.perm3':'分组的增改删与解散','teams.perm4':'<b>解散团队</b>（subadmin 不可）','teams.perm5':'<b>删除团队</b>（subadmin 不可）',
+    'teams.subadminDiffText':'除<b>解散</b>与<b>删除团队</b>外，权限与 admin 相同，包含对分组的全部操作。',
+    'teams.ungrouped':'未分组','teams.assignGroup':'分组…','teams.makeSubadmin':'设为 subadmin','teams.revokeSubadmin':'撤销 subadmin','teams.remove':'移除','teams.adminLocked':'admin 无法被移除',
+    'teams.inviteEmail':'邮箱邀请 · 3 天后过期','teams.inviteUsername':'用户名邀请 · 6 天后过期',
+    'teams.visPublic':'公开团队可被任何人在 Teamboard 中浏览','teams.visPrivate':'私有团队只有成员能在 Teamboard 中浏览',
+    'profile.teamGroup':'团队与分组','profile.embed':'Embed','profile.share':'Share',
+    'profile.teamRole':'Team · 你是 admin','profile.groupRole':'Group · 隶属 Neon Ravens',
+    'profile.viewInTeamboard':'在 Teamboard 查看','profile.leaveTeam':'退出 Team','profile.leaveGroup':'退出 Group',
+    'auth.regTitle':'创建账号','auth.regDesc':'用邮箱注册即可开始上报用量。',
+    'auth.email':'邮箱地址','auth.username':'用户名','auth.usernameHint':'公开展示于榜单，也用于接收团队邀请。最多 39 字符。','auth.password':'密码',
+    'auth.ruleLen':'至少 8 位','auth.ruleUpper':'含大写字母','auth.ruleLower':'含小写字母','auth.ruleSpecial':'含至少 1 个特殊字符',
+    'auth.register':'注册','auth.haveAccount':'已有账号？','auth.loginLink':'登录',
+    'auth.loginTitle':'登录','auth.loginDesc':'使用邮箱与密码继续。','auth.forgot':'忘记密码？','auth.login':'登录','auth.noAccount':'还没有账号？','auth.registerLink':'注册',
+    'dlg.cancel':'取消',
+    'invite.title':'邀请成员','invite.desc':'搜索并勾选要邀请的成员。下拉只显示用户名与显示名，不回显绑定邮箱。同一团队对同一个人的待处理邀请会自动去重——用户名和邮箱指向同一位已注册用户时只算一条。',
+    'invite.searchPh':'搜索用户名、显示名或邮箱…','invite.count0':'已选 0 人 · 邀请有效期 7 天','invite.countN':'已选 {n} 人 · 邀请有效期 7 天',
+    'invite.groupLabel':'加入后自动归入分组（可选）','invite.noGroup':'不指定','invite.send':'发送邀请','invite.inviteEmail':'邀请 {email}','invite.noMatch':'无匹配账户',
+    'dlgRename.title':'修改团队名称','dlgRename.desc':'名称会展示在 Leaderboard 的 Team 列与 Teamboard 的筛选项中。','dlgRename.label':'团队名称','dlg.save':'保存',
+    'dlgAvatar.title':'修改团队头像','dlgAvatar.desc':'建议 1:1，至少 256×256。不上传时使用团队名首字母生成的占位图。','dlgAvatar.choose':'选择图片…',
+    'dlgGroup.title':'新建分组','dlgGroup.desc':'分组隶属于当前团队，成员必须先是团队成员。同一团队内名称唯一。','dlgGroup.label':'分组名称','dlgGroup.ph':'例如 frontend','dlgGroup.create':'创建',
+    'dlgDisband.title':'解散团队？','dlgDisband.desc':'这会把 <b>8 位成员（含你自己）</b>全部移出团队，且<b>不可撤销</b>。解散后团队进入 <code>disbanded</code> 状态，你作为创建者仍可执行删除。',
+    'dlgDisband.label':'请输入团队名称 <code>Neon Ravens</code> 以确认','dlgDisband.confirm':'解散团队',
+    'dlgLeaveTeam.title':'无法退出团队','dlgLeaveTeam.desc':'你是 <b>Neon Ravens</b> 的 admin。未解散的团队必须恰有一个 admin，因此你需要先把 admin 移交给其他成员，或直接解散团队。',
+    'dlgLeaveTeam.ok':'我知道了','dlgLeaveTeam.transfer':'去移交 admin',
+    'dlgLeaveGroup.title':'退出分组 frontend？','dlgLeaveGroup.desc':'你仍然留在 Neon Ravens 团队，只是不再属于任何分组。榜单的 Group 列会变为空。','dlgLeaveGroup.confirm':'退出分组',
+    'docs.title':'文档','docs.desc':'在 macOS、Linux 或 Windows 上安装 Tokens CLI。',
+    'docs.cliTitle':'安装 CLI','docs.cliDesc':'CLI 扫描你机器上已安装的 AI 编码客户端，在本地汇总用量，只提交汇总数据。',
+    'docs.loginNote':'— 用邮箱登录','docs.autoNote':'— 自动提交',
+    'docs.usageTitle':'日常使用','docs.usageDesc':'五条命令覆盖整个工作流。',
+    'docs.clientsTitle':'支持的客户端','docs.clientsDesc':'CLI 扫描你机器上已有的客户端——无需为每个客户端单独配置。',
+      },
+  en: {
+    'nav.leaderboard':'Leaderboard','nav.teamboard':'Teamboard','nav.teams':'Teams','nav.profile':'Profile','nav.docs':'Docs','nav.signout':'Sign out',
+    'nav.language':'Language','nav.theme':'Toggle theme',
+    'lb.title':'Leaderboard','lb.desc':'AI coding token usage, reported by the Tokens CLI.',
+    'stat.tokens':'Tokens','stat.cost':'Cost','stat.developers':'Developers','stat.members':'Members','stat.yourRank':'Your rank','stat.rank':'Rank',
+    'period.all':'All time','period.today':'Today','period.week':'Week','period.month':'Month','period.lastMonth':'Last month',
+    'sort.tokens':'Tokens','sort.cost':'Cost',
+    'lb.searchPh':'Search…',
+    'tbl.developer':'Developer','tbl.team':'Team','tbl.group':'Group','tbl.usage':'Usage','tbl.tokens':'Tokens','tbl.cost':'Cost','tbl.fmtToggleTitle':'Abbreviate numbers',
+    'pgn.prev':'Previous','pgn.next':'Next','pgn.of':'1 of 3',
+    'tb.title':'Teamboard','tb.desc':'Token usage ranked within a team, filtered by group.',
+    'tb.selectTeam':'Select a team…','tb.allGroups':'All groups','tb.nGroups':'{n} groups','tb.clear':'Clear',
+    'tb.emptyTitle':'Select a team first','tb.emptyDesc':'Teamboard shows one team at a time. Signed-in users default to their own team; guests can pick any public team.',
+    'tb.noMatchTitle':'No matching members','tb.noMatchDesc':'No members submitted usage under the current group filter.',
+    'teams.title':'Teams','teams.desc':'Create a team, group its members, and manage who can do what.',
+    'teams.setPrivate':'Make private','teams.setPublic':'Make public','teams.rename':'Rename','teams.changeAvatar':'Change avatar','teams.invite':'Invite members',
+    'teams.groupsTitle':'Groups (click to filter members)','teams.newGroup':'+ New group','teams.membersTitle':'Members','teams.allMembers':'All members',
+    'teams.pendingInvites':'Pending invitations','teams.revoke':'Revoke','teams.dangerZone':'Danger zone',
+    'teams.disbandTitle':'Disband team','teams.disbandDesc':'Removes every member (including you). The team enters the <code>disbanded</code> state and this cannot be undone. You still hold deletion rights afterward.',
+    'teams.deleteTitle':'Delete team','teams.deleteDesc':'Only available once the team is <b>disbanded</b> and has <b>0 members</b>. Currently 8 members, so the button is disabled.',
+    'teams.disband':'Disband','teams.delete':'Delete',
+    'teams.meta':'8 members · 3 groups · created by you on 2026-07-02',
+    'teams.yourPerms':'Your permissions (admin)','teams.subadminDiff':'subadmin differences',
+    'teams.perm1':'Rename / change avatar / invite / remove members','teams.perm2':'Assign subadmin (<b>cap 2</b>, <span class="tabular">1</span> used)','teams.perm3':'Create, rename, disband groups','teams.perm4':'<b>Disband team</b> (not for subadmin)','teams.perm5':'<b>Delete team</b> (not for subadmin)',
+    'teams.subadminDiffText':'Identical to admin except <b>disbanding</b> and <b>deleting the team</b>, including full group permissions.',
+    'teams.ungrouped':'No group','teams.assignGroup':'Group…','teams.makeSubadmin':'Make subadmin','teams.revokeSubadmin':'Revoke subadmin','teams.remove':'Remove','teams.adminLocked':'admin cannot be removed',
+    'teams.inviteEmail':'Email invite · expires in 3 days','teams.inviteUsername':'Username invite · expires in 6 days',
+    'teams.visPublic':'Public teams can be browsed by anyone on Teamboard','teams.visPrivate':'Only members can browse a private team on Teamboard',
+    'profile.teamGroup':'Team & Group','profile.embed':'Embed','profile.share':'Share',
+    'profile.teamRole':"Team · you're admin",'profile.groupRole':'Group · part of Neon Ravens',
+    'profile.viewInTeamboard':'View on Teamboard','profile.leaveTeam':'Leave team','profile.leaveGroup':'Leave group',
+    'auth.regTitle':'Create account','auth.regDesc':'Register with email to start reporting usage.',
+    'auth.email':'Email address','auth.username':'Username','auth.usernameHint':'Shown on the leaderboard and used for team invitations. Up to 39 characters.','auth.password':'Password',
+    'auth.ruleLen':'At least 8 characters','auth.ruleUpper':'One uppercase letter','auth.ruleLower':'One lowercase letter','auth.ruleSpecial':'One special character',
+    'auth.register':'Register','auth.haveAccount':'Already have an account?','auth.loginLink':'Sign in',
+    'auth.loginTitle':'Sign in','auth.loginDesc':'Continue with your email and password.','auth.forgot':'Forgot password?','auth.login':'Sign in','auth.noAccount':"Don't have an account?",'auth.registerLink':'Register',
+    'dlg.cancel':'Cancel',
+    'invite.title':'Invite members','invite.desc':'Search and select members to invite. The list shows usernames and display names only — bound emails are never echoed. Pending invitations dedupe per person per team — a username and an email for the same registered user count as one.',
+    'invite.searchPh':'Search username, name, or email…','invite.count0':'0 selected · invites expire in 7 days','invite.countN':'{n} selected · invites expire in 7 days',
+    'invite.groupLabel':'Auto-assign to a group after joining (optional)','invite.noGroup':'None','invite.send':'Send invites','invite.inviteEmail':'Invite {email}','invite.noMatch':'No matching accounts',
+    'dlgRename.title':'Rename team','dlgRename.desc':'Shown in the Team column on the Leaderboard and in the Teamboard filter.','dlgRename.label':'Team name','dlg.save':'Save',
+    'dlgAvatar.title':'Change team avatar','dlgAvatar.desc':'Square, at least 256×256. Falls back to an initials placeholder when unset.','dlgAvatar.choose':'Choose image…',
+    'dlgGroup.title':'New group','dlgGroup.desc':'Groups belong to the current team; members must already be in it. Names are unique within a team.','dlgGroup.label':'Group name','dlgGroup.ph':'e.g. frontend','dlgGroup.create':'Create',
+    'dlgDisband.title':'Disband team?','dlgDisband.desc':'This removes <b>all 8 members (including you)</b> and <b>cannot be undone</b>. The team enters the <code>disbanded</code> state; as its creator you can still delete it.',
+    'dlgDisband.label':'Type the team name <code>Neon Ravens</code> to confirm','dlgDisband.confirm':'Disband team',
+    'dlgLeaveTeam.title':"You can't leave this team",'dlgLeaveTeam.desc':"You're the admin of <b>Neon Ravens</b>. An active team must have exactly one admin, so transfer admin to another member or disband the team first.",
+    'dlgLeaveTeam.ok':'Got it','dlgLeaveTeam.transfer':'Transfer admin',
+    'dlgLeaveGroup.title':'Leave group frontend?','dlgLeaveGroup.desc':'You stay in Neon Ravens but leave all groups. Your Group column on the leaderboard becomes empty.','dlgLeaveGroup.confirm':'Leave group',
+    'docs.title':'Docs','docs.desc':'Install the Tokens CLI on macOS, Linux or Windows.',
+    'docs.cliTitle':'Install the CLI','docs.cliDesc':'The CLI scans the AI coding clients already installed on your machine, totals the usage locally, and submits only the totals.',
+    'docs.loginNote':'— sign in with email','docs.autoNote':'— submit automatically',
+    'docs.usageTitle':'Everyday use','docs.usageDesc':'Five commands cover the whole workflow.',
+    'docs.clientsTitle':'Supported clients','docs.clientsDesc':'The CLI scans whatever is already on your machine — nothing to configure per client.',
+      },
+};
+
+let LOCALE = localStorage.getItem('tt_locale') === 'en' ? 'en' : 'zh';
+let currentPage = 'leaderboard';
+
+function t(key, vars) {
+  let s = (I18N[LOCALE] && I18N[LOCALE][key]) ?? I18N.zh[key] ?? key;
+  if (vars) for (const k in vars) s = s.split('{' + k + '}').join(String(vars[k]));
+  return s;
+}
+// 别名：vis 切换处理器里 `t` 被用作局部团队对象，渲染侧统一用 tr 规避遮蔽
+const tr = t;
+
+function applyI18n() {
+  document.querySelectorAll('[data-i18n]').forEach(n => { n.innerHTML = t(n.dataset.i18n); });
+  document.querySelectorAll('[data-i18n-ph]').forEach(n => { n.placeholder = t(n.dataset.i18nPh); });
+  document.querySelectorAll('[data-i18n-title]').forEach(n => { n.title = t(n.dataset.i18nTitle); n.setAttribute('aria-label', t(n.dataset.i18nTitle)); });
+  document.documentElement.lang = LOCALE === 'zh' ? 'zh-CN' : 'en';
+}
+
+function syncLangMenu() {
+  document.querySelectorAll('#lang-menu [data-lang]').forEach(b => {
+    const on = b.dataset.lang === LOCALE;
+    b.style.fontWeight = on ? '600' : '';
+    b.style.color = on ? 'var(--primary)' : '';
+  });
+}
+
+function setLocale(l) {
+  LOCALE = l === 'en' ? 'en' : 'zh';
+  localStorage.setItem('tt_locale', LOCALE);
+  applyI18n();
+  syncLangMenu();
+  renderNav(currentPage);
+  renderLeaderboard();
+  if (currentPage === 'teamboard') renderTeamboard();
+  if (currentPage === 'teams') renderTeamsPage();
+  if (typeof renderInvMenu === 'function') renderInvMenu();
+}
+
+function renderLeaderboard() {
+  const max = Math.max(...USERS.map(u => u.tokens));
+  el('lb-body').innerHTML = USERS.map((u, i) => {
+    const r = i + 1;
+    return `<tr class="${u.self ? 'is-self' : ''}">
+      <td class="col-rank"><span class="tabular ${rankClass(r)}">${r}</span></td>
+      <td>${devCell(u, { showTeam: true })}</td>
+      <td class="hide-sm">${u.team ? `<span class="badge badge-outline">${TEAMS[u.team].name}</span>` : ''}</td>
+      <td class="hide-sm">${u.group ? `<span class="badge badge-outline">${u.group}</span>` : ''}</td>
+      ${numCells(u, max)}
+    </tr>`;
+  }).join('');
+}
+
+/* ==========================================================================
+   Teamboard
+   ========================================================================== */
+let tbTeam = null;
+let tbGroups = new Set();
+
+// 当前登录用户所属的团队。受 INV-1 约束，一人至多属于一个 Team。
+const MY_TEAM = 'ravens';
+
+// 可见性规则（PRD §13 D-2 / INV-10）：
+// 非成员只能浏览 public 且未解散的团队；成员始终可浏览自己的团队，无论其可见性。
+const canViewTeam = (key) => TEAMS[key].visibility === 'public' || key === MY_TEAM;
+
+function renderTeamMenu() {
+  // 不可见的团队根本不出现在候选项里；直接请求其 id 在后端返回 404
+  el('tb-team-menu').innerHTML = Object.entries(TEAMS)
+    .filter(([k]) => canViewTeam(k))
+    .map(([k, t]) => {
+      const check = tbTeam === k
+        ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" stroke-width="2.5" stroke-linecap="round"><path d="m5 13 4 4L19 7"/></svg>'
+        : '';
+      const mine = k === MY_TEAM
+        ? '<span class="badge" style="font-size:10px">我的团队</span>'
+        : '';
+      const priv = t.visibility === 'private'
+        ? '<span class="badge" style="font-size:10px" title="私有团队，仅成员可见">private</span>'
+        : '';
+      return `
+      <button class="popover-item" data-team="${k}">
+        ${avatarHTML(t.name, 'sq')}
+        <span style="flex:1">${t.name}</span>
+        ${priv}${mine}${check}
+      </button>`;
+    }).join('');
+}
+
+function renderGroupMenu() {
+  if (!tbTeam) { el('tb-group-menu').innerHTML = ''; return; }
+  const gs = TEAMS[tbTeam].groups;
+  if (!gs.length) {
+    el('tb-group-menu').innerHTML = `<div style="padding:10px 8px;font-size:12px;color:var(--muted-foreground)">该团队暂无分组</div>`;
+    return;
+  }
+  el('tb-group-menu').innerHTML = gs.map(g => `
+    <button class="popover-item" data-group="${g}">
+      <span class="checkbox" data-checked="${tbGroups.has(g)}">
+        <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"><path d="m5 13 4 4L19 7"/></svg>
+      </span>
+      <span style="flex:1">${g}</span>
+      <span class="tabular" style="font-size:11px;color:var(--muted-foreground)">
+        ${USERS.filter(u => u.team === tbTeam && u.group === g).length}
+      </span>
+    </button>`).join('');
+}
+
+function renderTeamboard() {
+  renderTeamMenu();
+  renderGroupMenu();
+
+  el('tb-team-label').textContent = tbTeam ? TEAMS[tbTeam].name : tr('tb.selectTeam');
+  el('tb-group-btn').disabled = !tbTeam;
+  el('tb-group-label').textContent =
+    tbGroups.size === 0 ? tr('tb.allGroups') : tr('tb.nGroups', { n: tbGroups.size });
+
+  // 选中的分组以 chip 呈现，可单独移除
+  el('tb-chips').innerHTML = tbGroups.size
+    ? [...tbGroups].map(g => `<button class="chip" aria-pressed="true" data-unchip="${g}">${g}
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+      </button>`).join('') + `<button class="chip" data-clearchips>${tr('tb.clear')}</button>`
+    : '';
+
+  if (!tbTeam) {
+    el('tb-body').innerHTML = '';
+    el('tb-empty').style.display = 'block';
+    ['tb-tokens','tb-cost','tb-members','tb-rank'].forEach(id => el(id).textContent = '—');
+    return;
+  }
+  el('tb-empty').style.display = 'none';
+
+  let rows = USERS.filter(u => u.team === tbTeam);
+  if (tbGroups.size) rows = rows.filter(u => u.group && tbGroups.has(u.group));
+
+  const totalTokens = rows.reduce((a, u) => a + u.tokens, 0);
+  const totalCost = rows.reduce((a, u) => a + u.cost, 0);
+  el('tb-tokens').textContent = fmtAbbr(totalTokens);
+  el('tb-cost').textContent = fmtCostAbbr(totalCost);
+  el('tb-members').textContent = String(rows.length);
+  const selfIdx = rows.findIndex(u => u.self);
+  el('tb-rank').textContent = selfIdx >= 0 ? `#${selfIdx + 1}` : '—';
+
+  if (!rows.length) {
+    el('tb-body').innerHTML = '';
+    el('tb-empty').style.display = 'block';
+    el('tb-empty').innerHTML = `<h3>${tr('tb.noMatchTitle')}</h3><p>${tr('tb.noMatchDesc')}</p>`;
+    return;
+  }
+
+  const max = Math.max(...rows.map(u => u.tokens));
+  el('tb-body').innerHTML = rows.map((u, i) => {
+    const r = i + 1;
+    return `<tr class="${u.self ? 'is-self' : ''}">
+      <td class="col-rank"><span class="tabular ${rankClass(r)}">${r}</span></td>
+      <td>${devCell(u, { showTeam: false })}</td>
+      <td class="hide-sm">${u.group ? `<span class="badge badge-outline">${u.group}</span>` : ''}</td>
+      ${numCells(u, max)}
+    </tr>`;
+  }).join('');
+}
+
+/* ==========================================================================
+   Teams 管理页
+   ========================================================================== */
+let teamFilterGroup = null;
+
+function renderTeamsPage() {
+  const gs = TEAMS.ravens.groups;
+  el('team-group-chips').innerHTML =
+    `<button class="chip" aria-pressed="${teamFilterGroup === null}" data-tfilter="">${tr('teams.allMembers')}
+       <span class="tabular" style="opacity:.7">${MEMBERS.length}</span></button>` +
+    gs.map(g => `<button class="chip" aria-pressed="${teamFilterGroup === g}" data-tfilter="${g}">${g}
+       <span class="tabular" style="opacity:.7">${MEMBERS.filter(m => m.group === g).length}</span></button>`).join('') +
+    `<button class="chip" data-dialog="dlg-group" style="border-style:dashed">${tr('teams.newGroup')}</button>`;
+
+  const rows = teamFilterGroup === null ? MEMBERS : MEMBERS.filter(m => m.group === teamFilterGroup);
+  el('member-count').textContent = String(rows.length);
+
+  const roleBadge = (r) =>
+    r === 'admin' ? '<span class="badge badge-primary">admin</span>'
+    : r === 'subadmin' ? '<span class="badge badge-success">subadmin</span>'
+    : '<span class="badge badge-outline">member</span>';
+
+  el('team-members').innerHTML = rows.map(m => `
+    <div class="list-row">
+      ${avatarHTML(m.handle)}
+      <div class="dev-name"><b>${m.name}</b><span>@${m.handle}</span></div>
+      <div style="margin-left:auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        ${m.group ? `<span class="badge badge-outline">${m.group}</span>` : `<span class="badge badge-outline" style="opacity:.5">${tr('teams.ungrouped')}</span>`}
+        ${roleBadge(m.role)}
+        ${m.role === 'admin'
+          ? `<button class="btn btn-sm" disabled title="${tr('teams.adminLocked')}">—</button>`
+          : `<button class="btn btn-sm">${tr('teams.assignGroup')}</button>
+             <button class="btn btn-sm">${m.role === 'subadmin' ? tr('teams.revokeSubadmin') : tr('teams.makeSubadmin')}</button>
+             <button class="btn btn-sm btn-danger">${tr('teams.remove')}</button>`}
+      </div>
+    </div>`).join('');
+}
+
+/* ==========================================================================
+   页面路由 / 导航
+   ========================================================================== */
+const PAGES = [
+  { id:'leaderboard', key:'nav.leaderboard' },
+  { id:'teamboard',   key:'nav.teamboard'   },   // ← 原 Hall of Shame 的位置
+  { id:'teams',       key:'nav.teams'       },
+  { id:'docs',        key:'nav.docs'        },
+  { id:'profile',     key:'nav.profile'     },
+];
+
+function renderNav(active) {
+  el('nav-links').innerHTML = PAGES.map(p =>
+    `<button class="nav-link ${p.id === active ? 'active' : ''}" data-go="${p.id}">${tr(p.key)}</button>`
+  ).join('');
+}
+
+function go(id) {
+  currentPage = id;
+  document.querySelectorAll('.page').forEach(s => s.hidden = true);
+  const target = el('page-' + id);
+  if (target) target.hidden = false;
+  renderNav(id);
+  if (id === 'teamboard') renderTeamboard();
+  if (id === 'teams') renderTeamsPage();
+  window.scrollTo({ top: 0, behavior: 'instant' });
+}
+
+/* ==========================================================================
+   事件绑定
+   ========================================================================== */
+document.addEventListener('click', (e) => {
+  // 关闭所有 popover（点击 popover 内部除外）
+  if (!e.target.closest('.popover-host')) {
+    document.querySelectorAll('.popover').forEach(p => p.hidden = true);
+  }
+
+  const goBtn = e.target.closest('[data-go]');
+  if (goBtn) {
+    e.preventDefault();
+    const dlg = goBtn.closest('.overlay');
+    if (dlg) dlg.hidden = true;
+    document.querySelectorAll('.popover').forEach(p => p.hidden = true);
+    go(goBtn.dataset.go);
+    return;
+  }
+
+  const dlgBtn = e.target.closest('[data-dialog]');
+  if (dlgBtn) {
+    e.preventDefault();
+    el(dlgBtn.dataset.dialog).hidden = false;
+    if (dlgBtn.dataset.dialog === 'dlg-invite') { renderInvMenu(); el('inv-search').focus(); }
+    return;
+  }
+
+  if (e.target.closest('[data-close]')) {
+    e.target.closest('.overlay').hidden = true; return;
+  }
+  if (e.target.classList.contains('overlay')) { e.target.hidden = true; return; }
+
+  // 分段控件
+  const tg = e.target.closest('.toggle-group button');
+  if (tg) {
+    [...tg.parentElement.children].forEach(b => b.removeAttribute('aria-pressed'));
+    tg.setAttribute('aria-pressed', 'true');
+    return;
+  }
+
+  // Teamboard：Team 单选
+  if (e.target.closest('#tb-team-btn')) {
+    const m = el('tb-team-menu'); m.hidden = !m.hidden; return;
+  }
+  // Teams 页：admin / subadmin 切换团队可见性
+  if (e.target.closest('[data-vis]')) {
+    const t = TEAMS[MY_TEAM];
+    t.visibility = t.visibility === 'public' ? 'private' : 'public';
+    el('tm-vis-badge').textContent = t.visibility;
+    el('tm-vis-btn').textContent = t.visibility === 'public' ? tr('teams.setPrivate') : tr('teams.setPublic');
+    el('tm-vis-badge').title = t.visibility === 'public' ? tr('teams.visPublic') : tr('teams.visPrivate');
+    renderTeamboard();
+    return;
+  }
+
+  const teamItem = e.target.closest('[data-team]');
+  if (teamItem) {
+    tbTeam = teamItem.dataset.team;
+    tbGroups.clear();
+    el('tb-team-menu').hidden = true;
+    renderTeamboard();
+    return;
+  }
+
+  // Teamboard：Group 多选
+  if (e.target.closest('#tb-group-btn') && !el('tb-group-btn').disabled) {
+    const m = el('tb-group-menu'); m.hidden = !m.hidden; return;
+  }
+  const groupItem = e.target.closest('[data-group]');
+  if (groupItem) {
+    const g = groupItem.dataset.group;
+    tbGroups.has(g) ? tbGroups.delete(g) : tbGroups.add(g);
+    renderTeamboard();
+    el('tb-group-menu').hidden = false;   // 多选保持展开，便于连续勾选
+    return;
+  }
+  const unchip = e.target.closest('[data-unchip]');
+  if (unchip) { tbGroups.delete(unchip.dataset.unchip); renderTeamboard(); return; }
+  if (e.target.closest('[data-clearchips]')) { tbGroups.clear(); renderTeamboard(); return; }
+
+  // Teams：分组递进筛选
+  const tf = e.target.closest('[data-tfilter]');
+  if (tf) { teamFilterGroup = tf.dataset.tfilter || null; renderTeamsPage(); return; }
+
+  // 邀请对话框内的分组 chip（单选）
+  const invChip = e.target.closest('#dlg-invite .chip');
+  if (invChip) {
+    invChip.parentElement.querySelectorAll('.chip').forEach(c => c.setAttribute('aria-pressed','false'));
+    invChip.setAttribute('aria-pressed','true');
+    return;
+  }
+
+  // 语言切换
+  if (e.target.closest('#lang-btn')) { const m = el('lang-menu'); m.hidden = !m.hidden; return; }
+  const langItem = e.target.closest('#lang-menu [data-lang]');
+  if (langItem) { setLocale(langItem.dataset.lang); el('lang-menu').hidden = true; return; }
+
+  // 邀请下拉：勾选 / 取消勾选（保持展开便于连续勾选）
+  const invItem = e.target.closest('#inv-menu [data-inv], #inv-menu [data-inv-email]');
+  if (invItem) {
+    const key = invItem.dataset.inv || invItem.dataset.invEmail;
+    if (invSelected.has(key)) invSelected.delete(key); else invSelected.add(key);
+    renderInvMenu();
+    return;
+  }
+
+  // 用户菜单
+  if (e.target.closest('#user-menu-btn')) {
+    const m = el('user-menu'); m.hidden = !m.hidden; return;
+  }
+});
+
+// 主题切换
+const SUN = '<circle cx="12" cy="12" r="4"></circle><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M6.3 17.7l-1.4 1.4M19.1 4.9l-1.4 1.4"></path>';
+const MOON = '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"></path>';
+el('theme-toggle').addEventListener('click', () => {
+  const dark = document.documentElement.classList.toggle('dark');
+  el('theme-icon').innerHTML = dark ? SUN : MOON;
+});
+
+// 移动端视图模拟
+let mobile = false;
+el('viewport-toggle').addEventListener('click', (e) => {
+  mobile = !mobile;
+  const main = document.querySelector('main');
+  const hdr = document.querySelector('nav.site');
+  [main, hdr].forEach(n => {
+    n.style.maxWidth = mobile ? '390px' : '';
+    n.style.transition = 'max-width .2s';
+  });
+  // 用 important 覆盖 @media 中的 !important，否则模拟视图下合并列不会出现
+  const setDisp = (sel, val) => document.querySelectorAll(sel).forEach(n =>
+    val ? n.style.setProperty('display', val, 'important') : n.style.removeProperty('display'));
+  setDisp('.hide-sm', mobile ? 'none' : null);
+  setDisp('.only-sm', mobile ? 'table-cell' : null);
+  setDisp('.mobile-meta', mobile ? 'flex' : null);
+  document.querySelectorAll('.nav-links').forEach(n => n.style.display = mobile ? 'none' : '');
+  e.target.textContent = mobile ? '切换桌面视图' : '切换移动端视图';
+});
+
+// 密码规则实时校验
+const PW_RULES = {
+  len:     (v) => v.length >= 8,
+  upper:   (v) => /[A-Z]/.test(v),
+  lower:   (v) => /[a-z]/.test(v),
+  special: (v) => /[^A-Za-z0-9]/.test(v),
+};
+el('reg-password').addEventListener('input', (e) => {
+  const v = e.target.value;
+  let allOk = true;
+  document.querySelectorAll('#pw-rules li').forEach(li => {
+    const ok = PW_RULES[li.dataset.rule](v);
+    li.dataset.ok = String(ok);
+    if (!ok) allOk = false;
+  });
+  const emailOk = /\S+@\S+\.\S+/.test(el('reg-email').value);
+  const nameOk = el('reg-username').value.trim().length > 0;
+  el('reg-submit').disabled = !(allOk && emailOk && nameOk);
+});
+['reg-email','reg-username'].forEach(id =>
+  el(id).addEventListener('input', () => el('reg-password').dispatchEvent(new Event('input')))
+);
+
+// 邀请下拉（combobox）：可搜索、左侧勾选、选中计数、未注册邮箱路径保留
+const INVITEES = [
+  { name:'Mikoto',  handle:'mikoto',  email:'mikoto@example.com' },
+  { name:'Chen Wei',handle:'chenwei', email:'chenwei@example.com' },
+  { name:'lena',    handle:'lena_dev',email:'lena@example.com' },
+  { name:'Aki',     handle:'aki_ops', email:'aki.ops@example.com' },
+  { name:'Priya N', handle:'priyan',  email:'priya@example.com' },
+  { name:'kaz',     handle:'kazuma',  email:'kaz@example.com' },
+  { name:'Noel',    handle:'noel',    email:'noel@example.com' },
+  { name:'rin',     handle:'rin4096', email:'rin@example.com' },
+];
+const invSelected = new Set();
+const isEmailAddr = (s) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s);
+
+function renderInvMenu() {
+  const q = el('inv-search').value.trim().toLowerCase();
+  // 只用用户名 / 显示名做模糊匹配——不按邮箱子串匹配，避免向管理员暴露绑定邮箱
+  let hits = INVITEES.filter(u =>
+    !q || u.handle.toLowerCase().includes(q) || u.name.toLowerCase().includes(q));
+  // 输入完整邮箱时才按邮箱精确匹配；命中已注册用户按用户名 / 显示名展示，不回显邮箱
+  if (isEmailAddr(q)) {
+    const exact = INVITEES.find(u => u.email.toLowerCase() === q);
+    if (exact && !hits.includes(exact)) hits = [exact];
+  }
+  const rows = hits.map(u => `
+    <button type="button" class="popover-item" data-inv="${u.handle}">
+      <span class="checkbox" data-checked="${invSelected.has(u.handle)}"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"><path d="m5 13 4 4L19 7"/></svg></span>
+      ${avatarHTML(u.handle)}
+      <span style="flex:1;min-width:0;text-align:left"><b style="font-size:13px">${u.name}</b><br><span style="font-size:12px;color:var(--muted-foreground)">@${u.handle}</span></span>
+    </button>`).join('');
+  const emailRow = isEmailAddr(q) && !hits.length
+    ? `<button type="button" class="popover-item" data-inv-email="${q}"><span class="checkbox" data-checked="${invSelected.has(q)}"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"><path d="m5 13 4 4L19 7"/></svg></span><span style="flex:1;text-align:left">${tr('invite.inviteEmail', { email: q })}</span></button>`
+    : (!hits.length ? `<div style="padding:10px 8px;font-size:12px;color:var(--muted-foreground)">${tr('invite.noMatch')}</div>` : '');
+  el('inv-menu').innerHTML = rows + emailRow;
+  el('inv-count').textContent = invSelected.size === 0 ? tr('invite.count0') : tr('invite.countN', { n: invSelected.size });
+}
+el('inv-search').addEventListener('input', () => { el('inv-menu').hidden = false; renderInvMenu(); });
+el('inv-search').addEventListener('focus', () => { el('inv-menu').hidden = false; renderInvMenu(); });
+
+// 危险操作二次确认
+document.querySelectorAll('[data-confirm]').forEach(input => {
+  input.addEventListener('input', () => {
+    el(input.dataset.target).disabled = input.value.trim() !== input.dataset.confirm;
+  });
+});
+
+/* ==========================================================================
+   初始化
+   ========================================================================== */
+renderLeaderboard();
+tbTeam = 'ravens';           // 登录用户默认选中自己所属团队
+go('leaderboard');
+applyI18n();
+syncLangMenu();
+</script>
+</body>
+</html>

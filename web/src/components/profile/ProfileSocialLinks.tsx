@@ -2,6 +2,7 @@
 
 import type { ProfileSocialLink, ProfileSocialProvider } from "./types";
 import { tw } from "@/lib/tw";
+import { useI18n } from "@/lib/i18n";
 
 export interface ProfileSocialLinksProps {
   links: ProfileSocialLink[];
@@ -80,23 +81,31 @@ function SocialIcon({ provider }: { provider: ProfileSocialProvider }) {
 }
 
 export function ProfileSocialLinks({ links, className }: ProfileSocialLinksProps) {
+  const { t } = useI18n();
+
   if (links.length === 0) return null;
 
   return (
-    <LinksRow className={className} aria-label="Social links">
-      {links.map((link) => (
+    <LinksRow className={className} aria-label={t("profile.socialLinksAria")}>
+      {links.map((link) => {
+        const providerLabel =
+          link.provider === "website"
+            ? t("profile.social.website")
+            : PROVIDER_LABELS[link.provider];
+        return (
         <li key={link.url}>
           <IconLink
             href={link.url}
             target="_blank"
             rel="me noopener noreferrer"
-            title={PROVIDER_LABELS[link.provider]}
-            aria-label={`${PROVIDER_LABELS[link.provider]} (opens in new tab)`}
+            title={providerLabel}
+            aria-label={t("profile.socialLinkAria", { provider: providerLabel })}
           >
             <SocialIcon provider={link.provider} />
           </IconLink>
         </li>
-      ))}
+        );
+      })}
     </LinksRow>
   );
 }

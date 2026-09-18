@@ -1,9 +1,13 @@
 import type { Metadata } from 'next';
+import { cookies } from 'next/headers';
 import { notFound, permanentRedirect } from 'next/navigation';
 import type { ProfileDevice } from '@/components/profile';
 import { getGitHubSocialLinks } from '@/lib/githubSocials';
 import { loadPublicProfileDevicesForPage } from '@/lib/publicProfileDevices';
 import { loadPublicProfileForPage } from '@/lib/publicProfileData';
+import { loadProfileMembershipForPage } from '@/lib/teams/profileMembership';
+import { LOCALE_COOKIE, parseLocale } from '@/lib/i18n';
+import { SITE_URL } from '@/lib/site';
 import ProfilePageClient, { type ProfileData } from './ProfilePageClient';
 import BannedProfileView, { type BannedProfileData } from './BannedProfileView';
 
@@ -23,10 +27,8 @@ async function getProfileData(
   username: string,
   period: ProfilePeriod,
 ): Promise<ProfileData | BannedProfileData | null> {
-  // Calling the shared server handler keeps Vercel Deployment Protection out
-  // of the render path. A server-side HTTP self-fetch is anonymous and is
-  // redirected to Vercel's HTML login page on protected preview deployments.
-  const result = await loadPublicProfileForPage(username, period);
+  const locale = parseLocale((await cookies()).get(LOCALE_COOKIE)?.value);
+  const result = await loadPublicProfileForPage(username, period, locale);
 
   if (result.kind === "redirect") {
     if (result.location) {
@@ -60,6 +62,21 @@ async function getProfileDevices(username: string) {
     return (await loadPublicProfileDevicesForPage(username)) as ProfileDevice[];
   } catch {
     return [];
+  }
+}
+
+function isMissingDatabaseUrl(error: unknown): boolean {
+  return error instanceof Error && error.message === "DATABASE_URL environment variable is not set";
+}
+
+// Membership is an enrichment like devices: without a database the profile
+// still renders, just without the Team/Group block.
+async function getProfileMembership(username: string) {
+  try {
+    return await loadProfileMembershipForPage(username);
+  } catch (error) {
+    if (isMissingDatabaseUrl(error)) return null;
+    throw error;
   }
 }
 
@@ -97,7 +114,7 @@ export async function generateMetadata({ params }: { params: Promise<{ username:
         ? `${username} has used ${stats.totalTokens.toLocaleString("en-US")} tokens across their AI coding clients.`
         : `AI coding token usage for ${username}.`,
       type: "profile",
-      url: `https://tokens.ci/u/${username}`,
+      url: `${SITE_URL}/u/${username}`,
       siteName: "Tokens",
       images: [{ url: image, width: 1200, height: 630, alt: `@${username} on Tokens` }],
     },
@@ -119,10 +136,11 @@ export default async function ProfilePage({
   const { username } = await params;
   const resolvedSearchParams = await searchParams;
   const period = parseProfilePeriod(resolvedSearchParams.period);
-  const [data, devices, socialLinks] = await Promise.all([
+  const [data, devices, socialLinks, membership] = await Promise.all([
     getProfileData(username, period),
     getProfileDevices(username),
     getGitHubSocialLinks(username),
+    getProfileMembership(username),
   ]);
 
   if (!data) {
@@ -143,6 +161,7 @@ export default async function ProfilePage({
       initialDevices={devices}
       socialLinks={socialLinks}
       username={username}
+      membership={membership}
     />
   );
 }

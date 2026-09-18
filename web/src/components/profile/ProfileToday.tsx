@@ -3,8 +3,8 @@
 import { useMemo } from "react";
 import { SourceLogo } from "@/components/SourceLogo";
 import { ModelIcon } from "./ModelIcon";
-import { cn } from "@/lib/utils";
-import { formatCurrency, formatNumber } from "@/lib/format";
+import { cn, formatDate } from "@/lib/utils";
+import { useFormat, useI18n, type TranslationKey } from "@/lib/i18n";
 import {
   createContributionClientDetails,
   getContributionDayMessageCount,
@@ -21,14 +21,14 @@ export interface ProfileTodayProps {
 
 const COMPOSITION: ReadonlyArray<{
   key: keyof TokenBreakdown;
-  label: string;
+  labelKey: TranslationKey;
   className: string;
 }> = [
-  { key: "input", label: "Input", className: "bg-chart-1" },
-  { key: "output", label: "Output", className: "bg-chart-2" },
-  { key: "cacheRead", label: "Cache read", className: "bg-chart-3" },
-  { key: "cacheWrite", label: "Cache write", className: "bg-chart-4" },
-  { key: "reasoning", label: "Reasoning", className: "bg-chart-5" },
+  { key: "input", labelKey: "graph.tokenInput", className: "bg-chart-1" },
+  { key: "output", labelKey: "graph.tokenOutput", className: "bg-chart-2" },
+  { key: "cacheRead", labelKey: "graph.tokenCacheRead", className: "bg-chart-3" },
+  { key: "cacheWrite", labelKey: "graph.tokenCacheWrite", className: "bg-chart-4" },
+  { key: "reasoning", labelKey: "graph.tokenReasoning", className: "bg-chart-5" },
 ];
 
 function Figure({ label, value }: { label: string; value: string }) {
@@ -52,6 +52,8 @@ function Figure({ label, value }: { label: string; value: string }) {
  * scrolls — a summary you have to scroll is not a summary.
  */
 export function ProfileToday({ day, isToday, className }: ProfileTodayProps) {
+  const { t, locale } = useI18n();
+  const { formatNumber, formatCurrency } = useFormat();
   const clients = useMemo(
     () => (day ? createContributionClientDetails(day) : []),
     [day]
@@ -63,7 +65,11 @@ export function ProfileToday({ day, isToday, className }: ProfileTodayProps) {
 
   // Naming a day the reader deliberately picked adds nothing — the date is
   // already there. Only today earns a word.
-  const heading = isToday ? "Today" : day?.date ?? "Day";
+  const heading = isToday
+    ? t("profile.today.today")
+    : day?.date
+      ? formatDate(day.date, locale)
+      : t("profile.today.day");
   const tokens = day?.totals.tokens ?? 0;
   const cost = day?.totals.cost ?? 0;
 
@@ -93,25 +99,25 @@ export function ProfileToday({ day, isToday, className }: ProfileTodayProps) {
   return (
     <section
       className={cn("overflow-hidden rounded-lg border bg-card", className)}
-      aria-label={`${heading} usage`}
+      aria-label={t("profile.today.aria", { heading })}
     >
       <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-2 border-b px-4 py-3 sm:px-5">
         <div className="flex items-baseline gap-3">
           <h2 className="text-sm font-semibold tracking-tight">{heading}</h2>
           {isToday && day?.date && (
-            <span className="font-mono text-xs text-muted-foreground">{day.date}</span>
+            <span className="font-mono text-xs text-muted-foreground">{formatDate(day.date, locale)}</span>
           )}
         </div>
         <div className="flex flex-wrap items-baseline gap-x-6 gap-y-1">
-          <Figure label="Tokens" value={formatNumber(tokens, true)} />
-          <Figure label="Cost" value={formatCurrency(cost, true)} />
-          <Figure label="Messages" value={formatNumber(messages, true)} />
+          <Figure label={t("profile.tokens")} value={formatNumber(tokens, true)} />
+          <Figure label={t("profile.cost")} value={formatCurrency(cost, true)} />
+          <Figure label={t("graph.messages")} value={formatNumber(messages, true)} />
         </div>
       </div>
 
       {ranked.length === 0 ? (
         <p className="px-4 py-5 text-sm text-muted-foreground sm:px-5">
-          Nothing recorded for this day yet.
+          {t("profile.today.empty")}
         </p>
       ) : (
         <>
@@ -125,7 +131,7 @@ export function ProfileToday({ day, isToday, className }: ProfileTodayProps) {
                     style={{
                       width: `${(composition.totals[part.key] / composition.sum) * 100}%`,
                     }}
-                    title={`${part.label}: ${formatNumber(composition.totals[part.key], true)}`}
+                    title={t("profile.breakdown.segmentTitle", { label: t(part.labelKey), tokens: formatNumber(composition.totals[part.key], true) })}
                   />
                 ))}
               </div>
@@ -136,7 +142,7 @@ export function ProfileToday({ day, isToday, className }: ProfileTodayProps) {
                       className={cn("size-2 rounded-full", part.className)}
                       aria-hidden="true"
                     />
-                    <dt className="text-xs text-muted-foreground">{part.label}</dt>
+                    <dt className="text-xs text-muted-foreground">{t(part.labelKey)}</dt>
                     <dd className="font-mono text-xs tabular-nums">
                       {formatNumber(composition.totals[part.key], true)}
                     </dd>
@@ -160,7 +166,7 @@ export function ProfileToday({ day, isToday, className }: ProfileTodayProps) {
                     </span>
                     <span className="flex shrink-0 items-baseline gap-3">
                       <span className="font-mono text-xs tabular-nums text-muted-foreground">
-                        {formatNumber(client.messages, true)} msg
+                        {t("profile.today.msg", { n: formatNumber(client.messages, true) })}
                       </span>
                       <span className="font-mono text-xs tabular-nums text-muted-foreground">
                         {formatCurrency(client.cost, true)}

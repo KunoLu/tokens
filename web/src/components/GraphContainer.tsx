@@ -7,16 +7,22 @@ import { getPalette } from "@/lib/themes";
 import { useSettings } from "@/lib/useSettings";
 import { filterByClient, filterByYear, recalculateIntensity, findBestDay, calculateCurrentStreak, calculateLongestStreak, resolveSelectedDay } from "@/lib/utils";
 import { TokenGraph2D } from "./TokenGraph2D";
+import { useI18n } from "@/lib/i18n";
+
+function Graph3DLoading() {
+  const { t } = useI18n();
+  return (
+    <div className="flex h-[400px] items-center justify-center text-sm text-muted-foreground">
+      {t("graph.loading3d")}
+    </div>
+  );
+}
 
 // Lazy load the isometric view (obelisk.js, drawn to a 2D canvas) — it is only
 // needed once someone switches to 3D, and it touches window on import.
 const TokenGraph3D = dynamic(() => import("./TokenGraph3D").then((mod) => mod.TokenGraph3D), {
   ssr: false,
-  loading: () => (
-    <div className="flex h-[400px] items-center justify-center text-sm text-muted-foreground">
-      Loading 3D view...
-    </div>
-  ),
+  loading: () => <Graph3DLoading />,
 });
 import { GraphControls } from "./GraphControls";
 import { Tooltip } from "./Tooltip";
@@ -75,8 +81,8 @@ export function GraphContainer({ data, totalActiveTimeMs, sessionCount, mcpServe
     if (yearContributions.length === 0) return { start: "", end: "" };
     const dates = yearContributions.filter((c) => c.totals.tokens > 0).map((c) => c.date).sort();
     return {
-      start: dates[0]?.split("-").slice(1).join("/") || "",
-      end: dates[dates.length - 1]?.split("-").slice(1).join("/") || "",
+      start: dates[0] || "",
+      end: dates[dates.length - 1] || "",
     };
   }, [yearContributions]);
 

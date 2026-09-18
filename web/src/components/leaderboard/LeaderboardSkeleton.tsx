@@ -10,6 +10,9 @@ import {
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 import { CONTAINER } from "@/components/layout/Container";
+import { MembershipColumnHeaders } from "@/components/leaderboard/MembershipCells";
+import { cookies } from "next/headers";
+import { LOCALE_COOKIE, parseLocale, t } from "@/lib/i18n";
 
 /**
  * The Suspense fallback for /leaderboard.
@@ -49,8 +52,22 @@ function SkeletonRow() {
             <span className="flex h-[15px] items-center">
               <Skeleton className="h-3 w-20" />
             </span>
+            <span className="mt-0.5 flex h-[15px] items-center gap-1 sm:hidden">
+              <Skeleton className="h-3 w-12" />
+              <Skeleton className="h-3 w-10" />
+            </span>
           </div>
         </div>
+      </TableCell>
+      <TableCell className="hidden max-w-[9rem] sm:table-cell">
+        <span className="flex h-5 items-center">
+          <Skeleton className="h-3.5 w-16" />
+        </span>
+      </TableCell>
+      <TableCell className="hidden max-w-[9rem] sm:table-cell">
+        <span className="flex h-5 items-center">
+          <Skeleton className="h-3.5 w-14" />
+        </span>
       </TableCell>
 
       <TableCell className="py-3 pr-4 sm:hidden">
@@ -80,7 +97,7 @@ function SkeletonRow() {
   );
 }
 
-export function LeaderboardSkeleton({
+export async function LeaderboardSkeleton({
   /**
    * Whether the loaded page will render its "Your position" block — it does for
    * anyone signed in. Omitting it here was worth ~70px of shift on every
@@ -90,6 +107,7 @@ export function LeaderboardSkeleton({
 }: {
   showUserRank?: boolean;
 }) {
+  const locale = parseLocale((await cookies()).get(LOCALE_COOKIE)?.value);
   return (
     <div className={cn(CONTAINER, "pb-24 pt-10 sm:pt-14")}>
       {/* PageHeader. The title and description are known before the data is,
@@ -142,7 +160,7 @@ export function LeaderboardSkeleton({
           {/* The label is a permanent string in the loaded page, so it renders
               as itself — same reasoning as the column headings below. */}
           <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-            Your position
+            {t(locale, "leaderboard.yourPosition")}
           </span>
           <div className="mt-1.5 overflow-hidden rounded-lg border">
             <Table>
@@ -162,13 +180,17 @@ export function LeaderboardSkeleton({
                 never was. */}
             <TableRow className="hover:bg-transparent">
               <TableHead className="w-12 pl-4 sm:pl-6">#</TableHead>
-              <TableHead>Developer</TableHead>
-              <TableHead className="pr-4 text-right sm:hidden">Usage</TableHead>
+              <TableHead>{t(locale, "leaderboard.colDeveloper")}</TableHead>
+              <MembershipColumnHeaders
+                teamLabel={t(locale, "leaderboard.colTeam")}
+                groupLabel={t(locale, "teamboard.colGroup")}
+              />
+              <TableHead className="pr-4 text-right sm:hidden">{t(locale, "teamboard.colUsage")}</TableHead>
               <TableHead className="hidden w-44 px-2 py-2 text-right sm:table-cell">
-                Tokens
+                {t(locale, "leaderboard.colTokens")}
               </TableHead>
               <TableHead className="hidden w-32 pr-6 text-right sm:table-cell">
-                Cost
+                {t(locale, "leaderboard.colCost")}
               </TableHead>
             </TableRow>
           </TableHeader>

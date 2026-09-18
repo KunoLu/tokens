@@ -11,6 +11,7 @@ import type {
   EmbedTodayUsage,
 } from "./getUserEmbedStats";
 import { formatNumber, formatCurrency } from "../format";
+import { SITE_HOST } from "../site";
 import {
   type EmbedTheme,
   type EmbedColorName,
@@ -168,7 +169,7 @@ export function renderPulseEmbedSvg(
 
   // Footer.
   add(`  <text x="${PAD}" y="${footerY}" fill="${palette.muted}" font-size="11" font-family="${FIGTREE_FONT_STACK}">Daily Claude usage · ${layout.activeDays} active days · ${updated}</text>`);
-  add(`  <text x="${W - PAD}" y="${footerY}" text-anchor="end" fill="${palette.muted}" font-size="11" font-family="${FIGTREE_FONT_STACK}">tokens.ci/u/${escapeXml(data.user.username)}</text>`);
+  add(`  <text x="${W - PAD}" y="${footerY}" text-anchor="end" fill="${palette.muted}" font-size="11" font-family="${FIGTREE_FONT_STACK}">${SITE_HOST}/u/${escapeXml(data.user.username)}</text>`);
   add(`</svg>`);
 
   return parts.join("\n");

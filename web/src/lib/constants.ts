@@ -16,10 +16,6 @@ export const MIN_CUBE_HEIGHT = 3;
 export const ISO_CANVAS_WIDTH = 1000;
 export const ISO_CANVAS_HEIGHT = 600;
 
-// Labels
-export const DAY_LABELS_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-export const MONTH_LABELS_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-
 // Source configuration
 export const SOURCE_DISPLAY_NAMES: Record<ClientType, string> = {
   opencode: "OpenCode",

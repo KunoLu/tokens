@@ -6,10 +6,12 @@ import { KeyIcon } from "lucide-react";
 import { toast } from "react-toastify";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
+import { avatarUrlFor } from "@/lib/avatar";
 import { deviceDisplayLabel } from "@/lib/devices/shared";
 import { tw } from "@/lib/tw";
 import { cn, formatNumber, formatCurrency } from "@/lib/utils";
-import { formatRelativeTime } from "@/lib/format";
+import { formatRelativeTime } from "@/lib/formatRelativeTime";
+import { intlTag, useI18n, type Translate } from "@/lib/i18n";
 
 interface User {
   id: string;
@@ -51,12 +53,12 @@ interface SettingsDevice {
 const DEVICE_NAME_MAX_LENGTH = 120;
 const DEVICE_NAME_CONTROL_CHARS = /\p{C}/u;
 
-function validateDeviceName(name: string): string | null {
+function validateDeviceName(name: string, t: Translate): string | null {
   if (name.length > DEVICE_NAME_MAX_LENGTH) {
-    return `Device name must be ${DEVICE_NAME_MAX_LENGTH} characters or fewer`;
+    return t("settings.devices.nameTooLong", { max: DEVICE_NAME_MAX_LENGTH });
   }
   if (DEVICE_NAME_CONTROL_CHARS.test(name)) {
-    return "Device name must not contain control characters";
+    return t("settings.devices.nameControl");
   }
   return null;
 }
@@ -401,81 +403,83 @@ interface ConfirmationConfig {
   onConfirm: () => Promise<void>;
 }
 
-const CONFIRMATION_CONFIGS: Record<DangerAction, ConfirmationConfig> = {
-  "delete-data": {
-    title: "Delete submitted data",
-    steps: [
-      {
-        body: (
-          <>
-            <ModalBody>This will permanently remove all submitted usage data from your account:</ModalBody>
-            <ModalBulletList>
-              <li>Leaderboard entries</li>
-              <li>Public profile stats</li>
-              <li>Daily usage history</li>
-            </ModalBulletList>
-            <ModalBody style={{ marginBottom: 0 }}>
-              Your account and API tokens will remain active. You can submit new data at any time.
+function confirmationConfigs(t: Translate): Record<DangerAction, ConfirmationConfig> {
+  return {
+    "delete-data": {
+      title: t("settings.danger.deleteDataTitle"),
+      steps: [
+        {
+          body: (
+            <>
+              <ModalBody>{t("settings.danger.dataStep1")}</ModalBody>
+              <ModalBulletList>
+                <li>{t("settings.danger.dataBullet1")}</li>
+                <li>{t("settings.danger.dataBullet2")}</li>
+                <li>{t("settings.danger.dataBullet3")}</li>
+              </ModalBulletList>
+              <ModalBody style={{ marginBottom: 0 }}>
+                {t("settings.danger.dataStep1End")}
+              </ModalBody>
+            </>
+          ),
+          confirmLabel: t("settings.danger.dataConfirm"),
+        },
+        {
+          body: (
+            <ModalBody>
+              {t("settings.danger.dataStep2A")}{" "}
+              <strong>{t("settings.danger.dataStep2B")}</strong>
+              {t("settings.danger.dataStep2C")}
             </ModalBody>
-          </>
-        ),
-        confirmLabel: "I want to delete my data",
+          ),
+          confirmLabel: t("settings.danger.continue"),
+        },
+      ],
+      typedConfirmation: t("settings.danger.dataTyped"),
+      onConfirm: async () => {
+        const res = await fetch("/api/settings/submitted-data", { method: "DELETE" });
+        if (!res.ok) throw new Error(t("settings.danger.dataFailedToast"));
       },
-      {
-        body: (
-          <ModalBody>
-            This action <strong>cannot be undone</strong>. All your historical
-            token usage and cost data will be permanently erased from the
-            leaderboard and your public profile.
-          </ModalBody>
-        ),
-        confirmLabel: "I understand, continue",
-      },
-    ],
-    typedConfirmation: "delete my data",
-    onConfirm: async () => {
-      const res = await fetch("/api/settings/submitted-data", { method: "DELETE" });
-      if (!res.ok) throw new Error("Failed to delete submitted data");
     },
-  },
-  "delete-account": {
-    title: "Delete account",
-    steps: [
-      {
-        body: (
-          <>
-            <ModalBody>This will permanently delete your entire account and all associated data:</ModalBody>
-            <ModalBulletList>
-              <li>User profile</li>
-              <li>All submitted usage data</li>
-              <li>Leaderboard entries</li>
-              <li>API tokens and active sessions</li>
-            </ModalBulletList>
-            <ModalBody style={{ marginBottom: 0 }}>
-              You will be signed out immediately. This cannot be reversed.
+    "delete-account": {
+      title: t("settings.danger.deleteAccountTitle"),
+      steps: [
+        {
+          body: (
+            <>
+              <ModalBody>{t("settings.danger.accountStep1")}</ModalBody>
+              <ModalBulletList>
+                <li>{t("settings.danger.accountBullet1")}</li>
+                <li>{t("settings.danger.accountBullet2")}</li>
+                <li>{t("settings.danger.accountBullet3")}</li>
+                <li>{t("settings.danger.accountBullet4")}</li>
+              </ModalBulletList>
+              <ModalBody style={{ marginBottom: 0 }}>
+                {t("settings.danger.accountStep1End")}
+              </ModalBody>
+            </>
+          ),
+          confirmLabel: t("settings.danger.accountConfirm"),
+        },
+        {
+          body: (
+            <ModalBody>
+              {t("settings.danger.accountStep2A")}{" "}
+              <strong>{t("settings.danger.accountStep2B")}</strong>
+              {t("settings.danger.accountStep2C")}
             </ModalBody>
-          </>
-        ),
-        confirmLabel: "I want to delete my account",
+          ),
+          confirmLabel: t("settings.danger.continue"),
+        },
+      ],
+      typedConfirmation: t("settings.danger.accountTyped"),
+      onConfirm: async () => {
+        const res = await fetch("/api/settings/account", { method: "DELETE" });
+        if (!res.ok) throw new Error(t("settings.danger.accountFailedToast"));
       },
-      {
-        body: (
-          <ModalBody>
-            This action is <strong>permanent and irreversible</strong>. Your
-            username will become available for others to register. All your data
-            — submissions, tokens, sessions — will be wiped.
-          </ModalBody>
-        ),
-        confirmLabel: "I understand, continue",
-      },
-    ],
-    typedConfirmation: "delete my account",
-    onConfirm: async () => {
-      const res = await fetch("/api/settings/account", { method: "DELETE" });
-      if (!res.ok) throw new Error("Failed to delete account");
     },
-  },
-};
+  };
+}
 
 function DangerConfirmationModal({
   action,
@@ -486,7 +490,8 @@ function DangerConfirmationModal({
   onClose: () => void;
   onSuccess: () => void;
 }) {
-  const config = CONFIRMATION_CONFIGS[action];
+  const { t } = useI18n();
+  const config = confirmationConfigs(t)[action];
   const totalSteps = config.steps.length + 1; // +1 for typed confirmation step
   const titleId = useId();
   const [step, setStep] = useState(0);
@@ -505,14 +510,16 @@ function DangerConfirmationModal({
         onSuccess();
       } catch {
         toast.error(
-          `Failed to ${action === "delete-data" ? "delete submitted data" : "delete account"}. Please try again.`
+          action === "delete-data"
+            ? t("settings.danger.dataFailedToast")
+            : t("settings.danger.accountFailedToast")
         );
         setIsSubmitting(false);
       }
     } else {
       setStep((s) => s + 1);
     }
-  }, [isTypedStep, typedMatch, isSubmitting, config, onSuccess, action]);
+  }, [isTypedStep, typedMatch, isSubmitting, config, onSuccess, action, t]);
 
   return (
     <ModalShell
@@ -531,7 +538,9 @@ function DangerConfirmationModal({
       {isTypedStep ? (
         <>
           <ModalBody>
-            Type <strong>{config.typedConfirmation}</strong> to confirm:
+            {t("settings.danger.typePrefix")}{" "}
+            <strong>{config.typedConfirmation}</strong>{" "}
+            {t("settings.danger.typeSuffix")}
           </ModalBody>
           <ModalInput
             autoFocus
@@ -551,7 +560,7 @@ function DangerConfirmationModal({
 
       <ModalActions>
         <CancelButton onClick={onClose} disabled={isSubmitting}>
-          Cancel
+          {t("settings.cancel")}
         </CancelButton>
         <ConfirmDangerButton
           $disabled={isTypedStep ? !typedMatch : false}
@@ -559,9 +568,9 @@ function DangerConfirmationModal({
           onClick={handleConfirm}
         >
           {isSubmitting
-            ? "Deleting..."
+            ? t("settings.danger.deleting")
             : isTypedStep
-              ? config.steps[config.steps.length - 1].confirmLabel.replace("I understand, continue", "Delete permanently")
+              ? t("settings.danger.deletePermanently")
               : config.steps[step].confirmLabel}
         </ConfirmDangerButton>
       </ModalActions>
@@ -584,6 +593,7 @@ function RevokeTokenModal({
   onConfirm: () => Promise<void>;
 }) {
   const titleId = useId();
+  const { t } = useI18n();
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleConfirm = async () => {
@@ -602,18 +612,18 @@ function RevokeTokenModal({
       dismissable={!isSubmitting}
       onClose={onClose}
     >
-      <ModalTitle id={titleId}>⚠ Revoke token</ModalTitle>
+      <ModalTitle id={titleId}>⚠ {t("settings.tokens.revokeTitle")}</ModalTitle>
       <ModalBody>
-        <strong>{token.name}</strong> will stop working immediately. Anything
-        submitting with it — CI, a machine running <code>tokens serve</code> —
-        will start failing until it is given a new token.
+        <strong>{token.name}</strong> {t("settings.tokens.revokeBodyA")}{" "}
+        <code>tokens serve</code>{" "}
+        {t("settings.tokens.revokeBodyB")}
       </ModalBody>
       <ModalActions>
         <CancelButton onClick={onClose} disabled={isSubmitting}>
-          Cancel
+          {t("settings.cancel")}
         </CancelButton>
         <ConfirmDangerButton disabled={isSubmitting} onClick={handleConfirm}>
-          {isSubmitting ? "Revoking..." : "Revoke token"}
+          {isSubmitting ? t("settings.tokens.revoking") : t("settings.tokens.revokeTitle")}
         </ConfirmDangerButton>
       </ModalActions>
     </ModalShell>
@@ -669,13 +679,14 @@ async function fetchDevices(username: string): Promise<SettingsDevice[]> {
 
 export default function SettingsClient() {
   const router = useRouter();
+  const { t, locale } = useI18n();
   const createTokenErrorId = useId();
   const deviceErrorId = useId();
   const [user, setUser] = useState<User | null>(null);
   const [tokens, setTokens] = useState<ApiToken[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [dangerAction, setDangerAction] = useState<DangerAction | null>(null);
-  const [tokenName, setTokenName] = useState("CI token");
+  const [tokenName, setTokenName] = useState(t("settings.tokens.defaultName"));
   const [createdToken, setCreatedToken] = useState<CreatedApiToken | null>(null);
   const [isCreatingToken, setIsCreatingToken] = useState(false);
   const [createTokenError, setCreateTokenError] = useState<string | null>(null);
@@ -720,7 +731,7 @@ export default function SettingsClient() {
         if (cancelled) return;
 
         if (!sessionData.user) {
-          router.push("/api/auth/github?returnTo=/settings");
+          router.push("/login?returnTo=/settings");
           return;
         }
 
@@ -754,9 +765,9 @@ export default function SettingsClient() {
 
       setTokens((current) => current.filter((t) => t.id !== token.id));
       setRevokingToken(null);
-      toast.success(`Revoked "${token.name}"`);
+      toast.success(t("settings.tokens.revoked", { name: token.name }));
     } catch {
-      toast.error("Failed to revoke token. Please try again.");
+      toast.error(t("settings.tokens.revokeError"));
     } finally {
       setRevokingTokenId(null);
     }
@@ -769,9 +780,9 @@ export default function SettingsClient() {
     } else {
       // Data deleted — close modal and stay.
       setDangerAction(null);
-      toast.success("Submitted data has been deleted.");
+      toast.success(t("settings.danger.dataDeleted"));
     }
-  }, [dangerAction]);
+  }, [dangerAction, t]);
 
   const handleCreateToken = async () => {
     setIsCreatingToken(true);
@@ -786,7 +797,7 @@ export default function SettingsClient() {
 
       const data = await response.json();
       if (!response.ok || !data.token) {
-        throw new Error(data.error || "Failed to create token");
+        throw new Error(data.error || t("settings.tokens.createError"));
       }
 
       setCreatedToken(data.token);
@@ -794,7 +805,7 @@ export default function SettingsClient() {
         prependApiToken(current, apiTokenListItem(data.token))
       );
     } catch (error) {
-      setCreateTokenError(error instanceof Error ? error.message : "Failed to create token");
+      setCreateTokenError(error instanceof Error ? error.message : t("settings.tokens.createError"));
     } finally {
       setIsCreatingToken(false);
     }
@@ -817,7 +828,7 @@ export default function SettingsClient() {
 
   const handleSaveDeviceName = async (device: SettingsDevice) => {
     const trimmed = editingDeviceName.trim();
-    const validationError = validateDeviceName(trimmed);
+    const validationError = validateDeviceName(trimmed, t);
     if (validationError) {
       setDeviceError(validationError);
       return;
@@ -837,7 +848,7 @@ export default function SettingsClient() {
 
       const data = await response.json();
       if (!response.ok || !data.device) {
-        throw new Error(data.error || "Failed to rename device");
+        throw new Error(data.error || t("settings.devices.renameFailed"));
       }
 
       setDevices((current) =>
@@ -858,7 +869,7 @@ export default function SettingsClient() {
       setEditingDeviceName("");
     } catch (error) {
       setDeviceError(
-        error instanceof Error ? error.message : "Failed to rename device"
+        error instanceof Error ? error.message : t("settings.devices.renameFailed")
       );
     } finally {
       setIsSavingDeviceName(false);
@@ -882,7 +893,7 @@ export default function SettingsClient() {
     // full-height wrapper, so arriving content jumped a whole viewport.
     return (
       <PageWrapper style={{ backgroundColor: "var(--background)" }}>
-        <MainContent aria-busy="true" aria-label="Loading settings">
+        <MainContent aria-busy="true" aria-label={t("settings.loadingAria")}>
           <Skeleton className="h-8 w-40 sm:h-9" />
           <Skeleton className="mb-7 mt-1.5 h-5 w-full max-w-[28rem]" />
           {[0, 1, 2].map((section) => (
@@ -905,17 +916,17 @@ export default function SettingsClient() {
     <PageWrapper style={{ backgroundColor: "var(--background)" }}>
       <MainContent>
         <Title style={{ color: "var(--foreground)" }}>
-          Settings
+          {t("settings.title")}
         </Title>
-        <Subtitle>Manage your profile, API tokens, devices, and submitted data.</Subtitle>
+        <Subtitle>{t("settings.desc")}</Subtitle>
 
         <Section>
           <SectionTitle style={{ color: "var(--foreground)" }}>
-            Profile
+            {t("nav.profile")}
           </SectionTitle>
           <ProfileWrapper>
             <AvatarImg
-              src={user.avatarUrl || `https://github.com/${user.username}.png`}
+              src={avatarUrlFor(user)}
               alt={user.username}
               width={64}
               height={64}
@@ -935,29 +946,29 @@ export default function SettingsClient() {
             </div>
           </ProfileWrapper>
           <InfoBanner style={{ marginTop: 16 }}>
-            Profile information is synced from GitHub and cannot be edited here.
+            {t("settings.profileLocked")}
           </InfoBanner>
         </Section>
 
         <Section>
           <SectionTitle style={{ color: "var(--foreground)" }}>
-            API Tokens
+            {t("settings.tokens.title")}
           </SectionTitle>
           <Description style={{ color: "var(--muted-foreground)" }}>
-            Create a token for CI or use one generated by{" "}
+            {t("settings.tokens.descA")}{" "}
             <CodeText
               style={{ backgroundColor: "var(--muted)" }}
             >
               tokens login
             </CodeText>{" "}
-            from the CLI.
+            {t("settings.tokens.descB")}
           </Description>
 
           <FieldLabel
             htmlFor="token-name"
             style={{ color: "var(--foreground)" }}
           >
-            Token name
+            {t("settings.tokens.name")}
           </FieldLabel>
           <ActionRow>
             <TextInput
@@ -973,7 +984,7 @@ export default function SettingsClient() {
               disabled={isCreatingToken}
               onClick={handleCreateToken}
             >
-              {isCreatingToken ? "Creating..." : "Create token"}
+              {isCreatingToken ? t("settings.tokens.creating") : t("settings.tokens.create")}
             </PrimaryButton>
           </ActionRow>
 
@@ -983,7 +994,7 @@ export default function SettingsClient() {
               variant="destructive"
               className="mb-4"
             >
-              <AlertTitle>Could not create the token</AlertTitle>
+              <AlertTitle>{t("settings.tokens.createFailed")}</AlertTitle>
               <AlertDescription>{createTokenError}</AlertDescription>
             </Alert>
           )}
@@ -991,14 +1002,14 @@ export default function SettingsClient() {
           {createdToken && (
             <TokenReveal>
               <SmallText style={{ color: "var(--foreground)", fontWeight: 600 }}>
-                Copy this token now. It will not be shown again.
+                {t("settings.tokens.copyNow")}
               </SmallText>
               <TokenCodeRow>
                 <TokenCode style={{ color: "var(--foreground)" }}>
                   {createdToken.token}
                 </TokenCode>
                 <SecondaryButton type="button" onClick={handleCopyCreatedToken}>
-                  Copy
+                  {t("settings.tokens.copy")}
                 </SecondaryButton>
               </TokenCodeRow>
             </TokenReveal>
@@ -1006,16 +1017,15 @@ export default function SettingsClient() {
 
           {tokensLoadFailed ? (
             <Alert variant="destructive">
-              <AlertTitle>Could not load your API tokens</AlertTitle>
+              <AlertTitle>{t("settings.tokens.loadFailedTitle")}</AlertTitle>
               <AlertDescription>
-                Your tokens are still there — this page just could not reach the
-                server.{" "}
+                {t("settings.tokens.loadFailedBody")}{" "}
                 <SecondaryButton
                   type="button"
                   className="ml-1 h-7 px-2 text-xs"
                   onClick={loadTokens}
                 >
-                  Try again
+                  {t("error.retry")}
                 </SecondaryButton>
               </AlertDescription>
             </Alert>
@@ -1024,15 +1034,15 @@ export default function SettingsClient() {
               <EmptyIcon>
                 <KeyIcon size={32} />
               </EmptyIcon>
-              <p>No API tokens yet.</p>
+              <p>{t("settings.tokens.empty")}</p>
               <EmptyText>
-                Create one here or run{" "}
+                {t("settings.tokens.emptyHintA")}{" "}
                 <CodeText
                   style={{ backgroundColor: "var(--muted)" }}
                 >
                   tokens login
                 </CodeText>{" "}
-                from the CLI.
+                {t("settings.tokens.descB")}
               </EmptyText>
             </EmptyState>
           ) : (
@@ -1048,10 +1058,9 @@ export default function SettingsClient() {
                         {token.name}
                       </TokenName>
                       <SmallText style={{ color: "var(--muted-foreground)" }}>
-                        Created {new Date(token.createdAt).toLocaleDateString()}
-                        {token.lastUsedAt && (
-                          <> - Last used {new Date(token.lastUsedAt).toLocaleDateString()}</>
-                        )}
+                        {t("settings.tokens.created", { date: new Date(token.createdAt).toLocaleDateString(intlTag(locale)) })}
+                        {token.lastUsedAt &&
+                          t("settings.tokens.lastUsed", { date: new Date(token.lastUsedAt).toLocaleDateString(intlTag(locale)) })}
                       </SmallText>
                     </div>
                   </TokenInfo>
@@ -1061,7 +1070,7 @@ export default function SettingsClient() {
                     className="disabled:cursor-not-allowed disabled:opacity-60"
                     onClick={() => setRevokingToken(token)}
                   >
-                    {revokingTokenId === token.id ? "Revoking..." : "Revoke"}
+                    {revokingTokenId === token.id ? t("settings.tokens.revoking") : t("settings.tokens.revoke")}
                   </DangerButton>
                 </TokenItem>
               ))}
@@ -1071,46 +1080,44 @@ export default function SettingsClient() {
 
         <Section>
           <SectionTitle style={{ color: "var(--foreground)" }}>
-            Devices
+            {t("settings.devices.title")}
           </SectionTitle>
           <Description style={{ color: "var(--muted-foreground)" }}>
-            Machines that have submitted usage data. Rename a device to tell
-            your machines apart — the name is shown on your public profile.
+            {t("settings.devices.desc")}
           </Description>
 
           {deviceError && (
             <Alert id={deviceErrorId} variant="destructive" className="mb-4">
-              <AlertTitle>Could not rename the device</AlertTitle>
+              <AlertTitle>{t("settings.devices.renameFailedTitle")}</AlertTitle>
               <AlertDescription>{deviceError}</AlertDescription>
             </Alert>
           )}
 
           {devicesLoadFailed ? (
             <Alert variant="destructive">
-              <AlertTitle>Could not load your devices</AlertTitle>
+              <AlertTitle>{t("settings.devices.loadFailedTitle")}</AlertTitle>
               <AlertDescription>
-                Your devices are still registered — this page just could not
-                reach the server.{" "}
+                {t("settings.devices.loadFailedBody")}{" "}
                 <SecondaryButton
                   type="button"
                   className="ml-1 h-7 px-2 text-xs"
                   onClick={() => user && loadDevices(user.username)}
                 >
-                  Try again
+                  {t("error.retry")}
                 </SecondaryButton>
               </AlertDescription>
             </Alert>
           ) : devices.length === 0 ? (
             <EmptyState style={{ color: "var(--muted-foreground)" }}>
-              <p>No devices yet.</p>
+              <p>{t("settings.devices.empty")}</p>
               <EmptyText>
-                Run{" "}
+                {t("settings.devices.emptyHintA")}{" "}
                 <CodeText
                   style={{ backgroundColor: "var(--muted)" }}
                 >
                   bunx tokens-cli submit
                 </CodeText>{" "}
-                to register this machine.
+                {t("settings.devices.emptyHintB")}
               </EmptyText>
             </EmptyState>
           ) : (
@@ -1120,10 +1127,10 @@ export default function SettingsClient() {
                   {editingDeviceId === device.id ? (
                     <DeviceEditRow>
                       <TextInput
-                        aria-label="Device name"
+                        aria-label={t("settings.devices.nameAria")}
                         value={editingDeviceName}
                         maxLength={DEVICE_NAME_MAX_LENGTH}
-                        placeholder="Device name (empty to reset)"
+                        placeholder={t("settings.devices.placeholder")}
                         autoFocus
                         disabled={isSavingDeviceName}
                         aria-invalid={deviceError ? true : undefined}
@@ -1145,14 +1152,14 @@ export default function SettingsClient() {
                         disabled={isSavingDeviceName}
                         onClick={() => handleSaveDeviceName(device)}
                       >
-                        {isSavingDeviceName ? "Saving..." : "Save"}
+                        {isSavingDeviceName ? t("settings.devices.saving") : t("settings.devices.save")}
                       </PrimaryButton>
                       <SecondaryButton
                         type="button"
                         disabled={isSavingDeviceName}
                         onClick={cancelEditingDevice}
                       >
-                        Cancel
+                        {t("settings.cancel")}
                       </SecondaryButton>
                     </DeviceEditRow>
                   ) : (
@@ -1163,14 +1170,15 @@ export default function SettingsClient() {
                             {device.displayName}
                           </TokenName>
                           <SmallText style={{ color: "var(--muted-foreground)" }}>
-                            {formatNumber(device.totalTokens)} tokens
+                            {t("settings.devices.tokens", { n: formatNumber(device.totalTokens, locale) })}
                             {" · "}
-                            {formatCurrency(device.totalCost)}
+                            {formatCurrency(device.totalCost, locale)}
                             {" · "}
-                            {device.activeDays} active{" "}
-                            {device.activeDays === 1 ? "day" : "days"}
+                            {device.activeDays === 1
+                              ? t("settings.devices.activeDay", { n: device.activeDays })
+                              : t("settings.devices.activeDays", { n: device.activeDays })}
                             {" · "}
-                            Last submit {formatRelativeTime(device.lastSubmittedAt)}
+                            {t("settings.devices.lastSubmit", { time: formatRelativeTime(device.lastSubmittedAt, undefined, locale) })}
                           </SmallText>
                         </div>
                       </TokenInfo>
@@ -1178,7 +1186,7 @@ export default function SettingsClient() {
                         type="button"
                         onClick={() => startEditingDevice(device)}
                       >
-                        Rename
+                        {t("settings.devices.rename")}
                       </SecondaryButton>
                     </>
                   )}
@@ -1190,32 +1198,30 @@ export default function SettingsClient() {
 
         <DangerSection>
           <DangerSectionTitle>
-            Danger Zone
+            {t("settings.danger.title")}
           </DangerSectionTitle>
 
           <DangerActionRow>
             <DangerActionInfo>
-              <DangerActionTitle>Delete submitted data</DangerActionTitle>
+              <DangerActionTitle>{t("settings.danger.deleteDataTitle")}</DangerActionTitle>
               <DangerActionDescription>
-                Remove all leaderboard entries, profile stats, and usage
-                history. Your account and API tokens stay active.
+                {t("settings.danger.deleteDataDesc")}
               </DangerActionDescription>
             </DangerActionInfo>
             <DangerActionButton onClick={() => setDangerAction("delete-data")}>
-              Delete data
+              {t("settings.danger.deleteDataButton")}
             </DangerActionButton>
           </DangerActionRow>
 
           <DangerActionRow>
             <DangerActionInfo>
-              <DangerActionTitle>Delete account</DangerActionTitle>
+              <DangerActionTitle>{t("settings.danger.deleteAccountTitle")}</DangerActionTitle>
               <DangerActionDescription>
-                Permanently delete your account and all associated data. This
-                action is irreversible.
+                {t("settings.danger.deleteAccountDesc")}
               </DangerActionDescription>
             </DangerActionInfo>
             <DangerActionButton onClick={() => setDangerAction("delete-account")}>
-              Delete account
+              {t("settings.danger.deleteAccountButton")}
             </DangerActionButton>
           </DangerActionRow>
         </DangerSection>

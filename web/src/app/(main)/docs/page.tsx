@@ -1,9 +1,4 @@
 import type { Metadata } from "next";
-import { LayoutGridIcon, LockIcon, Share2Icon } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { CommandBlock, type DocCommand } from "@/components/docs/CommandBlock";
 import { BrandGlyph } from "@/components/profile/ModelIcon";
@@ -15,20 +10,24 @@ import {
   SUPPORTED_CLIENTS,
 } from "@/lib/constants";
 import { PageHeader } from "@/components/layout/PageHeader";
+import { LOCALE_COOKIE, parseLocale, t, type Locale, type TranslationKey } from "@/lib/i18n";
+import { cookies } from "next/headers";
 import { cn } from "@/lib/utils";
+import { SITE_URL } from "@/lib/site";
+import { SCRIPTS_RAW_BASE, SCRIPTS_BLOB_BASE } from "@/lib/scriptsRef";
+
 
 export const metadata: Metadata = {
   title: "Docs - Tokens",
-  description:
-    "Install the Tokens CLI on macOS, Linux or Windows, and get the iOS app on TestFlight.",
+  description: "Install the Tokens CLI on macOS, Linux or Windows.",
   openGraph: {
     title: "Docs — Tokens",
-    description: "Install the Tokens CLI, or get the iOS app.",
-    url: "https://tokens.ci",
+    description: "Install the Tokens CLI.",
+    url: `${SITE_URL}/docs`,
     siteName: "Tokens",
     images: [
       {
-        url: `/api/og?title=Docs&subtitle=Install+the+Tokens+CLI,+or+get+the+iOS+app.`,
+        url: `/api/og?title=Docs&subtitle=Install+the+Tokens+CLI.`,
         width: 1200,
         height: 630,
       },
@@ -36,8 +35,6 @@ export const metadata: Metadata = {
   },
   twitter: { card: "summary_large_image" },
 };
-
-const TESTFLIGHT_URL = "https://testflight.apple.com/join/NWmvqqTX";
 
 /**
  * What the Supported clients grid renders.
@@ -57,22 +54,46 @@ const CLIENT_GRID: ReadonlyArray<{ id: string; name: string; logo: string }> = [
   { id: "orca", name: "Orca", logo: "/clients/client-orca.png" },
 ].sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
 
-const MACOS: readonly DocCommand[] = [
-  { command: BREW_INSTALL_COMMAND, note: "install" },
-  { command: "tokens login", note: "link your GitHub account" },
-  { command: "brew services start tokens", note: "submit automatically" },
-];
+// Commands stay literal; the notes beside them are dictionary keys resolved
+// at render, so the arrays keep working as plain module constants.
+const MACOS = [
+  { command: BREW_INSTALL_COMMAND, note: "docs.note.install" },
+  { command: "tokens login", note: "docs.note.signIn" },
+  // brew services start tokens would bypass the shell alias and submit
+  // upstream; serve in the foreground honors TOKENS_API_URL.
+  { command: "tokens serve", note: "docs.note.submitAuto" },
+] as const;
 
-const LINUX: readonly DocCommand[] = [
-  { command: "curl -fsSL https://tokens.ci/install.sh | sh", note: "install" },
-  { command: "tokens login", note: "link your GitHub account" },
-  { command: "tokens serve", note: "submit automatically" },
-];
+// URL-bearing rows are computed in the component from the site origin so the
+// docs page always points at the deployment it is served from.
+const LINUX = [
+  { command: "tokens login", note: "docs.note.signIn" },
+  { command: "tokens serve", note: "docs.note.submitAuto" },
+] as const;
 
-const WINDOWS: readonly DocCommand[] = [
-  { command: "bunx tokens-cli@latest login", note: "link your GitHub account" },
-  { command: "bunx tokens-cli@latest submit", note: "submit your usage" },
-];
+
+const WINDOWS = [
+  { command: "tokens login", note: "docs.note.signIn" },
+  { command: "tokens submit", note: "docs.note.submitUsage" },
+] as const;
+
+const EVERYDAY = [
+  { command: "tokens login", note: "docs.note.authenticate" },
+  { command: "tokens submit", note: "docs.note.sendNow" },
+  { command: "tokens serve", note: "docs.note.keepSubmitting" },
+  { command: "tokens status", note: "docs.note.whatSubmitted" },
+  { command: "tokens help", note: "docs.note.everythingElse" },
+] as const;
+
+function localize(
+  locale: Locale,
+  commands: ReadonlyArray<{ command: string; note: TranslationKey }>
+): DocCommand[] {
+  return commands.map(({ command, note }) => ({
+    command,
+    note: t(locale, note),
+  }));
+}
 
 /**
  * Platform marks. Apple and Microsoft come from the shared brand set so they
@@ -127,39 +148,21 @@ function Section({
   );
 }
 
-function Feature({
-  icon: Icon,
-  title,
-  children,
-}: {
-  icon: React.ComponentType<{ className?: string }>;
-  title: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="flex gap-3">
-      <Icon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
-      <div className="flex flex-col gap-1">
-        <span className="text-sm font-medium">{title}</span>
-        <span className="text-sm leading-relaxed text-muted-foreground">
-          {children}
-        </span>
-      </div>
-    </div>
-  );
-}
+export default async function DocsPage() {
+  const locale = parseLocale((await cookies()).get(LOCALE_COOKIE)?.value);
+  // The install commands must point at the site serving this page.
+  const siteUrl = SITE_URL;
+  // Pre-install scripts execute straight from this repo's public GitHub at an
+  // immutable ref — a release tag or the pinned commit fallback, never a moving
+  // branch. Resolution (env override, release-advanced constant) lives in
+  // @/lib/scriptsRef.
+  const preinstallRaw = SCRIPTS_RAW_BASE;
+  const preinstallSh = `curl -fsSL ${preinstallRaw}/pre-install-tokens.sh | bash -s -- ${siteUrl}`;
+  const preinstallPs1 = `iex "& { $(irm ${preinstallRaw}/pre-install-tokens.ps1) } -Site ${siteUrl}"`;
+  // Resident-submission setup, served from this site like install.sh.
+  const enableServiceSh = `curl -fsSL ${siteUrl}/enable-tokens-service.sh | bash -s -- ${siteUrl}`;
+  const registerTaskPs1 = `iex "& { $(irm ${siteUrl}/register-tokens-submit-task.ps1) } -Site ${siteUrl}"`;
 
-/** Apple's mark. lucide's `AppleIcon` is the fruit, which is not the same
- *  thing and reads as a mistake next to "TestFlight". */
-function AppleMark(props: React.SVGProps<SVGSVGElement>) {
-  return (
-    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" {...props}>
-      <path d="M11.932 6.908c.95 0 2.727-1.291 4.595-1.1.782.032 2.976.316 4.388 2.38-.113.069-2.622 1.528-2.593 4.565.034 3.617 3.166 4.828 3.221 4.85-.029.086-.506 1.723-1.658 3.416-1.002 1.463-2.039 2.919-3.675 2.95-1.606.03-2.125-.955-3.96-.955s-2.409.923-3.931.984c-1.581.06-2.78-1.58-3.79-3.037-2.065-2.98-3.64-8.422-1.527-12.087 1.051-1.824 2.93-2.98 4.969-3.009 1.549-.032 3.011 1.043 3.96 1.043zM16.552 0c.153 1.407-.411 2.817-1.251 3.833-.837 1.013-2.214 1.804-3.555 1.7-.185-1.378.495-2.814 1.27-3.712C13.883.805 15.346.05 16.553 0z" />
-    </svg>
-  );
-}
-
-export default function DocsPage() {
   return (
     <main
       className={cn(CONTAINER, "pb-24 pt-10 sm:pt-14")}
@@ -167,15 +170,15 @@ export default function DocsPage() {
     >
       <div className="mx-auto w-full max-w-[860px]">
       <PageHeader
-        title="Docs"
-        description="Get your AI coding usage onto the leaderboard, from the terminal or from your phone."
+        title={t(locale, "nav.docs")}
+        description={t(locale, "docs.desc")}
       />
 
         <div className="flex flex-col gap-12">
         <Section
           id="cli"
-          title="Install the CLI"
-          description="The CLI scans the AI coding clients already installed on your machine, totals the usage locally, and submits only the totals."
+          title={t(locale, "docs.cliTitle")}
+          description={t(locale, "docs.cliDesc")}
         >
           <Tabs defaultValue="macos">
             <TabsList>
@@ -183,203 +186,98 @@ export default function DocsPage() {
                   the monochrome marks legible in both themes. */}
               <TabsTrigger value="macos">
                 <OsIcon name="macos" />
-                macOS
+                {t(locale, "docs.os.macos")}
               </TabsTrigger>
               <TabsTrigger value="linux">
                 <OsIcon name="linux" />
-                Linux
+                {t(locale, "docs.os.linux")}
               </TabsTrigger>
               <TabsTrigger value="windows">
                 <OsIcon name="windows" />
-                Windows
+                {t(locale, "docs.os.windows")}
               </TabsTrigger>
             </TabsList>
 
             <TabsContent value="macos" className="mt-4 flex flex-col gap-3">
-              <CommandBlock commands={MACOS} />
+              <CommandBlock
+                commands={[
+                  ...localize(locale, [MACOS[0]]),
+                  { command: preinstallSh, note: t(locale, "docs.note.preinstall") },
+                  ...localize(locale, MACOS.slice(1)),
+                ]}
+              />
               <p className="text-sm leading-relaxed text-muted-foreground">
-                <code className="font-mono text-[13px]">brew services</code>{" "}
-                keeps a background agent running, so your usage stays current
-                without you thinking about it.
+                {t(locale, "docs.reloadNote.posix")}
+              </p>
+              <p className="text-sm leading-relaxed text-muted-foreground">
+                <code className="font-mono text-[13px]">tokens serve</code>{" "}
+                {t(locale, "docs.macosNote", { site: siteUrl })}{" "}
+                <a
+                  href={`${SCRIPTS_BLOB_BASE}/docs/deploy/tokens-cli-usage.md`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-foreground underline underline-offset-4"
+                >
+                  {t(locale, "docs.cliGuideLink")}
+                </a>
               </p>
             </TabsContent>
 
             <TabsContent value="linux" className="mt-4 flex flex-col gap-3">
-              <CommandBlock commands={LINUX} />
+              <CommandBlock
+                commands={[
+                  { command: `curl -fsSL ${siteUrl}/install.sh | sh`, note: t(locale, "docs.note.install") },
+                  { command: preinstallSh, note: t(locale, "docs.note.preinstall") },
+                  ...localize(locale, [LINUX[0]]),
+                  { command: enableServiceSh, note: t(locale, "docs.note.setupService") },
+                  ...localize(locale, LINUX.slice(1)),
+                ]}
+              />
               <p className="text-sm leading-relaxed text-muted-foreground">
-                <code className="font-mono text-[13px]">tokens serve</code> runs
-                the submitter in the foreground; pair it with a systemd unit to
-                keep it alive across reboots.
+                {t(locale, "docs.reloadNote.posix")}
+              </p>
+              <p className="text-sm leading-relaxed text-muted-foreground">
+                <code className="font-mono text-[13px]">tokens serve</code>{" "}
+                {t(locale, "docs.linuxNote")}
               </p>
             </TabsContent>
 
             <TabsContent value="windows" className="mt-4 flex flex-col gap-3">
-              <CommandBlock commands={WINDOWS} />
+              <CommandBlock
+                commands={[
+                  { command: preinstallPs1, note: t(locale, "docs.note.preinstall") },
+                  ...localize(locale, WINDOWS),
+                  { command: registerTaskPs1, note: t(locale, "docs.note.setupTask") },
+                ]}
+              />
               <p className="text-sm leading-relaxed text-muted-foreground">
-                Runs straight from npm, so nothing is installed globally. Use a
-                Scheduled Task to submit on a timer.
+                {t(locale, "docs.reloadNote.windows")}
+              </p>
+              <p className="text-sm leading-relaxed text-muted-foreground">
+                {t(locale, "docs.windowsNote")}
               </p>
             </TabsContent>
           </Tabs>
         </Section>
 
-        <Section
-          id="ios"
-          title="iOS app"
-          description="Your rank and usage on your phone, without opening a browser."
-        >
-          <Card>
-            {/* Stacked on phones. Forced side by side, the title is the only
-                flexible item in the row, so at 390px it was squeezed to 53px
-                and wrapped onto two lines while the badge and button kept
-                their width. */}
-            <CardHeader className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-              <div className="flex flex-wrap items-center gap-2">
-                <CardTitle className="text-base">Tokens for iOS</CardTitle>
-                <Badge variant="secondary">TestFlight beta</Badge>
-              </div>
-              {/* Base UI composes via `render`, not Radix's `asChild`.
-                  Styled the way Apple's own install buttons are — black with
-                  the mark — so it reads as "this goes to Apple". It inverts in
-                  dark mode because a black button on a black card disappears. */}
-              <Button
-                className="w-full shrink-0 border border-transparent bg-black text-white hover:bg-black/85 sm:w-auto dark:bg-white dark:text-black dark:hover:bg-white/90"
-                render={
-                  <a href={TESTFLIGHT_URL} target="_blank" rel="noopener noreferrer" />
-                }
-              >
-                <AppleMark data-icon="inline-start" />
-                Join the TestFlight
-              </Button>
-            </CardHeader>
-            <CardContent className="flex flex-col gap-5">
-              <p className="text-sm leading-relaxed text-muted-foreground">
-                The app is built around Liquid Glass, so it picks up the depth
-                and translucency of iOS itself rather than looking like a web
-                page in a shell.
-              </p>
-
-              <div className="flex flex-col gap-4">
-                <Feature icon={Share2Icon} title="Share cards">
-                  Turn a day, a month or an all-time total into a card worth
-                  posting, rendered on device.
-                </Feature>
-                <Feature icon={LayoutGridIcon} title="Home screen widgets">
-                  Today&apos;s tokens and your standing, refreshed in the
-                  background.
-                </Feature>
-                <Feature icon={LockIcon} title="Lock screen widgets">
-                  Daily usage, running total and current rank, readable at a
-                  glance without unlocking.
-                </Feature>
-              </div>
-
-              <Separator />
-
-              <ol className="flex list-decimal flex-col gap-2 pl-5 text-sm leading-relaxed text-muted-foreground">
-                <li>Install Apple&apos;s TestFlight app from the App Store.</li>
-                <li>
-                  Open the invitation link above on the same device and tap
-                  Accept.
-                </li>
-                <li>
-                  Install Tokens from TestFlight, then enter a GitHub username.
-                  There is no sign-in: every profile on Tokens is public, so the
-                  app just reads the one you name. Enter your own username or
-                  the widgets will show someone else&apos;s usage.
-                </li>
-                <li>
-                  Long-press your Home or Lock screen to add the widgets.
-                </li>
-              </ol>
-            </CardContent>
-          </Card>
-        </Section>
 
         <Section
           id="usage"
-          title="Everyday use"
-          description="Five commands cover the whole workflow."
+          title={t(locale, "docs.usageTitle")}
+          description={t(locale, "docs.usageDesc")}
         >
-          <CommandBlock
-            commands={[
-              { command: "tokens login", note: "authenticate" },
-              { command: "tokens submit", note: "send usage now" },
-              { command: "tokens serve", note: "keep submitting in the background" },
-              { command: "tokens status", note: "what has been submitted" },
-              { command: "tokens help", note: "everything else" },
-            ]}
-          />
+          <CommandBlock commands={localize(locale, EVERYDAY)} />
         </Section>
 
-        <Section
-          id="verified"
-          title="The verified badge"
-          description="A small check next to a name on the leaderboard. It says the account is a real, findable person — nothing more."
-        >
-          <div className="flex flex-col gap-4">
-            <Card size="sm">
-              <CardHeader>
-                <CardTitle className="text-sm">How to get it</CardTitle>
-              </CardHeader>
-              <CardContent className="text-sm leading-relaxed text-muted-foreground">
-                Add at least <strong className="font-medium text-foreground">two social
-                links</strong> to your GitHub profile — the &ldquo;Social accounts&rdquo;
-                fields in{" "}
-                <a
-                  href="https://github.com/settings/profile"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="underline underline-offset-4 hover:text-foreground"
-                >
-                  GitHub profile settings
-                </a>
-                . Any two count: a personal site, X, LinkedIn, Mastodon, YouTube.
-                That is the whole rule.
-              </CardContent>
-            </Card>
-
-            <Card size="sm">
-              <CardHeader>
-                <CardTitle className="text-sm">When it appears</CardTitle>
-              </CardHeader>
-              <CardContent className="text-sm leading-relaxed text-muted-foreground">
-                Links are re-read once a day, at 03:20 UTC. Adding them now means
-                the badge appears on the next run rather than immediately —
-                signing out and back in does not speed it up. Dropping below two
-                links removes it on the same schedule.
-              </CardContent>
-            </Card>
-
-            <Card size="sm">
-              <CardHeader>
-                <CardTitle className="text-sm">Why two links</CardTitle>
-              </CardHeader>
-              <CardContent className="text-sm leading-relaxed text-muted-foreground">
-                A leaderboard attracts throwaway accounts. Filling in two social
-                fields is trivial for someone who already exists online and
-                tedious to fake at scale, which is all the badge claims. It is
-                not an identity check, and it has no effect on ranking —
-                inflated numbers are handled separately, by the submission
-                checks and the{" "}
-                <a href="/shame" className="underline underline-offset-4 hover:text-foreground">
-                  Hall of Shame
-                </a>
-                .
-              </CardContent>
-            </Card>
-          </div>
-        </Section>
 
         <Section
           id="clients"
-          title="Supported clients"
-          description="The CLI scans whatever is already on your machine — nothing to configure per client."
+          title={t(locale, "docs.clientsTitle")}
+          description={t(locale, "docs.clientsDesc")}
         >
           <div className="flex flex-col gap-4">
             <p className="text-sm leading-relaxed text-muted-foreground">
-              All {CLIENT_GRID.length} of these are detected automatically — if
-              it is installed and has written sessions, it is counted.
+              {t(locale, "docs.clientsDetected", { n: CLIENT_GRID.length })}
             </p>
 
             {/* A plain responsive grid rather than a table: these are names,
@@ -408,97 +306,6 @@ export default function DocsPage() {
           </div>
         </Section>
 
-        <Section
-          id="architecture"
-          title="Architecture"
-          description="What runs where. The repository is public so this can be checked rather than taken on trust."
-        >
-          <div className="flex flex-col gap-4">
-            <Card size="sm">
-              <CardHeader>
-                <CardTitle className="text-sm">The site and the API</CardTitle>
-              </CardHeader>
-              <CardContent className="text-sm leading-relaxed text-muted-foreground">
-                Next.js, deployed to Cloudflare Workers through OpenNext — one
-                Worker serves both the pages and the API, with no origin server
-                behind it. Static assets, the share cards, and the pages a
-                signed-out reader sees are cached at the edge, so most requests
-                are answered without running any code at all.
-                <br />
-                <br />
-                <a
-                  href="https://v.ps"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="font-medium text-foreground underline underline-offset-4"
-                >
-                  V.PS
-                </a>{" "}
-                sponsor a server for this project. Readers in mainland China
-                reach Cloudflare over routes that are often slow, and the fix
-                for that is a machine close to them rather than a cleverer
-                cache — which is a thing you have to be given, not something a
-                free tier provides.
-              </CardContent>
-            </Card>
-
-            <Card size="sm">
-              <CardHeader>
-                <CardTitle className="text-sm">The database</CardTitle>
-              </CardHeader>
-              <CardContent className="text-sm leading-relaxed text-muted-foreground">
-                <a
-                  href="https://neon.com"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="font-medium text-foreground underline underline-offset-4"
-                >
-                  Neon
-                </a>{" "}
-                (Postgres), reached through Cloudflare Hyperdrive, which keeps
-                warm pooled connections beside the database so a page issuing
-                several queries does not pay a fresh handshake for each. The
-                Worker is pinned to the same region: a request crosses the ocean
-                once, and every query after that is a local hop. Schema changes
-                go through Drizzle migrations applied at build time.
-                <br />
-                <br />
-                Neon sponsor the database this site runs on. Tokens is free to
-                use and free to self-host, and the leaderboard reads every page
-                straight from Postgres rather than a cache of a cache — that is
-                only affordable because someone is paying for it, and they are.
-              </CardContent>
-            </Card>
-
-            <Card size="sm">
-              <CardHeader>
-                <CardTitle className="text-sm">The CLI</CardTitle>
-              </CardHeader>
-              <CardContent className="text-sm leading-relaxed text-muted-foreground">
-                Rust, distributed as a prebuilt binary per platform through npm.
-                It reads the session files your clients already write, totals
-                them on your machine, and sends only the totals — token counts,
-                model names, timestamps. Prompts, completions and file contents
-                never leave the machine.{" "}
-                <code className="font-mono text-[13px]">tokens submit --dry-run</code>{" "}
-                prints exactly what would be uploaded.
-              </CardContent>
-            </Card>
-
-            <Card size="sm">
-              <CardHeader>
-                <CardTitle className="text-sm">Caching and scheduled work</CardTitle>
-              </CardHeader>
-              <CardContent className="text-sm leading-relaxed text-muted-foreground">
-                Rendered pages live in R2, with Durable Objects tracking which
-                tags a submission invalidates — so your own numbers update the
-                moment you submit rather than on a timer. The daily badge
-                refresh runs as a Worker cron trigger, in-process, with no
-                external scheduler holding a key.
-              </CardContent>
-            </Card>
-          </div>
-        </Section>
 
         </div>
       </div>

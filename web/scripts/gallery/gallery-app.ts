@@ -14,6 +14,7 @@ import { renderVitalsEmbedSvg } from "../../src/lib/embed/renderVitalsEmbedSvg";
 import { renderBlueprintEmbedSvg } from "../../src/lib/embed/renderBlueprintEmbedSvg";
 import { renderReceiptEmbedSvg } from "../../src/lib/embed/renderReceiptEmbedSvg";
 import { EMBED_TEMPLATES } from "../../src/lib/embed/embedShared";
+import { SITE_URL } from "../../src/lib/site";
 import { getPaletteNames } from "../../src/lib/themes";
 import type { UserEmbedStats } from "../../src/lib/embed/getUserEmbedStats";
 
@@ -76,7 +77,7 @@ function render() {
   if (state.cost !== "compact") params.push(`cost=${state.cost}`);
   if (state.rank !== "plain") params.push(`rank=${state.rank}`);
   if (state.sort !== "tokens") params.push(`sort=${state.sort}`);
-  $("url").textContent = `https://tokens.ci/api/embed/${G.username}/svg?${params.join("&")}`;
+  $("url").textContent = `${SITE_URL}/api/embed/${G.username}/svg?${params.join("&")}`;
 }
 
 const tpl = $("tpl") as HTMLSelectElement;

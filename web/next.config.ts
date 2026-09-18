@@ -1,12 +1,16 @@
 import type { NextConfig } from "next";
-import { initOpenNextCloudflareForDev } from "@opennextjs/cloudflare";
 
 const nextConfig: NextConfig = {
+  // Dev-only: the site is served as localhost:3000 but often browsed via
+  // 127.0.0.1:3000; allow both origins for /_next/* dev resources so the dev
+  // badge doesn't count a cross-origin warning as an issue.
+  allowedDevOrigins: ["127.0.0.1", "localhost"],
+
   images: {
-    // Workers has no Vercel image optimizer. Every `next/image` source in this
-    // app is a local, pre-optimized static asset (svg/webp/png) served straight
-    // from Cloudflare's edge, and GitHub avatars go through plain <img>, so
-    // opting out costs nothing and avoids a Cloudflare Images bill.
+    // Every `next/image` source is a local, pre-optimized static asset
+    // (svg/webp/png) and GitHub avatars go through plain <img>, so the image
+    // optimizer is opted out — one less moving part on the self-hosted
+    // Node server.
     unoptimized: true,
     remotePatterns: [
       {
@@ -57,7 +61,3 @@ const nextConfig: NextConfig = {
 };
 
 export default nextConfig;
-
-// Makes the Cloudflare bindings (Hyperdrive, R2, Durable Objects) available to
-// `next dev`, so local development exercises the same code paths as production.
-initOpenNextCloudflareForDev();

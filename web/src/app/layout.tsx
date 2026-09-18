@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import { cookies } from "next/headers";
 import { Geist, JetBrains_Mono } from "next/font/google";
 import NextTopLoader from "nextjs-toploader";
 import { Providers } from "@/lib/providers";
@@ -8,7 +9,8 @@ import { ThemedToastContainer } from "@/components/layout/ThemedToastContainer";
 import "./globals.css";
 import "react-toastify/dist/ReactToastify.css";
 import { cn } from "@/lib/utils";
-
+import { htmlLang, LOCALE_COOKIE, parseLocale, t } from "@/lib/i18n";
+import { SITE_URL } from "@/lib/site";
 // Geist carries interface text and JetBrains Mono carries every figure, so
 // numeric columns stay aligned when scanned down the page.
 const geist = Geist({
@@ -23,18 +25,20 @@ const jetbrainsMono = JetBrains_Mono({
   display: "swap",
 });
 
+
 export const metadata: Metadata = {
   title: "Tokens - AI Token Usage Tracker & Leaderboard",
   description: "Track, visualize, and compete on AI coding assistant token usage across Claude Code, Cursor, OpenCode, Codex, Gemini, Kimi, and Qwen. The Kardashev Scale for AI Devs.",
-  metadataBase: new URL("https://tokens.ci"),
+  // Everything relative below (OG images, icons) resolves against this base —
+  // the deployment's own origin, never a hardcoded upstream domain.
+  metadataBase: new URL(SITE_URL),
   icons: {
     icon: [
       // SVG first so capable browsers get the theme-aware mark; the .ico stays
-      // for the ones that do not support SVG favicons.
-      { url: "/brand/tokens-favicon.svg", type: "image/svg+xml" },
-      { url: "/favicon.ico?v=2", sizes: "48x48", type: "image/x-icon" },
-      { url: "/favicon-16x16.png?v=2", sizes: "16x16", type: "image/png" },
-      { url: "/favicon-32x32.png?v=2", sizes: "32x32", type: "image/png" },
+      { url: "/brand/tokens-favicon.svg?v=3", type: "image/svg+xml" },
+      { url: "/favicon.ico?v=3", sizes: "48x48", type: "image/x-icon" },
+      { url: "/favicon-16x16.png?v=3", sizes: "16x16", type: "image/png" },
+      { url: "/favicon-32x32.png?v=3", sizes: "32x32", type: "image/png" },
     ],
     apple: "/brand/tokens-app-icon-180.png",
   },
@@ -43,13 +47,13 @@ export const metadata: Metadata = {
     title: "Tokens - AI Token Usage Tracker & Leaderboard",
     description: "Track, visualize, and compete on AI coding assistant token usage across Claude Code, Cursor, OpenCode, Codex, Gemini, Kimi, and Qwen. The Kardashev Scale for AI Devs.",
     type: "website",
-    url: "https://tokens.ci",
+    url: SITE_URL,
     siteName: "Tokens",
     // The dynamic renderer, not a static file: it draws the current mark, so
     // the share card cannot drift from the brand the way a checked-in PNG did.
     images: [
       {
-        url: "https://tokens.ci/api/og?title=Tokens&subtitle=The%20leaderboard%20for%20AI%20coding%20usage",
+        url: "/api/og?title=Tokens&subtitle=The%20leaderboard%20for%20AI%20coding%20usage",
         width: 1200,
         height: 630,
         alt: "Tokens - AI Token Usage Tracker",
@@ -60,7 +64,7 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     title: "Tokens - AI Token Usage Tracker & Leaderboard",
     description: "Track, visualize, and compete on AI coding assistant token usage across Claude Code, Cursor, OpenCode, Codex, Gemini, Kimi, and Qwen.",
-    images: ["https://tokens.ci/api/og?title=Tokens&subtitle=The%20leaderboard%20for%20AI%20coding%20usage"],
+    images: ["/api/og?title=Tokens&subtitle=The%20leaderboard%20for%20AI%20coding%20usage"],
   },
 };
 
@@ -69,10 +73,12 @@ export const viewport: Viewport = {
   initialScale: 1,
 };
 
-export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+  const jar = await cookies();
+  const locale = parseLocale(jar.get(LOCALE_COOKIE)?.value);
   return (
     <html
-      lang="en"
+      lang={htmlLang(locale)}
       suppressHydrationWarning
       className={cn(geist.variable, jetbrainsMono.variable)}
     >
@@ -94,22 +100,14 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
       </head>
       <body className="flex min-h-dvh flex-col font-sans">
         <NextTopLoader color="#0073FF" showSpinner={false} />
-        {/* Every route's <main> carries id="main-content"; this is the link the
-            anchors were always for. Off-screen until focused, so it costs
-            nothing visually and is the first stop for a keyboard user. */}
         <a
           href="#main-content"
           className="sr-only rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-[100]"
         >
-          Skip to content
+          {t(locale, "nav.skipToContent")}
         </a>
-        <Providers>
-          {/* Rendered once here so it persists across route changes (no remount
-              flicker) and switching Leaderboard <-> Profile is a seamless
-              client-side transition. */}
+        <Providers locale={locale}>
           <Navigation />
-          {/* Grows to fill the viewport so the footer stays at the bottom on
-              short pages instead of floating up under the content. */}
           <div className="flex flex-1 flex-col">{children}</div>
           <ServiceFooter />
           <ThemedToastContainer />

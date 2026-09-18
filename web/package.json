@@ -4,26 +4,29 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "cp ../install.sh public/install.sh && mkdir -p public/clients && cp ../.github/assets/client-* public/clients/ && next build",
+    "build": "cp ../install.sh public/install.sh && cp ../pre-install-tokens.sh ../pre-install-tokens.ps1 ../enable-tokens-service.sh ../register-tokens-submit-task.ps1 public/ && mkdir -p public/clients && cp ../.github/assets/client-* public/clients/ && next build",
     "start": "next start",
     "lint": "eslint",
-    "typecheck": "wrangler types --env-interface CloudflareEnv --include-runtime=false cloudflare-env.d.ts && tsc --noEmit",
+    "test:e2e": "playwright test",
+    "typecheck": "tsc --noEmit",
+
     "test:migrations": "drizzle-kit migrate && bun scripts/check-migrations.ts",
+    "test:teams": "bun scripts/check-teams-invariants.ts",
+
+
+
     "gallery": "bun scripts/gallery/build-gallery.ts",
     "generate:embed-logos": "bun scripts/generate-embed-logos.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",
-    "db:studio": "drizzle-kit studio",
-    "cf:build": "cp ../install.sh public/install.sh && mkdir -p public/clients && cp ../.github/assets/client-* public/clients/ && opennextjs-cloudflare build",
-    "cf:preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
-    "cf:deploy": "npm run cf:build && wrangler deploy",
-    "cf:typegen": "wrangler types --env-interface CloudflareEnv --include-runtime=false cloudflare-env.d.ts"
+    "db:studio": "drizzle-kit studio"
+
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",
     "@lobehub/icons-static-svg": "^1.94.0",
-    "@opennextjs/cloudflare": "^1.20.2",
+
     "@radix-ui/react-tooltip": "^1.2.8",
     "@tailwindcss/postcss": "^4.3.0",
     "class-variance-authority": "^0.7.1",
@@ -46,6 +49,7 @@
     "zod": "^3.24.1"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
@@ -53,7 +57,7 @@
     "drizzle-kit": "^0.30.1",
     "eslint": "^9",
     "eslint-config-next": "16.0.6",
-    "typescript": "^5",
-    "wrangler": "^4.114.0"
+    "typescript": "^5"
+
   }
 }

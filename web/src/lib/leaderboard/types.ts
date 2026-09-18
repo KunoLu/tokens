@@ -7,16 +7,27 @@ export type Period =
   | "custom";
 export type SortBy = "tokens" | "cost";
 
+export interface LeaderboardTeamRef {
+  id: string;
+  name: string;
+  slug: string;
+}
+
+export interface LeaderboardGroupRef {
+  id: string;
+  name: string;
+}
+
 export interface LeaderboardUser {
   rank: number;
   userId: string;
   username: string;
   displayName: string | null;
   avatarUrl: string | null;
+  team: LeaderboardTeamRef | null;
+  group: LeaderboardGroupRef | null;
   totalTokens: number;
   totalCost: number;
-  /** True when the user has enough linked social accounts on GitHub. */
-  verified: boolean;
 }
 
 export interface LeaderboardData {

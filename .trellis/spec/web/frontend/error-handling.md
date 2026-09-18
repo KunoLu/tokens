@@ -12,8 +12,8 @@
 ### Root error boundary
 
 `web/src/app/error.tsx` is a client boundary rendering **inside** the root
-layout, so header/footer survive. `/leaderboard`, `/shame`, and
-`/u/[username]` all do live database work during render, so any of them can
+layout, so header/footer survive. `/leaderboard` and
+`/u/[username]` do live database work during render, so either can
 throw — without this boundary the user lands on Next's default error screen
 with no way back. It offers the two useful actions (`reset()` and a link to
 the leaderboard) and shows `error.digest` — the only support handle on a
@@ -37,7 +37,7 @@ internal messages into the JSON body.
 ### Inline and toast feedback
 
 - Recoverable page states use the shadcn `Alert` — profile resubmit banner,
-  shame page, settings load failures.
+  settings load failures.
 - Mutation results use `toast.success` / `toast.error` (react-toastify via
   `ThemedToastContainer`) — see `app/settings/SettingsClient.tsx`.
 
@@ -45,9 +45,14 @@ internal messages into the JSON body.
 
 - **Missing `DATABASE_URL`** (local dev without a database): pages check
   `isMissingDatabaseUrl` and render empty data instead of throwing — e.g. the
-  leaderboard renders an empty table (`app/(main)/leaderboard/page.tsx`).
+  leaderboard and teamboard pages (`app/(main)/leaderboard/page.tsx`,
+  `app/(main)/teamboard/page.tsx`). The Teamboard API does not invent a 200
+  empty list; it returns 500 `{ error }`. Private/unknown teams are 404 via
+  `notFound()` / `teamErrorResponse`, never 403.
 - **Non-critical sections fail soft**: the profile's devices fetch is wrapped
-  in try/catch and falls back to `[]` (`app/u/[username]/page.tsx`).
+  in try/catch and falls back to `[]`; membership uses the same
+  `isMissingDatabaseUrl` path and hides the Team/Group block
+  (`app/u/[username]/page.tsx`).
 
 ## Rules
 

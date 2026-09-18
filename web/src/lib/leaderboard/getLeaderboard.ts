@@ -1,5 +1,5 @@
 import { unstable_cache } from "next/cache";
-import { db, users, submissions, dailyBreakdown } from "@/lib/db";
+import { db, users, submissions, dailyBreakdown, teams, teamMembers, groups, groupMembers } from "@/lib/db";
 import {
   USERNAME_LOOKUP_LIMIT,
   getSingleUsernameMatch,
@@ -7,31 +7,36 @@ import {
   usernameEqualsIgnoreCase,
 } from "@/lib/db/usernameLookup";
 import { eq, desc, sql, and, or, gte, lte, isNull } from "drizzle-orm";
-import type { LeaderboardData, LeaderboardUser, Period, SortBy } from "@/lib/leaderboard/types";
+import type {
+  LeaderboardData,
+  LeaderboardGroupRef,
+  LeaderboardTeamRef,
+  LeaderboardUser,
+  Period,
+  SortBy,
+} from "@/lib/leaderboard/types";
 import {
   escapeLikePattern,
   hasDirectives,
   parseSearchDirectives,
+  type ParsedSearchDirectives,
 } from "@/lib/leaderboard/searchDirectives";
-import { SOCIAL_VERIFIED_THRESHOLD } from "@/lib/socialVerification";
 
 export type { LeaderboardData, LeaderboardUser, Period, SortBy } from "@/lib/leaderboard/types";
 
-// A user with >= SOCIAL_VERIFIED_THRESHOLD linked socials is "verified". The
-// snapshot on users.social_links is refreshed by lib/githubSocials.ts.
-function verifiedExpr() {
-  return sql<boolean>`COALESCE(jsonb_array_length(${users.socialLinks}) >= ${SOCIAL_VERIFIED_THRESHOLD}, false)`;
-}
-
-interface LeaderboardPeriodRow {
+export interface LeaderboardPeriodRow {
   userId: string;
   username: string;
   displayName: string | null;
   avatarUrl: string | null;
-  verified: boolean;
   tokens: number;
   cost: number;
   sourceBreakdown: Record<string, { models: Record<string, unknown> }> | null;
+  teamId: string | null;
+  teamName: string | null;
+  teamSlug: string | null;
+  groupId: string | null;
+  groupName: string | null;
 }
 
 interface PeriodDateRange {
@@ -44,11 +49,15 @@ interface PeriodLeaderboardDbRow {
   username: string;
   displayName: string | null;
   avatarUrl: string | null;
-  verified: boolean | null;
   tokens: number | string | null;
   cost: number | string | null;
   /** Absent when the query skipped the column — see fetchPeriodLeaderboardRows. */
   sourceBreakdown?: Record<string, { models: Record<string, unknown> }> | null;
+  teamId: string | null;
+  teamName: string | null;
+  teamSlug: string | null;
+  groupId: string | null;
+  groupName: string | null;
 }
 
 interface AllTimeLeaderboardDbRow {
@@ -56,20 +65,51 @@ interface AllTimeLeaderboardDbRow {
   username: string;
   displayName: string | null;
   avatarUrl: string | null;
-  verified: boolean | null;
   totalTokens: number | string | null;
   totalCost: number | string | null;
+  teamId: string | null;
+  teamName: string | null;
+  teamSlug: string | null;
+  groupId: string | null;
+  groupName: string | null;
 }
 
 interface RankedLeaderboardDbRow extends AllTimeLeaderboardDbRow {
   rank: number | string | null;
 }
 
+function packMembership(row: {
+  teamId?: string | null;
+  teamName?: string | null;
+  teamSlug?: string | null;
+  groupId?: string | null;
+  groupName?: string | null;
+}): { team: LeaderboardTeamRef | null; group: LeaderboardGroupRef | null } {
+  return {
+    team:
+      row.teamId && row.teamName && row.teamSlug
+        ? { id: row.teamId, name: row.teamName, slug: row.teamSlug }
+        : null,
+    group:
+      row.groupId && row.groupName
+        ? { id: row.groupId, name: row.groupName }
+        : null,
+  };
+}
+
+const membershipJoins = {
+  teamId: sql<string | null>`${teams.id}`.as("team_id"),
+  teamName: sql<string | null>`${teams.name}`.as("team_name"),
+  teamSlug: sql<string | null>`${teams.slug}`.as("team_slug"),
+  groupId: sql<string | null>`${groups.id}`.as("group_id"),
+  groupName: sql<string | null>`${groups.name}`.as("group_name"),
+};
+
 function toUtcDateString(date: Date): string {
   return date.toISOString().slice(0, 10);
 }
 
-function getPeriodDateRange(
+export function getPeriodDateRange(
   period: Period,
   now: Date = new Date(),
   customFrom?: string,
@@ -127,7 +167,7 @@ function getPeriodDateRange(
   };
 }
 
-function compareLeaderboardUsers(
+export function compareLeaderboardUsers(
   left: Omit<LeaderboardUser, "rank">,
   right: Omit<LeaderboardUser, "rank">,
   sortBy: SortBy
@@ -151,7 +191,7 @@ function compareLeaderboardUsers(
   return left.username.localeCompare(right.username);
 }
 
-function aggregatePeriodRows(
+export function aggregatePeriodRows(
   rows: LeaderboardPeriodRow[],
   sortBy: SortBy
 ): Array<Omit<LeaderboardUser, "rank">> {
@@ -171,7 +211,7 @@ function aggregatePeriodRows(
       username: row.username,
       displayName: row.displayName,
       avatarUrl: row.avatarUrl,
-      verified: row.verified,
+      ...packMembership(row),
       totalTokens: row.tokens,
       totalCost: row.cost,
     });
@@ -200,6 +240,39 @@ function matchesLeaderboardSearch(
   return false;
 }
 
+/**
+ * A daily row matches a `client:`/`model:` search when its source breakdown
+ * names a matching client or model. Exported so the Teamboard answers the
+ * same directives the same way.
+ */
+export function rowMatchesSearchDirectives(
+  sourceBreakdown: Record<string, { models: Record<string, unknown> }> | null | undefined,
+  parsed: ParsedSearchDirectives
+): boolean {
+  if (!sourceBreakdown) return false;
+
+  const clientKeys = Object.keys(sourceBreakdown).map((k) => k.toLowerCase());
+  const modelKeys = Object.values(sourceBreakdown).flatMap((client) =>
+    client.models ? Object.keys(client.models).map((m) => m.toLowerCase()) : []
+  );
+
+  if (parsed.clients.length > 0) {
+    const hasMatchingClient = parsed.clients.some((c) =>
+      clientKeys.some((k) => k.includes(c))
+    );
+    if (!hasMatchingClient) return false;
+  }
+
+  if (parsed.models.length > 0) {
+    const hasMatchingModel = parsed.models.some((m) =>
+      modelKeys.some((k) => k.includes(m))
+    );
+    if (!hasMatchingModel) return false;
+  }
+
+  return true;
+}
+
 function buildPeriodLeaderboardData(
   rows: LeaderboardPeriodRow[],
   page: number,
@@ -212,30 +285,9 @@ function buildPeriodLeaderboardData(
 
   let filteredRows = rows;
   if (hasDirectives(parsed)) {
-    filteredRows = rows.filter((row) => {
-      if (!row.sourceBreakdown) return false;
-
-      const clientKeys = Object.keys(row.sourceBreakdown).map((k) => k.toLowerCase());
-      const modelKeys = Object.values(row.sourceBreakdown).flatMap((client) =>
-        client.models ? Object.keys(client.models).map((m) => m.toLowerCase()) : []
-      );
-
-      if (parsed.clients.length > 0) {
-        const hasMatchingClient = parsed.clients.some((c) =>
-          clientKeys.some((k) => k.includes(c))
-        );
-        if (!hasMatchingClient) return false;
-      }
-
-      if (parsed.models.length > 0) {
-        const hasMatchingModel = parsed.models.some((m) =>
-          modelKeys.some((k) => k.includes(m))
-        );
-        if (!hasMatchingModel) return false;
-      }
-
-      return true;
-    });
+    filteredRows = rows.filter((row) =>
+      rowMatchesSearchDirectives(row.sourceBreakdown, parsed)
+    );
   }
 
   return pageRanking(
@@ -255,7 +307,7 @@ function buildPeriodLeaderboardData(
  * being baked into a per-page cache entry of its own. Ranks are assigned before
  * the text filter so a search shows each user's real position on the board.
  */
-function pageRanking(
+export function pageRanking(
   aggregatedUsers: Array<Omit<LeaderboardUser, "rank">>,
   page: number,
   limit: number,
@@ -347,16 +399,20 @@ async function fetchPeriodLeaderboardRows(
       username: users.username,
       displayName: users.displayName,
       avatarUrl: users.avatarUrl,
-      verified: verifiedExpr().as("verified"),
       tokens: dailyBreakdown.tokens,
       cost: dailyBreakdown.cost,
       ...(withBreakdown
         ? { sourceBreakdown: dailyBreakdown.sourceBreakdown }
         : {}),
+      ...membershipJoins,
     })
     .from(dailyBreakdown)
     .innerJoin(submissions, eq(dailyBreakdown.submissionId, submissions.id))
     .innerJoin(users, eq(submissions.userId, users.id))
+    .leftJoin(teamMembers, eq(teamMembers.userId, users.id))
+    .leftJoin(teams, and(eq(teams.id, teamMembers.teamId), eq(teams.status, "active")))
+    .leftJoin(groupMembers, eq(groupMembers.userId, users.id))
+    .leftJoin(groups, and(eq(groups.id, groupMembers.groupId), eq(groups.status, "active")))
     .where(
       and(
         gte(dailyBreakdown.date, dateRange.start),
@@ -370,10 +426,14 @@ async function fetchPeriodLeaderboardRows(
     username: row.username,
     displayName: row.displayName,
     avatarUrl: row.avatarUrl,
-    verified: Boolean(row.verified),
     tokens: Number(row.tokens) || 0,
     cost: Number(row.cost) || 0,
     sourceBreakdown: row.sourceBreakdown ?? null,
+    teamId: row.teamId ?? null,
+    teamName: row.teamName ?? null,
+    teamSlug: row.teamSlug ?? null,
+    groupId: row.groupId ?? null,
+    groupName: row.groupName ?? null,
   }));
 }
 
@@ -430,14 +490,28 @@ async function fetchLeaderboardData(
         username: users.username,
         displayName: users.displayName,
         avatarUrl: users.avatarUrl,
-        verified: verifiedExpr().as("verified"),
         totalTokens: sql<number>`SUM(${submissions.totalTokens})`.as("total_tokens"),
         totalCost: sql<number>`SUM(CAST(${submissions.totalCost} AS DECIMAL(18,4)))`.as("total_cost"),
+        ...membershipJoins,
       })
       .from(submissions)
       .innerJoin(users, eq(submissions.userId, users.id))
+      .leftJoin(teamMembers, eq(teamMembers.userId, users.id))
+      .leftJoin(teams, and(eq(teams.id, teamMembers.teamId), eq(teams.status, "active")))
+      .leftJoin(groupMembers, eq(groupMembers.userId, users.id))
+      .leftJoin(groups, and(eq(groups.id, groupMembers.groupId), eq(groups.status, "active")))
       .where(and(isNull(users.bannedAt), ...directiveConditions))
-      .groupBy(users.id, users.username, users.displayName, users.avatarUrl)
+      .groupBy(
+        users.id,
+        users.username,
+        users.displayName,
+        users.avatarUrl,
+        teams.id,
+        teams.name,
+        teams.slug,
+        groups.id,
+        groups.name
+      )
       .as("ranked");
     const rankedSecondaryOrderByColumn = sortBy === "cost"
       ? rankedSubquery.totalTokens
@@ -487,7 +561,7 @@ async function fetchLeaderboardData(
         username: row.username,
         displayName: row.displayName,
         avatarUrl: row.avatarUrl,
-        verified: Boolean(row.verified),
+        ...packMembership(row),
         totalTokens: Number(row.totalTokens) || 0,
         totalCost: Number(row.totalCost) || 0,
       })),
@@ -517,14 +591,28 @@ async function fetchLeaderboardData(
       username: users.username,
       displayName: users.displayName,
       avatarUrl: users.avatarUrl,
-      verified: verifiedExpr().as("verified"),
       totalTokens: sql<number>`SUM(${submissions.totalTokens})`.as("total_tokens"),
       totalCost: sql<number>`SUM(CAST(${submissions.totalCost} AS DECIMAL(18,4)))`.as("total_cost"),
+      ...membershipJoins,
     })
     .from(submissions)
     .innerJoin(users, eq(submissions.userId, users.id))
+    .leftJoin(teamMembers, eq(teamMembers.userId, users.id))
+    .leftJoin(teams, and(eq(teams.id, teamMembers.teamId), eq(teams.status, "active")))
+    .leftJoin(groupMembers, eq(groupMembers.userId, users.id))
+    .leftJoin(groups, and(eq(groups.id, groupMembers.groupId), eq(groups.status, "active")))
     .where(isNull(users.bannedAt))
-    .groupBy(users.id, users.username, users.displayName, users.avatarUrl)
+    .groupBy(
+      users.id,
+      users.username,
+      users.displayName,
+      users.avatarUrl,
+      teams.id,
+      teams.name,
+      teams.slug,
+      groups.id,
+      groups.name
+    )
     .orderBy(
       desc(orderByColumn),
       desc(secondaryOrderByColumn),
@@ -556,7 +644,7 @@ async function fetchLeaderboardData(
       username: row.username,
       displayName: row.displayName,
       avatarUrl: row.avatarUrl,
-      verified: Boolean(row.verified),
+      ...packMembership(row),
       totalTokens: Number(row.totalTokens) || 0,
       totalCost: Number(row.totalCost) || 0,
     })),
@@ -586,10 +674,10 @@ async function fetchLeaderboardData(
 // A username is at most 39 chars and the `client:`/`model:` directives add a
 // short prefix, so 120 is well past any real query; 500 pages of 100 is well
 // past the end of the board.
-const MAX_SEARCH_LENGTH = 120;
-const MAX_PAGE = 500;
+export const MAX_SEARCH_LENGTH = 120;
+export const MAX_PAGE = 500;
 
-function periodCacheKey(
+export function periodCacheKey(
   period: Exclude<Period, "all">,
   customFrom?: string,
   customTo?: string
@@ -691,7 +779,12 @@ async function fetchAllTimeUserRank(
   sortBy: SortBy
 ): Promise<LeaderboardUser | null> {
   const userResult = await db
-    .select({ id: users.id, username: users.username, displayName: users.displayName, avatarUrl: users.avatarUrl, verified: verifiedExpr() })
+    .select({
+      id: users.id,
+      username: users.username,
+      displayName: users.displayName,
+      avatarUrl: users.avatarUrl,
+    })
     .from(users)
     .where(and(usernameEqualsIgnoreCase(username), isNull(users.bannedAt)))
     .limit(USERNAME_LOOKUP_LIMIT);
@@ -718,30 +811,52 @@ async function fetchAllTimeUserRank(
   const userTotalTokens = Number(userStats.totalTokens);
   const userTotalCost = userStats.totalCost != null ? Number(userStats.totalCost) : 0;
 
-  const userCompareValue = sortBy === "cost"
-    ? userTotalCost
-    : userTotalTokens;
-  const compareColumn = sortBy === "cost"
-    ? sql`SUM(CAST(${submissions.totalCost} AS DECIMAL(18,4)))`
-    : sql`SUM(${submissions.totalTokens})`;
+  const userCompareValue = sortBy === "cost" ? userTotalCost : userTotalTokens;
+  const compareColumn =
+    sortBy === "cost"
+      ? sql`SUM(CAST(${submissions.totalCost} AS DECIMAL(18,4)))`
+      : sql`SUM(${submissions.totalTokens})`;
 
-  const higherRankedResult = await db
-    .select({
-      count: sql<number>`COUNT(*)`.as("count"),
-    })
-    .from(
-      db
-        .select({
-          userId: submissions.userId,
-          total: compareColumn.as("total"),
-        })
-        .from(submissions)
-        .innerJoin(users, eq(submissions.userId, users.id))
-        .where(isNull(users.bannedAt))
-        .groupBy(submissions.userId)
-        .having(sql`${compareColumn} > ${userCompareValue}`)
-        .as("higher_ranked")
-    );
+  const [higherRankedResult, membership] = await Promise.all([
+    db
+      .select({
+        count: sql<number>`COUNT(*)`.as("count"),
+      })
+      .from(
+        db
+          .select({
+            userId: submissions.userId,
+            total: compareColumn.as("total"),
+          })
+          .from(submissions)
+          .innerJoin(users, eq(submissions.userId, users.id))
+          .where(isNull(users.bannedAt))
+          .groupBy(submissions.userId)
+          .having(sql`${compareColumn} > ${userCompareValue}`)
+          .as("higher_ranked")
+      ),
+    db
+      .select({
+        teamId: teams.id,
+        teamName: teams.name,
+        teamSlug: teams.slug,
+        groupId: groups.id,
+        groupName: groups.name,
+      })
+      .from(users)
+      .leftJoin(teamMembers, eq(teamMembers.userId, users.id))
+      .leftJoin(
+        teams,
+        and(eq(teams.id, teamMembers.teamId), eq(teams.status, "active"))
+      )
+      .leftJoin(groupMembers, eq(groupMembers.userId, users.id))
+      .leftJoin(
+        groups,
+        and(eq(groups.id, groupMembers.groupId), eq(groups.status, "active"))
+      )
+      .where(eq(users.id, user.id))
+      .limit(1),
+  ]);
 
   const rank = Number(higherRankedResult[0]?.count || 0) + 1;
 
@@ -751,7 +866,7 @@ async function fetchAllTimeUserRank(
     username: user.username,
     displayName: user.displayName,
     avatarUrl: user.avatarUrl,
-    verified: Boolean(user.verified),
+    ...packMembership(membership[0] ?? {}),
     totalTokens: userTotalTokens,
     totalCost: userTotalCost,
   };

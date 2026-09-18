@@ -28,6 +28,7 @@ export type { ProfileDevice } from "./ProfileDevices";
 export { ProfileHabits } from "./ProfileHabits";
 
 export { ProfileSocialLinks } from "./ProfileSocialLinks";
+export { ProfileMembership } from "./ProfileMembership";
 
 export type {
   ModelUsage,

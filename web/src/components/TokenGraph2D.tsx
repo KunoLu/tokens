@@ -5,7 +5,9 @@ import { useTheme } from "next-themes";
 import type { DailyContribution, GraphColorPalette, TooltipPosition } from "@/lib/types";
 import { getThemeGradeColor } from "@/lib/themes";
 import { groupByWeek } from "@/lib/utils";
-import { BOX_WIDTH, CELL_SIZE, CANVAS_MARGIN, HEADER_HEIGHT, TEXT_HEIGHT, FONT_SIZE, FONT_FAMILY, DAY_LABELS_SHORT, MONTH_LABELS_SHORT } from "@/lib/constants";
+import { BOX_WIDTH, CELL_SIZE, CANVAS_MARGIN, HEADER_HEIGHT, TEXT_HEIGHT, FONT_SIZE, FONT_FAMILY } from "@/lib/constants";
+import { intlTag, useI18n, type Locale, type Translate } from "@/lib/i18n";
+import { formatContributionDate } from "@/lib/date-utils";
 import { parseISO, getMonth } from "date-fns";
 
 interface TokenGraph2DProps {
@@ -20,6 +22,11 @@ export function TokenGraph2D({ contributions, palette, year, onDayHover, onDayCl
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const weeksData = useMemo(() => groupByWeek(contributions, year), [contributions, year]);
   const { resolvedTheme } = useTheme();
+  const { t, locale } = useI18n();
+  // Split once per locale: the canvas effect depends on these arrays, and a
+  // fresh array every render would repaint the whole graph every render.
+  const monthLabels = useMemo(() => t("graph.monthsShort").split(","), [t]);
+  const dayLabels = useMemo(() => t("graph.daysShort").split(","), [t]);
   const isDark = resolvedTheme === "dark";
 
   // Theme colors are derived from `isDark` (next-themes' resolvedTheme — the
@@ -65,7 +72,7 @@ export function TokenGraph2D({ contributions, palette, year, onDayHover, onDayCl
         const month = getMonth(parseISO(firstDay.date));
         if (month !== lastMonth) {
           const x = CANVAS_MARGIN + TEXT_HEIGHT + weekIndex * CELL_SIZE;
-          ctx.fillText(MONTH_LABELS_SHORT[month], x, CANVAS_MARGIN + FONT_SIZE);
+          ctx.fillText(monthLabels[month], x, CANVAS_MARGIN + FONT_SIZE);
           lastMonth = month;
         }
       }
@@ -74,7 +81,7 @@ export function TokenGraph2D({ contributions, palette, year, onDayHover, onDayCl
     ctx.textAlign = "right";
     for (const dayIndex of [1, 3, 5]) {
       const y = HEADER_HEIGHT + dayIndex * CELL_SIZE + BOX_WIDTH / 2 + FONT_SIZE / 3;
-      ctx.fillText(DAY_LABELS_SHORT[dayIndex], CANVAS_MARGIN + TEXT_HEIGHT - 4, y);
+      ctx.fillText(dayLabels[dayIndex], CANVAS_MARGIN + TEXT_HEIGHT - 4, y);
     }
 
     for (let weekIndex = 0; weekIndex < weeksData.length; weekIndex++) {
@@ -93,7 +100,7 @@ export function TokenGraph2D({ contributions, palette, year, onDayHover, onDayCl
         ctx.fill();
       }
     }
-  }, [contributions, palette, year, weeksData, canvasWidth, canvasHeight, graphBg, graphEmptyCell, graphMuted, isDark]);
+  }, [contributions, palette, year, weeksData, canvasWidth, canvasHeight, graphBg, graphEmptyCell, graphMuted, isDark, monthLabels, dayLabels]);
 
   const getDayAtPosition = useCallback(
     (clientX: number, clientY: number): { day: DailyContribution | null; position: TooltipPosition } | null => {
@@ -145,7 +152,7 @@ export function TokenGraph2D({ contributions, palette, year, onDayHover, onDayCl
       <canvas
         ref={canvasRef}
         role="img"
-        aria-label={`Token usage contribution graph for ${year}. A list of the same days follows.`}
+        aria-label={t("graph.canvasAria", { year })}
         className="cursor-pointer"
         onMouseMove={handleMouseMove}
         onMouseLeave={() => onDayHover(null, null)}
@@ -161,7 +168,7 @@ export function TokenGraph2D({ contributions, palette, year, onDayHover, onDayCl
         {contributions.map((day) => (
           <li key={day.date}>
             <button type="button" onClick={() => onDayClick(day)}>
-              {dayButtonLabel(day)}
+              {dayButtonLabel(day, t, locale)}
             </button>
           </li>
         ))}
@@ -170,11 +177,12 @@ export function TokenGraph2D({ contributions, palette, year, onDayHover, onDayCl
   );
 }
 
-function dayButtonLabel(day: DailyContribution): string {
-  return `${day.date}: ${day.totals.tokens.toLocaleString("en-US")} tokens, ${day.totals.cost.toLocaleString(
-    "en-US",
-    { style: "currency", currency: "USD" }
-  )}`;
+function dayButtonLabel(day: DailyContribution, t: Translate, locale: Locale): string {
+  return t("graph.dayButton", {
+    date: formatContributionDate(day, locale),
+    tokens: day.totals.tokens.toLocaleString(intlTag(locale)),
+    cost: day.totals.cost.toLocaleString(intlTag(locale), { style: "currency", currency: "USD" }),
+  });
 }
 
 function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, radius: number) {

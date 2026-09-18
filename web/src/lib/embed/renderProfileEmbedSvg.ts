@@ -4,6 +4,7 @@ import type {
   EmbedTodayUsage,
 } from "./getUserEmbedStats";
 import { formatCurrency, formatNumber } from "../format";
+import { SITE_HOST } from "../site";
 import {
   type EmbedColorName,
   type EmbedNumberFormat,
@@ -183,6 +184,6 @@ export function renderProfileEmbedErrorSvg(
   ${divider(x, right, 46, palette)}
   ${fittedText({ text: message, x, y: 72, maxWidth: right - x, fill: palette.text, fontSize: 15, minFontSize: 9, fontWeight: 600 })}
   ${fittedText({ text: "Check the profile or try again later.", x, y: 94, maxWidth: right - x, fill: palette.muted, fontSize: 11, minFontSize: 8 })}
-  <text x="${right}" y="106" fill="${palette.muted}" font-size="10" text-anchor="end" font-family="${FIGTREE_FONT_STACK}">tokens.ci</text>
+  <text x="${right}" y="106" fill="${palette.muted}" font-size="10" text-anchor="end" font-family="${FIGTREE_FONT_STACK}">${SITE_HOST}</text>
 </svg>`;
 }

@@ -1,4 +1,5 @@
 import type { EmbedTemplate } from "@/lib/embed/embedShared";
+import { SITE_URL } from "@/lib/site";
 import type { ColorPaletteName } from "@/lib/themes";
 
 export type EmbedTheme = "dark" | "light";
@@ -38,7 +39,6 @@ export interface ProfileEmbedLinks {
   profileUrl: string;
 }
 
-const TOKENS_URL = "https://tokens.ci";
 
 function escapeHtmlAttribute(value: string): string {
   return value.replace(
@@ -55,7 +55,7 @@ function escapeHtmlAttribute(value: string): string {
 }
 
 export function buildEmbedPreviewPath(embedUrl: string): string {
-  const url = new URL(embedUrl, TOKENS_URL);
+  const url = new URL(embedUrl, SITE_URL);
   return `${url.pathname}${url.search}`;
 }
 
@@ -113,9 +113,9 @@ export function buildProfileEmbedLinks(
   const query = params.toString();
   const encodedUsername = encodeURIComponent(username);
   const escapedUsername = escapeHtmlAttribute(username);
-  const baseEmbedUrl = `${TOKENS_URL}/api/embed/${encodedUsername}/svg`;
+  const baseEmbedUrl = `${SITE_URL}/api/embed/${encodedUsername}/svg`;
   const embedUrl = query ? `${baseEmbedUrl}?${query}` : baseEmbedUrl;
-  const profileUrl = `${TOKENS_URL}/u/${encodedUsername}`;
+  const profileUrl = `${SITE_URL}/u/${encodedUsername}`;
 
   return {
     embedUrl,

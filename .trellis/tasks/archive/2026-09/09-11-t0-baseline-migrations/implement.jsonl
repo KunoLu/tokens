@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/web/frontend/index.md", "reason": "Web 验证命令"}
+{"file": ".trellis/spec/web/frontend/database-guidelines.md", "reason": "snapshot 必须等于 journal 尾部 idx；迁移 additive"}
+{"file": ".trellis/spec/web/frontend/quality-guidelines.md", "reason": "test:migrations 是本任务唯一验证门"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "改断言前先搜 groups 表名的全部引用"}

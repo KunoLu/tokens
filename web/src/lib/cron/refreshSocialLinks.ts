@@ -1,45 +1,38 @@
 import { db, users } from "@/lib/db";
-import { syncGitHubSocialLinks } from "@/lib/githubSocials";
-import { isVerifiedBySocialLinks } from "@/lib/socialVerification";
+import { syncGitHubSocialLinksStrict } from "@/lib/githubSocials";
 
 const SYNC_CONCURRENCY = 4;
 
 interface RefreshSocialLinksResult {
   users: number;
-  verified: number;
+  failed: number;
 }
 
 /**
- * Re-sync every user's GitHub social-links snapshot, which drives the verified
- * badge. Runs in batches so a few hundred users don't open a few hundred
- * simultaneous connections to GitHub.
+ * Re-sync every user's GitHub social-links snapshot, the source of the
+ * profile page's social-links row. Runs in batches so a few hundred users
+ * don't open a few hundred simultaneous connections to GitHub.
  *
- * Callers are responsible for keeping the runtime alive for the duration:
- * a Workers isolate stops executing once its response is returned unless the
- * promise is handed to `waitUntil`, so fire-and-forget would be truncated.
+ * Uses the strict per-user sync and counts failures: the cron caller turns
+ * `failed > 0` into a 500 so the scheduler retries instead of treating
+ * silently stale snapshots as success.
  */
 export async function refreshAllSocialLinks(): Promise<RefreshSocialLinksResult> {
   const rows = await db.select({ username: users.username }).from(users);
 
-  let verified = 0;
+  let failed = 0;
   for (let i = 0; i < rows.length; i += SYNC_CONCURRENCY) {
     const batch = rows.slice(i, i + SYNC_CONCURRENCY);
     const results = await Promise.all(
-      batch.map((row) => syncGitHubSocialLinks(row.username)),
+      batch.map((row) =>
+        syncGitHubSocialLinksStrict(row.username).then(
+          () => true,
+          () => false,
+        ),
+      ),
     );
-    for (const links of results) {
-      if (isVerifiedBySocialLinks(links)) verified++;
-    }
+    failed += results.filter((ok) => !ok).length;
   }
 
-  return { users: rows.length, verified };
-}
-
-/**
- * Count of users to report before the sync starts, so the HTTP endpoint can
- * answer 202 with a meaningful body without waiting for the whole run.
- */
-export async function countUsers(): Promise<number> {
-  const rows = await db.select({ username: users.username }).from(users);
-  return rows.length;
+  return { users: rows.length, failed };
 }

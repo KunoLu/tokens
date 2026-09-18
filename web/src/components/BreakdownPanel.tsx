@@ -4,6 +4,7 @@ import type { DailyContribution, GraphColorPalette, ClientType } from "@/lib/typ
 import { formatCurrency, formatTokenCount, groupClientsByType, sortClientsByCost } from "@/lib/utils";
 import { formatContributionDateFull } from "@/lib/date-utils";
 import { SOURCE_DISPLAY_NAMES, SOURCE_COLORS } from "@/lib/constants";
+import { intlTag, useI18n } from "@/lib/i18n";
 import { SourceLogo } from "./SourceLogo";
 
 interface BreakdownPanelProps {
@@ -13,18 +14,20 @@ interface BreakdownPanelProps {
 }
 
 export function BreakdownPanel({ day, onClose, palette }: BreakdownPanelProps) {
+  const { t, locale } = useI18n();
+
   if (!day) return null;
 
   const groupedClients = groupClientsByType(day.clients);
   const sortedClientTypes = Array.from(groupedClients.keys()).sort();
 
   return (
-    <div role="region" aria-label="Day breakdown" className="mt-8 overflow-hidden rounded-2xl border border-border bg-card shadow-sm transition-shadow hover:shadow-md">
+    <div role="region" aria-label={t("graph.dayBreakdownAria")} className="mt-8 overflow-hidden rounded-2xl border border-border bg-card shadow-sm transition-shadow hover:shadow-md">
       <div className="flex items-center justify-between gap-3 border-b border-border px-6 py-4 max-[480px]:items-start max-[480px]:p-4">
-        <h3 className="min-w-0 flex-1 text-base font-semibold text-foreground">{formatContributionDateFull(day)} — Detailed Breakdown</h3>
+        <h3 className="min-w-0 flex-1 text-base font-semibold text-foreground">{t("graph.detailedBreakdown", { date: formatContributionDateFull(day, locale) })}</h3>
         <button
           onClick={onClose}
-          aria-label="Close breakdown panel"
+          aria-label={t("graph.closeBreakdown")}
           className="flex h-11 w-11 flex-none items-center justify-center rounded-full text-muted-foreground transition hover:scale-110 hover:bg-accent"
         >
           <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -36,7 +39,7 @@ export function BreakdownPanel({ day, onClose, palette }: BreakdownPanelProps) {
 
       <div className="p-6">
         {day.clients.length === 0 ? (
-          <p className="py-8 text-center text-sm font-medium text-muted-foreground">No activity on this day</p>
+          <p className="py-8 text-center text-sm font-medium text-muted-foreground">{t("graph.noActivity")}</p>
         ) : (
           <div className="flex flex-col gap-6">
             {sortedClientTypes.map((clientType) => {
@@ -50,13 +53,10 @@ export function BreakdownPanel({ day, onClose, palette }: BreakdownPanelProps) {
         {day.clients.length > 0 && (
           <div className="mt-6 flex flex-wrap gap-6 border-t border-border pt-6 text-sm text-muted-foreground">
             <div className="font-medium">
-              Total: <span className="font-mono text-base font-bold text-foreground tabular-nums">{formatCurrency(day.totals.cost)}</span>
+              {t("graph.total")} <span className="font-mono text-base font-bold text-foreground tabular-nums">{formatCurrency(day.totals.cost, locale)}</span>
             </div>
             <div className="font-medium">
-              across{" "}
-              <span className="font-semibold text-foreground">
-                {sortedClientTypes.length} client{sortedClientTypes.length !== 1 ? "s" : ""}
-              </span>
+              {t(sortedClientTypes.length === 1 ? "graph.acrossClientsOne" : "graph.acrossClientsMany", { n: sortedClientTypes.length })}
             </div>
             <div className="font-medium">
               <span className="font-semibold text-foreground">
@@ -70,7 +70,7 @@ export function BreakdownPanel({ day, onClose, palette }: BreakdownPanelProps) {
                     }
                   }
                   const count = allModels.size;
-                  return `${count} model${count !== 1 ? "s" : ""}`;
+                  return t(count === 1 ? "graph.modelsOne" : "graph.modelsMany", { n: count });
                 })()}
               </span>
             </div>
@@ -89,6 +89,7 @@ interface ClientSectionProps {
 }
 
 function ClientSection({ clientType, clients, totalCost, palette }: ClientSectionProps) {
+  const { locale } = useI18n();
   const clientColor = SOURCE_COLORS[clientType] || palette.grade3;
 
   const modelEntries: Array<{ modelId: string; cost: number; messages: number; tokens: { input: number; output: number; cacheRead: number; cacheWrite: number; reasoning: number } }> = [];
@@ -133,7 +134,7 @@ function ClientSection({ clientType, clients, totalCost, palette }: ClientSectio
           <SourceLogo sourceId={clientType} height={14} />
           {SOURCE_DISPLAY_NAMES[clientType] || clientType}
         </span>
-        <span className="text-sm font-bold text-foreground">{formatCurrency(totalCost)}</span>
+        <span className="text-sm font-bold text-foreground">{formatCurrency(totalCost, locale)}</span>
       </div>
 
       <div className="ml-5 flex flex-col gap-3">
@@ -151,6 +152,7 @@ interface ModelRowProps {
 }
 
 function ModelRow({ model, isLast }: ModelRowProps) {
+  const { t, locale } = useI18n();
   const { modelId, tokens, cost, messages } = model;
 
   return (
@@ -164,20 +166,20 @@ function ModelRow({ model, isLast }: ModelRowProps) {
         <div className="flex min-w-0 flex-wrap items-center gap-3">
           <span className="min-w-0 flex-1 truncate font-mono text-sm font-semibold text-foreground">{modelId}</span>
           <span className="flex-none font-mono text-sm font-bold text-primary tabular-nums">
-            {formatCurrency(cost)}
+            {formatCurrency(cost, locale)}
           </span>
         </div>
 
         <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-2 text-xs max-[400px]:grid-cols-1 sm:grid-cols-3 md:grid-cols-5">
-          {tokens.input > 0 && <TokenBadge label="Input" value={tokens.input} />}
-          {tokens.output > 0 && <TokenBadge label="Output" value={tokens.output} />}
-          {tokens.cacheRead > 0 && <TokenBadge label="Cache Read" value={tokens.cacheRead} />}
-          {tokens.cacheWrite > 0 && <TokenBadge label="Cache Write" value={tokens.cacheWrite} />}
-          {tokens.reasoning > 0 && <TokenBadge label="Reasoning" value={tokens.reasoning} />}
+          {tokens.input > 0 && <TokenBadge label={t("graph.tokenInput")} value={tokens.input} />}
+          {tokens.output > 0 && <TokenBadge label={t("graph.tokenOutput")} value={tokens.output} />}
+          {tokens.cacheRead > 0 && <TokenBadge label={t("graph.tokenCacheRead")} value={tokens.cacheRead} />}
+          {tokens.cacheWrite > 0 && <TokenBadge label={t("graph.tokenCacheWrite")} value={tokens.cacheWrite} />}
+          {tokens.reasoning > 0 && <TokenBadge label={t("graph.tokenReasoning")} value={tokens.reasoning} />}
         </div>
 
         <div className="mt-2 font-mono text-xs font-medium text-muted-foreground tabular-nums">
-          {messages.toLocaleString()} message{messages !== 1 ? "s" : ""}
+          {t(messages === 1 ? "graph.messagesOne" : "graph.messagesMany", { n: messages.toLocaleString(intlTag(locale)) })}
         </div>
       </div>
     </div>
@@ -185,10 +187,11 @@ function ModelRow({ model, isLast }: ModelRowProps) {
 }
 
 function TokenBadge({ label, value }: { label: string; value: number }) {
+  const { locale } = useI18n();
   return (
     <div className="flex min-w-0 items-center gap-1.5">
       <span className="font-medium text-muted-foreground">{label}:</span>
-      <span className="font-mono font-semibold text-foreground tabular-nums">{formatTokenCount(value)}</span>
+      <span className="font-mono font-semibold text-foreground tabular-nums">{formatTokenCount(value, locale)}</span>
     </div>
   );
 }

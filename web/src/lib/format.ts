@@ -1,3 +1,6 @@
+import { intlTag, type Locale } from "@/lib/i18n/locale";
+
+
 export function escapeXml(value: string): string {
   return value
     .replace(/&/g, "&amp;")
@@ -11,31 +14,50 @@ function safeNumber(value: number): number {
   return Number.isFinite(value) ? value : 0;
 }
 
-export function formatCompact(value: number, kind: "number" | "currency"): string {
+function numberLocale(locale: Locale): string {
+  return intlTag(locale);
+}
+
+export function formatCompact(
+  value: number,
+  kind: "number" | "currency",
+  locale: Locale = "en"
+): string {
   const clamped = Math.max(0, safeNumber(value));
+  const tag = numberLocale(locale);
 
   if (kind === "currency") {
-    const formatted = new Intl.NumberFormat("en-US", {
+    const formatted = new Intl.NumberFormat(tag, {
       notation: "compact",
       maximumFractionDigits: clamped >= 100 ? 1 : 2,
     }).format(clamped);
     return `$${formatted}`;
   }
 
-  return new Intl.NumberFormat("en-US", {
+  return new Intl.NumberFormat(tag, {
     notation: "compact",
     maximumFractionDigits: clamped >= 100 ? 1 : 2,
   }).format(Math.round(clamped));
 }
 
-export function formatNumber(value: number, compact = false): string {
-  if (compact) return formatCompact(value, "number");
-  return new Intl.NumberFormat("en-US").format(Math.max(0, Math.round(safeNumber(value))));
+export function formatNumber(
+  value: number,
+  compact = false,
+  locale: Locale = "en"
+): string {
+  if (compact) return formatCompact(value, "number", locale);
+  return new Intl.NumberFormat(numberLocale(locale)).format(
+    Math.max(0, Math.round(safeNumber(value)))
+  );
 }
 
-export function formatCurrency(value: number, compact = false): string {
-  if (compact) return formatCompact(value, "currency");
-  return new Intl.NumberFormat("en-US", {
+export function formatCurrency(
+  value: number,
+  compact = false,
+  locale: Locale = "en"
+): string {
+  if (compact) return formatCompact(value, "currency", locale);
+  return new Intl.NumberFormat(numberLocale(locale), {
     style: "currency",
     currency: "USD",
     minimumFractionDigits: 2,
@@ -43,36 +65,6 @@ export function formatCurrency(value: number, compact = false): string {
   }).format(Math.max(0, safeNumber(value)));
 }
 
-/**
- * Format an ISO timestamp as a short relative time, e.g. "just now",
- * "5m ago", "3h ago", "12d ago", "2mo ago", "1y ago". Returns "never"
- * for null/invalid input so callers can render it directly.
- *
- * `now` is injectable for tests; future timestamps clamp to "just now".
- */
-export function formatRelativeTime(
-  iso: string | null | undefined,
-  now: Date = new Date()
-): string {
-  if (!iso) return "never";
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return "never";
-
-  const diffMs = now.getTime() - date.getTime();
-  if (diffMs < 60_000) return "just now";
-
-  const minutes = Math.floor(diffMs / 60_000);
-  if (minutes < 60) return `${minutes}m ago`;
-
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-
-  const days = Math.floor(hours / 24);
-  if (days < 30) return `${days}d ago`;
-  if (days < 365) return `${Math.floor(days / 30)}mo ago`;
-
-  return `${Math.floor(days / 365)}y ago`;
-}
 
 /**
  * Format milliseconds into a human-readable duration string.

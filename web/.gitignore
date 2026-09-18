@@ -41,14 +41,14 @@ yarn-error.log*
 next-env.d.ts
 .env*.local
 
-# cloudflare / opennext
-/.open-next/
-.wrangler/
-.dev.vars
-cloudflare-env.d.ts
+
 
 # Copied from the repo root at build time by `prebuild:assets`.
 public/install.sh
+public/pre-install-tokens.sh
+public/pre-install-tokens.ps1
+public/enable-tokens-service.sh
+public/register-tokens-submit-task.ps1
 
 # Copied from .github/assets at build time.
 public/clients/

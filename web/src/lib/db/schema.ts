@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import {
   pgTable,
   uuid,
@@ -12,6 +13,7 @@ import {
   index,
   unique,
   uniqueIndex,
+  check,
 } from "drizzle-orm/pg-core";
 import {
   USERS_USERNAME_LOWER_UNIQUE_INDEX,
@@ -25,15 +27,19 @@ export const users = pgTable(
   "users",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    githubId: integer("github_id").notNull().unique(),
+    // Nullable since 0024: email/password accounts have no GitHub identity.
+    // Postgres allows any number of NULLs under the UNIQUE constraint.
+    githubId: integer("github_id").unique(),
     username: varchar("username", { length: 39 }).notNull().unique(),
     displayName: varchar("display_name", { length: 255 }),
     avatarUrl: text("avatar_url"),
     email: varchar("email", { length: 255 }),
+    passwordHash: varchar("password_hash", { length: 255 }),
+    emailVerifiedAt: timestamp("email_verified_at", { withTimezone: true }),
     /**
      * Snapshot of the user's public GitHub social links (website + recognized
-     * social accounts), refreshed on login and on profile views. An array of
-     * {provider, url}; >= 2 entries marks the user as verified.
+     * social accounts), refreshed by the daily cron and rendered on the
+     * profile page. An array of {provider, url}.
      */
     socialLinks: jsonb("social_links"),
     socialLinksSyncedAt: timestamp("social_links_synced_at", {
@@ -41,9 +47,9 @@ export const users = pgTable(
     }),
     /**
      * Non-null once the user is banned. Banned users cannot authenticate
-     * (web session, OAuth login, or API token) and are excluded from every
-     * leaderboard, but their submitted rows are retained as evidence and
-     * listed on the Hall of Shame together with banReason.
+     * (web session, password login, or API token) and are excluded from every
+     * leaderboard, but their submitted rows are retained as evidence together
+     * with banReason.
      */
     bannedAt: timestamp("banned_at", { withTimezone: true }),
     banReason: text("ban_reason"),
@@ -64,6 +70,45 @@ export const users = pgTable(
       usernameLowerExpression(table.username)
     ),
     index("idx_users_github_id").on(table.githubId),
+    // Login lookup is by email, case-insensitively; rows without an email
+    // (legacy OAuth accounts) stay outside the partial index.
+    uniqueIndex("users_email_lower_unique")
+      .on(sql`lower(${table.email})`)
+      .where(sql`"email" IS NOT NULL`),
+  ]
+);
+
+// ============================================================================
+// EMAIL VERIFICATION TOKENS
+// ============================================================================
+/**
+ * Single-use tokens for email verification (24h) and password reset (1h).
+ * Only the SHA-256 hash is stored; the plaintext lives solely in the emailed
+ * link. Issuing a new token for the same user+purpose consumes the old ones,
+ * so at most one is active at a time. Expired rows are swept by the daily cron.
+ */
+export const emailVerificationTokens = pgTable(
+  "email_verification_tokens",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    tokenHash: varchar("token_hash", { length: 64 }).notNull(),
+    purpose: varchar("purpose", { length: 20 }).notNull(), // 'verify_email' | 'reset_password'
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    consumedAt: timestamp("consumed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    unique("email_verification_tokens_token_hash_unique").on(table.tokenHash),
+    index("idx_email_verification_tokens_user_purpose").on(
+      table.userId,
+      table.purpose
+    ),
+    index("idx_email_verification_tokens_expires_at").on(table.expiresAt),
   ]
 );
 
@@ -443,10 +488,166 @@ export const archivedWindowTotals = pgTable(
 );
 
 // ============================================================================
+// TEAMS / GROUPS
+// ============================================================================
+/**
+ * Organization unit. INV-1 is enforced by team_members.user_id UNIQUE.
+ * `created_by` survives disband; delete auth reads this column, not admin
+ * membership, because disband clears every team_members row (INV-7).
+ */
+export const teams = pgTable(
+  "teams",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    name: varchar("name", { length: 100 }).notNull(),
+    slug: varchar("slug", { length: 100 }).notNull(),
+    avatarUrl: text("avatar_url"),
+    visibility: varchar("visibility", { length: 10 })
+      .notNull()
+      .default("private"),
+    status: varchar("status", { length: 10 }).notNull().default("active"),
+    createdBy: uuid("created_by")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    disbandedAt: timestamp("disbanded_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    unique("teams_slug_unique").on(table.slug),
+    index("teams_public_active_idx")
+      .on(table.name)
+      .where(sql`"visibility" = 'public' AND "status" = 'active'`),
+  ]
+);
+
+export const teamMembers = pgTable(
+  "team_members",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    teamId: uuid("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    role: varchar("role", { length: 10 }).notNull().default("member"),
+    invitedBy: uuid("invited_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    joinedAt: timestamp("joined_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    unique("team_members_user_unique").on(table.userId),
+    index("idx_team_members_team_role").on(table.teamId, table.role),
+  ]
+);
+
+export const groups = pgTable(
+  "groups",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    teamId: uuid("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "cascade" }),
+    name: varchar("name", { length: 100 }).notNull(),
+    status: varchar("status", { length: 10 }).notNull().default("active"),
+    createdBy: uuid("created_by")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    disbandedAt: timestamp("disbanded_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    unique("groups_team_name_unique").on(table.teamId, table.name),
+    index("idx_groups_team_status").on(table.teamId, table.status),
+  ]
+);
+
+export const groupMembers = pgTable(
+  "group_members",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    groupId: uuid("group_id")
+      .notNull()
+      .references(() => groups.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    joinedAt: timestamp("joined_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    unique("group_members_user_unique").on(table.userId),
+    index("idx_group_members_group_id").on(table.groupId),
+  ]
+);
+
+export const teamInvitations = pgTable(
+  "team_invitations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    teamId: uuid("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "cascade" }),
+    invitedEmail: varchar("invited_email", { length: 255 }),
+    invitedUsername: varchar("invited_username", { length: 39 }),
+    invitedUserId: uuid("invited_user_id").references(() => users.id, {
+      onDelete: "cascade",
+    }),
+    invitedBy: uuid("invited_by")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    status: varchar("status", { length: 10 }).notNull().default("pending"),
+    tokenHash: varchar("token_hash", { length: 64 }).notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    respondedAt: timestamp("responded_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    groupId: uuid("group_id").references(() => groups.id, {
+      onDelete: "set null",
+    }),
+  },
+  (table) => [
+    unique("team_invitations_token_hash_unique").on(table.tokenHash),
+    check(
+      "team_invitations_target_present",
+      sql`${table.invitedUserId} IS NOT NULL OR ${table.invitedEmail} IS NOT NULL`
+    ),
+    uniqueIndex("team_invitations_pending_user_unique")
+      .on(table.teamId, table.invitedUserId)
+      .where(sql`"status" = 'pending' AND "invited_user_id" IS NOT NULL`),
+    uniqueIndex("team_invitations_pending_email_unique")
+      .on(table.teamId, sql`lower(${table.invitedEmail})`)
+      .where(sql`"status" = 'pending' AND "invited_user_id" IS NULL`),
+    index("idx_team_invitations_invited_user_status").on(
+      table.invitedUserId,
+      table.status
+    ),
+    index("idx_team_invitations_expires_at").on(table.expiresAt),
+  ]
+);
+
+// ============================================================================
 // TYPE EXPORTS
 // ============================================================================
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
+export type EmailVerificationToken = typeof emailVerificationTokens.$inferSelect;
+export type NewEmailVerificationToken = typeof emailVerificationTokens.$inferInsert;
 export type Session = typeof sessions.$inferSelect;
 export type NewSession = typeof sessions.$inferInsert;
 export type ApiToken = typeof apiTokens.$inferSelect;
@@ -459,3 +660,13 @@ export type SubmittedDevice = typeof submittedDevices.$inferSelect;
 export type NewSubmittedDevice = typeof submittedDevices.$inferInsert;
 export type DailyBreakdown = typeof dailyBreakdown.$inferSelect;
 export type NewDailyBreakdown = typeof dailyBreakdown.$inferInsert;
+export type Team = typeof teams.$inferSelect;
+export type NewTeam = typeof teams.$inferInsert;
+export type TeamMember = typeof teamMembers.$inferSelect;
+export type NewTeamMember = typeof teamMembers.$inferInsert;
+export type Group = typeof groups.$inferSelect;
+export type NewGroup = typeof groups.$inferInsert;
+export type GroupMember = typeof groupMembers.$inferSelect;
+export type NewGroupMember = typeof groupMembers.$inferInsert;
+export type TeamInvitation = typeof teamInvitations.$inferSelect;
+export type NewTeamInvitation = typeof teamInvitations.$inferInsert;

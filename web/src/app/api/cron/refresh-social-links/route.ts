@@ -1,7 +1,8 @@
 import { timingSafeEqual } from "crypto";
 import { NextResponse } from "next/server";
-import { getCloudflareContext } from "@opennextjs/cloudflare";
-import { countUsers, refreshAllSocialLinks } from "@/lib/cron/refreshSocialLinks";
+import { refreshAllSocialLinks } from "@/lib/cron/refreshSocialLinks";
+import { deleteExpiredEmailTokens } from "@/lib/auth/emailTokens";
+import { expireInvitations } from "@/lib/teams/service";
 
 export const dynamic = "force-dynamic";
 
@@ -12,29 +13,18 @@ function safeEqual(a: string, b: string): boolean {
 }
 
 /**
- * Keep the sync running after the 202 has been sent.
+ * Daily maintenance for the self-hosted deployment — the Node replacement for
+ * the Worker cron trigger. Refreshes social-links snapshots, sweeps expired
+ * email-verification tokens, and expires overdue team invitations.
  *
- * On Workers an isolate stops executing once its response is returned, so the
- * promise has to be handed to `waitUntil` or the run is truncated partway
- * through the user list. Outside Workers there is no such constraint and the
- * floating promise settles on its own.
- */
-function runInBackground(work: Promise<unknown>): void {
-  try {
-    getCloudflareContext().ctx.waitUntil(work);
-    return;
-  } catch {
-    // Not on Workers.
-  }
-
-  void work;
-}
-
-/**
- * Daily refresh of every user's GitHub social-links snapshot (drives the
- * verified badge). Triggered by the Worker's cron trigger, or over HTTP for
- * manual runs; guarded by CRON_SECRET. Responds immediately and syncs in the
- * background so proxy timeouts can't cut the run short.
+ * Every job runs to completion inside the request and the response is the
+ * scheduler's retry signal: 200 only when all three succeeded, 500 when any
+ * failed. A failing job does not skip the others (they are independent), and
+ * all three are idempotent sweeps, so retrying after a partial failure is
+ * safe. Trigger it from the same host (system cron -> loopback) so no public
+ * proxy timeout can cut a run short.
+ *
+ * Scenarios: web/features/maintenance-cron.feature.
  */
 export async function POST(request: Request) {
   const secret = process.env.CRON_SECRET;
@@ -50,15 +40,46 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const total = await countUsers();
+  const [socialLinks, emailTokens, invitations] = await Promise.all([
+    refreshAllSocialLinks()
+      .then(({ users, failed }) =>
+        failed === 0
+          ? { ok: true as const, refreshedUsers: users }
+          : { ok: false as const, refreshedUsers: users, failedRefreshes: failed },
+      )
+      .catch((error: unknown) => {
+        console.error("[cron] refreshAllSocialLinks failed", error);
+        return { ok: false as const };
+      }),
+    deleteExpiredEmailTokens()
+      .then((deleted) => ({ ok: true as const, expiredEmailTokens: deleted }))
+      .catch((error: unknown) => {
+        console.error("[cron] deleteExpiredEmailTokens failed", error);
+        return { ok: false as const };
+      }),
+    expireInvitations()
+      .then((expired) => ({ ok: true as const, expiredInvitations: expired }))
+      .catch((error: unknown) => {
+        console.error("[cron] expireInvitations failed", error);
+        return { ok: false as const };
+      }),
+  ]);
 
-  runInBackground(
-    refreshAllSocialLinks().then(({ users, verified }) => {
-      console.log(
-        `[cron] refresh-social-links: synced ${users} users, ${verified} verified`,
-      );
-    }),
-  );
+  if (!socialLinks.ok || !emailTokens.ok || !invitations.ok) {
+    const failedJobs = [
+      ...(!socialLinks.ok ? ["socialLinks"] : []),
+      ...(!emailTokens.ok ? ["emailTokens"] : []),
+      ...(!invitations.ok ? ["invitations"] : []),
+    ];
+    return NextResponse.json(
+      { error: "One or more cron jobs failed", failedJobs },
+      { status: 500 },
+    );
+  }
 
-  return NextResponse.json({ accepted: true, users: total }, { status: 202 });
+  return NextResponse.json({
+    refreshedUsers: socialLinks.refreshedUsers,
+    expiredEmailTokens: emailTokens.expiredEmailTokens,
+    expiredInvitations: invitations.expiredInvitations,
+  });
 }

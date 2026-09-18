@@ -19,17 +19,22 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
-import { VerifiedBadge } from "@/components/ui/VerifiedBadge";
 import { cn } from "@/lib/utils";
 import { CONTAINER } from "@/components/layout/Container";
 import { PageHeader } from "@/components/layout/PageHeader";
-import { formatCurrency, formatNumber } from "@/lib/format";
+import { useFormat, useI18n, type TranslationKey } from "@/lib/i18n";
 import type {
   LeaderboardSortBy,
   LeaderboardTokenFormat,
 } from "@/lib/leaderboard/constants";
 import type { LeaderboardData, LeaderboardUser, Period } from "@/lib/leaderboard/types";
 import { toLocalDateString } from "@/lib/leaderboard/dateRange";
+import { avatarUrlFor } from "@/lib/avatar";
+import {
+  MembershipBadges,
+  MembershipCells,
+  MembershipColumnHeaders,
+} from "@/components/leaderboard/MembershipCells";
 
 interface SessionUser {
   id: string;
@@ -46,18 +51,28 @@ interface LeaderboardProps {
 }
 
 // All time leads because it is the standing everyone compares against; Today
-// stays the landing selection, which the server resolves.
-const PERIODS: ReadonlyArray<{ value: Period; label: string }> = [
-  { value: "all", label: "All time" },
-  { value: "today", label: "Today" },
-  { value: "week", label: "Week" },
-  { value: "month", label: "Month" },
-  { value: "last-month", label: "Last month" },
+// stays the landing selection, which the server resolves. Labels come from the
+// dictionary at render via PERIOD_LABEL_KEYS; `value` stays the URL token.
+export const PERIODS: ReadonlyArray<{ value: Period }> = [
+  { value: "all" },
+  { value: "today" },
+  { value: "week" },
+  { value: "month" },
+  { value: "last-month" },
 ];
 
-function avatarFor(user: { username: string; avatarUrl: string | null }) {
-  return user.avatarUrl || `https://github.com/${user.username}.png`;
-}
+// Shared with the Teamboard, which renders the same period chrome. `custom`
+// is parsed on the URL but is not a ToggleGroup option, so it reuses the
+// All-time label.
+export const PERIOD_LABEL_KEYS: Record<Period, TranslationKey> = {
+  all: "teamboard.periodAll",
+  today: "teamboard.periodToday",
+  week: "teamboard.periodWeek",
+  month: "teamboard.periodMonth",
+  "last-month": "teamboard.periodLastMonth",
+  custom: "teamboard.periodAll",
+};
+
 
 function Stat({
   label,
@@ -86,24 +101,27 @@ function Stat({
     </div>
   );
 }
-
-function DeveloperRow({
+// Exported for the Teamboard, which renders the same rows minus the Team
+// column (`hideTeam`) — one row implementation, two column sets.
+export function DeveloperRow({
   user,
   isSelf,
   max,
   sortBy,
   tokenFormat,
+  hideTeam = false,
 }: {
   user: LeaderboardUser;
   isSelf: boolean;
   max: number;
   sortBy: LeaderboardSortBy;
   tokenFormat: LeaderboardTokenFormat;
+  hideTeam?: boolean;
 }) {
   const compact = tokenFormat === "compact";
+  const { formatNumber, formatCurrency } = useFormat();
   const primary = sortBy === "cost" ? user.totalCost : user.totalTokens;
   const share = max > 0 ? Math.max(primary / max, 0.006) : 0;
-
   return (
     <TableRow
       className={cn(
@@ -136,24 +154,24 @@ function DeveloperRow({
           className="flex min-w-0 items-center gap-3"
         >
           <Avatar className="size-7 shrink-0">
-            <AvatarImage src={avatarFor(user)} alt="" loading="lazy" />
+            <AvatarImage src={avatarUrlFor(user)} alt="" loading="lazy" />
             <AvatarFallback className="text-[10px]">
               {user.username.slice(0, 2).toUpperCase()}
             </AvatarFallback>
           </Avatar>
           <span className="flex min-w-0 flex-col leading-tight">
-            <span className="flex items-center gap-1.5">
-              <span className="truncate text-sm font-medium group-hover:underline">
-                {user.displayName || user.username}
-              </span>
-              {user.verified && <VerifiedBadge size={13} />}
+            <span className="truncate text-sm font-medium group-hover:underline">
+              {user.displayName || user.username}
             </span>
             <span className="truncate text-xs text-muted-foreground">
               @{user.username}
             </span>
+            <MembershipBadges team={hideTeam ? null : user.team} group={user.group} />
           </span>
         </Link>
       </TableCell>
+
+      <MembershipCells team={user.team} group={user.group} includeTeam={!hideTeam} />
 
       {/* Phones get one stacked cell; the split columns need the width.
           Always abbreviated here, regardless of the stored preference: the
@@ -235,23 +253,28 @@ function DeveloperRow({
  * on a pointer. The title spells out what the click will do, in the direction
  * it will do it.
  */
-function FormatToggle({
+export function FormatToggle({
   label,
   compact,
   onToggle,
+  titles,
 }: {
   label: string;
   compact: boolean;
   onToggle: () => void;
+  /** Localized title/aria strings describing the action each direction takes. */
+  titles: { showExact: string; abbreviate: string };
 }) {
   return (
     <button
       type="button"
       onClick={onToggle}
       aria-label={
-        compact ? `${label}: show exact numbers` : `${label}: abbreviate numbers`
+        compact
+          ? `${label}: ${titles.showExact}`
+          : `${label}: ${titles.abbreviate}`
       }
-      title={compact ? "Show exact numbers" : "Abbreviate numbers"}
+      title={compact ? titles.showExact : titles.abbreviate}
       className="flex h-full w-full items-center justify-end gap-1.5 px-2 py-2 transition-colors hover:text-foreground"
     >
       {label}
@@ -272,7 +295,12 @@ export default function Leaderboard({
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-
+  const { t } = useI18n();
+  const { formatNumber, formatCurrency } = useFormat();
+  const formatTitles = {
+    showExact: t("teamboard.showExact"),
+    abbreviate: t("teamboard.abbreviate"),
+  };
   const [sortBy, setSortBy] = useState<LeaderboardSortBy>(initialSortBy);
   const [search, setSearch] = useState(searchParams.get("search") ?? "");
   // The query these results actually answer, as opposed to what is currently
@@ -356,8 +384,8 @@ export default function Leaderboard({
   return (
     <div className={cn(CONTAINER, "pb-24 pt-10 sm:pt-14")}>
       <PageHeader
-        title="Leaderboard"
-        description="AI coding token usage, reported by the Tokens CLI."
+        title={t("nav.leaderboard")}
+        description={t("leaderboard.desc")}
       />
 
       {/* The rank card exists only when there is a rank to put in it. A signed
@@ -371,19 +399,19 @@ export default function Leaderboard({
           "grid grid-cols-2 gap-6",
           initialUserRank ? "sm:grid-cols-4" : "sm:grid-cols-3"
         )}
-        aria-label="Totals"
+        aria-label={t("leaderboard.totalsAria")}
       >
-        <Stat label="Tokens" value={formatNumber(stats.totalTokens, true)} />
-        <Stat label="Cost" value={formatCurrency(stats.totalCost, true)} />
+        <Stat label={t("teamboard.sortTokens")} value={formatNumber(stats.totalTokens, true)} />
+        <Stat label={t("teamboard.sortCost")} value={formatCurrency(stats.totalCost, true)} />
         <Stat
-          label="Developers"
+          label={t("leaderboard.developers")}
           value={formatNumber(stats.uniqueUsers, false)}
           className={initialUserRank ? undefined : "col-span-2 sm:col-span-1"}
         />
         {/* The only figure here that is about the viewer, so it takes the
             accent — same signal as the highlighted self row below. */}
         {initialUserRank && (
-          <Stat label="Your rank" value={`#${initialUserRank.rank}`} accent />
+          <Stat label={t("leaderboard.yourRank")} value={`#${initialUserRank.rank}`} accent />
         )}
       </section>
 
@@ -413,12 +441,12 @@ export default function Leaderboard({
               });
             }}
             variant="outline"
-            aria-label="Period"
+            aria-label={t("teamboard.periodFilter")}
             className="[&>*]:h-10 [&>*]:px-3.5 sm:[&>*]:h-8 sm:[&>*]:px-3"
           >
             {PERIODS.map((p) => (
               <ToggleGroupItem key={p.value} value={p.value}>
-                {p.label}
+                {t(PERIOD_LABEL_KEYS[p.value])}
               </ToggleGroupItem>
             ))}
           </ToggleGroup>
@@ -434,11 +462,11 @@ export default function Leaderboard({
               pushQuery({ sortBy: next, page: null });
             }}
             variant="outline"
-            aria-label="Sort by"
+            aria-label={t("teamboard.sortFilter")}
             className="[&>*]:h-10 [&>*]:px-3.5 sm:[&>*]:h-8 sm:[&>*]:px-3"
           >
-            <ToggleGroupItem value="tokens">Tokens</ToggleGroupItem>
-            <ToggleGroupItem value="cost">Cost</ToggleGroupItem>
+            <ToggleGroupItem value="tokens">{t("teamboard.sortTokens")}</ToggleGroupItem>
+            <ToggleGroupItem value="cost">{t("teamboard.sortCost")}</ToggleGroupItem>
           </ToggleGroup>
 
           <form
@@ -453,8 +481,8 @@ export default function Leaderboard({
               ref={searchRef}
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search…"
-              aria-label="Search developers"
+              placeholder={t("teamboard.searchPlaceholder")}
+              aria-label={t("teamboard.searchAria")}
               className="h-10 w-full pl-8 text-sm sm:h-8 sm:w-56"
             />
           </form>
@@ -476,7 +504,7 @@ export default function Leaderboard({
           aria-busy={pending}
         >
           <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-            Your position
+            {t("leaderboard.yourPosition")}
           </span>
           <div className="mt-1.5 overflow-hidden rounded-lg border">
             <Table>
@@ -505,8 +533,12 @@ export default function Leaderboard({
           <TableHeader>
             <TableRow className="hover:bg-transparent">
               <TableHead className="w-12 pl-4 sm:pl-6">#</TableHead>
-              <TableHead>Developer</TableHead>
-              <TableHead className="pr-4 text-right sm:hidden">Usage</TableHead>
+              <TableHead>{t("teamboard.colDeveloper")}</TableHead>
+              <MembershipColumnHeaders
+                teamLabel={t("leaderboard.colTeam")}
+                groupLabel={t("teamboard.colGroup")}
+              />
+              <TableHead className="pr-4 text-right sm:hidden">{t("teamboard.colUsage")}</TableHead>
               {/* Both numeric headers toggle abbreviated figures (1.2B) for
                   exact ones — a toggle contributed upstream by Fai Chou that
                   people rely on when comparing close totals. It was invisible:
@@ -516,7 +548,8 @@ export default function Leaderboard({
                   preference so the two columns cannot disagree. */}
               <TableHead className="hidden w-44 p-0 text-right sm:table-cell">
                 <FormatToggle
-                  label="Tokens"
+                  label={t("teamboard.sortTokens")}
+                  titles={formatTitles}
                   compact={tokenFormat === "compact"}
                   onToggle={() =>
                     setLeaderboardTokenFormat(
@@ -527,7 +560,8 @@ export default function Leaderboard({
               </TableHead>
               <TableHead className="hidden w-32 p-0 pr-4 text-right sm:table-cell">
                 <FormatToggle
-                  label="Cost"
+                  label={t("teamboard.sortCost")}
+                  titles={formatTitles}
                   compact={tokenFormat === "compact"}
                   onToggle={() =>
                     setLeaderboardTokenFormat(
@@ -561,12 +595,12 @@ export default function Leaderboard({
                   the applied query rather than the input, which can have been
                   typed past what these results answer. */}
               <EmptyTitle>
-                {appliedSearch ? "No developers found" : "Nothing recorded"}
+                {appliedSearch ? t("teamboard.noSearchTitle") : t("teamboard.nothingTitle")}
               </EmptyTitle>
               <EmptyDescription>
                 {appliedSearch
-                  ? `No developer matches "${appliedSearch}" for this period.`
-                  : "No usage was submitted for this period."}
+                  ? t("teamboard.noSearchDesc", { q: appliedSearch })
+                  : t("teamboard.nothingDesc")}
               </EmptyDescription>
             </EmptyHeader>
           </Empty>
@@ -574,17 +608,17 @@ export default function Leaderboard({
       </div>
 
       {pagination.totalPages > 1 && (
-        <nav className="mt-6 flex items-center justify-between" aria-label="Pagination">
+        <nav className="mt-6 flex items-center justify-between" aria-label={t("teamboard.paginationAria")}>
           <Button
             variant="outline"
             disabled={!pagination.hasPrev}
             className="h-10 sm:h-8"
             onClick={() => pushQuery({ page: String(pagination.page - 1) })}
           >
-            Previous
+            {t("teamboard.prevPage")}
           </Button>
           <span className="tabular text-xs text-muted-foreground">
-            {pagination.page} of {pagination.totalPages}
+            {t("teamboard.pageOf", { page: pagination.page, total: pagination.totalPages })}
           </span>
           <Button
             variant="outline"
@@ -592,7 +626,7 @@ export default function Leaderboard({
             className="h-10 sm:h-8"
             onClick={() => pushQuery({ page: String(pagination.page + 1) })}
           >
-            Next
+            {t("teamboard.nextPage")}
           </Button>
         </nav>
       )}
