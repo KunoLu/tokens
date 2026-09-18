@@ -196,21 +196,30 @@ export default async function DocsPage() {
             <TabsContent value="macos" className="mt-4 flex flex-col gap-3">
               <CommandBlock
                 commands={[
+                  ...localize(locale, [MACOS[0]]),
                   { command: preinstallSh, note: t(locale, "docs.note.preinstall") },
-                  ...localize(locale, MACOS),
+                  ...localize(locale, MACOS.slice(1)),
                 ]}
               />
               <p className="text-sm leading-relaxed text-muted-foreground">
                 <code className="font-mono text-[13px]">tokens serve</code>{" "}
-                {t(locale, "docs.macosNote")}
+                {t(locale, "docs.macosNote")}{" "}
+                <a
+                  href="https://github.com/KunoLu/tokens/blob/main/docs/deploy/tokens-cli-usage.md"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-foreground underline underline-offset-4"
+                >
+                  {t(locale, "docs.cliGuideLink")}
+                </a>
               </p>
             </TabsContent>
 
             <TabsContent value="linux" className="mt-4 flex flex-col gap-3">
               <CommandBlock
                 commands={[
-                  { command: preinstallSh, note: t(locale, "docs.note.preinstall") },
                   { command: `curl -fsSL ${siteUrl}/install.sh | sh`, note: t(locale, "docs.note.install") },
+                  { command: preinstallSh, note: t(locale, "docs.note.preinstall") },
                   ...localize(locale, LINUX),
                 ]}
               />
