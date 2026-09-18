@@ -27,4 +27,16 @@
 - Fix: Remove the unused `colorPalettes` import (T11-caused). Leave the DeviceClient effect alone. Do not claim lint/E2E passed while the pre-existing error remains.
 - Prevention: Diff the failing line against HEAD before editing. If the pattern predates the wrap, record it as a remaining lint risk; do not fold it into the i18n task.
 
+## LESSON-20260918-640-e2e-locator-dollar-prefix: Exact-text e2e locators must include the CommandBlock prompt prefix
+
+- Date: 2026-09-18
+- Tags: validation, playwright, e2e, locator, docs
+- Applicable scenarios: Writing or editing e2e assertions against docs-page CommandBlock commands; when an exact-text getByText times out on a command that is visibly on screen
+- Severity: medium
+- Source: Windows docs tab change (commit `1355308ae048b6827a1da430d55f38c8b416762a`); failure report `tests/e2e/reports/html/playwright-report-docs-page-feature_teamboard-teams-auth-2026_09_18-10_18_35.md`
+- Problem: `getByText("tokens login", { exact: true })` timed out for 15s even though the Windows panel was mounted and showing the command.
+- Root cause: `web/src/components/docs/CommandBlock.tsx:55-56` renders a decorative `<span>$ </span>` inside the `<code>`, so the element's full text is `$ tokens login`. Exact matching compares the whole normalized text. The failure's error-context a11y snapshot already showed `code: $ tokens login`.
+- Fix: `windowsPanel.getByRole("code").filter({ hasText: "tokens login" })` — substring match scoped to the active tabpanel. Green rerun preserved as `...-10_22_33` report pair.
+- Prevention: Check the component for decorative inline children (prompt prefixes, icons) before writing exact-text locators on rendered output. Prefer role-scoped `filter({ hasText })` for command rows. When a locator fails, read the error-context a11y snapshot first — it shows the text as the tree actually exposes it.
+
 <!-- lessons:640:end -->
