@@ -1,6 +1,11 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // Dev-only: the site is served as localhost:3000 but often browsed via
+  // 127.0.0.1:3000; allow both origins for /_next/* dev resources so the dev
+  // badge doesn't count a cross-origin warning as an issue.
+  allowedDevOrigins: ["127.0.0.1", "localhost"],
+
   images: {
     // Every `next/image` source is a local, pre-optimized static asset
     // (svg/webp/png) and GitHub avatars go through plain <img>, so the image
