@@ -35,7 +35,7 @@ docs 页 pre-install 脚本 URL 改为可随 release 推进的 ref；新增两�
 - [x] 默认（无 env）下 docs 页 preinstall URL 仍为 `4921ccbe…` SHA；设 `TOKENS_SCRIPTS_REF=v9.9.9-test` 后页面 URL 改用该 tag（`:3100` 实例页面级验证）
 - [x] `set-version.sh` 用假版本演练：常数与三处 markdown 的旧 ref 全部替换为 `v<version>`；任一 0 命中即报错；脚本缺失时拒绝写入（临时副本演练，含 fail-closed）
 - [x] `enable-tokens-service.sh --dry-run` 打印计划动作；实跑（systemd 容器）后 `systemctl --user is-enabled tokens` 且 `override.conf` 含正确 `Environment`，且服务不携带旧上游指向
-- [ ] `register-tokens-submit-task.ps1 -DryRun` 输出正确；静态审查通过；真机验证列为用户侧遗留项（静态审查已过；无 pwsh，dry-run/真机未跑）
+- [-] `register-tokens-submit-task.ps1 -DryRun` 输出正确；静态审查通过；真机验证列为用户侧遗留项（静态审查已过；无 pwsh，dry-run/真机未跑——owner 已显式接受残留风险，真机验证归用户后续使用）
 - [x] `bun run build` 后 `web/public/` 出现两脚本，站点 `/enable-tokens-service.sh` 可下载（含 `/register-tokens-submit-task.ps1`，内容含撇号转义修复）
 - [x] `bun run lint` / `bun run typecheck` / `bun run test:migrations` 绿；docs e2e 绿并按报告契约出命名报告 + 同 stem 中文 MD
 
