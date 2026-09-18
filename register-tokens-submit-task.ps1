@@ -62,9 +62,11 @@ if (-not $tokensCmd) {
 }
 Write-Host "✓ tokens CLI：$($tokensCmd.Source)"
 
+# 路径会嵌进 runner 的单引号字符串：撇号（如 C:\Users\O'Brien）必须加倍转义。
+$escapedTokensPath = $tokensCmd.Source.Replace("'", "''")
 $runner = @"
 `$env:TOKENS_API_URL = '$Site'
-& '$($tokensCmd.Source)' submit
+& '$escapedTokensPath' submit
 "@
 
 if ($DryRun) {
