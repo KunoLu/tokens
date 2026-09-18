@@ -91,6 +91,8 @@ fi
 CRED_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/tokens"
 if [ -f "$CRED_DIR/credentials.json" ]; then
   ok "找到登录凭据"
+elif [ "$DRY_RUN" = 1 ]; then
+  info "未找到登录凭据（$CRED_DIR/credentials.json）——实跑才会启用服务；请先重开终端跑 tokens login，否则上报会 401"
 else
   info "未找到登录凭据（$CRED_DIR/credentials.json）——服务已启用，但请先重开终端跑 tokens login，否则上报会 401"
 fi

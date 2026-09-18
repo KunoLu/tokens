@@ -25,13 +25,13 @@ CUR_REF=$(grep -oE 'PINNED_SCRIPTS_REF = "[^"]+"' web/src/lib/scriptsRef.ts | cu
 REF_FILES="web/src/lib/scriptsRef.ts README.md README_zh.md docs/deploy/tokens-cli-usage.md"
 if [ "${CUR_REF}" != "${NEW_REF}" ]; then
   for f in ${REF_FILES}; do
-    grep -q "${CUR_REF}" "${f}" || { echo "ERROR: ${f} has no occurrence of ${CUR_REF}" >&2; exit 1; }
+    grep -qF "${CUR_REF}" "${f}" || { echo "ERROR: ${f} has no occurrence of ${CUR_REF}" >&2; exit 1; }
   done
 fi
 
 # Rust workspace.
 perl -0pi -e "s/^(\[workspace\.package\](?:.|\n)*?^version = )\"[^\"]+\"/\${1}\"${VERSION}\"/m" cli/Cargo.toml
-grep -q "version = \"${VERSION}\"" cli/Cargo.toml || { echo "ERROR: cli/Cargo.toml not updated" >&2; exit 1; }
+grep -qF "version = \"${VERSION}\"" cli/Cargo.toml || { echo "ERROR: cli/Cargo.toml not updated" >&2; exit 1; }
 
 # Keep Cargo.lock in step so the build does not rewrite it mid-release.
 cargo update --manifest-path cli/Cargo.toml --workspace --offline >/dev/null 2>&1 || \
@@ -66,7 +66,7 @@ NODE
 # validated above, before any manifest write.
 if [ "${CUR_REF}" != "${NEW_REF}" ]; then
   for f in ${REF_FILES}; do
-    count=$(grep -c "${CUR_REF}" "${f}")
+    count=$(grep -cF "${CUR_REF}" "${f}")
     perl -pi -e "s/\Q${CUR_REF}\E/${NEW_REF}/g" "${f}"
     echo "  ${f}: ${CUR_REF} -> ${NEW_REF} (${count})"
   done

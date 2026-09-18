@@ -39,4 +39,16 @@
 - Fix: `windowsPanel.getByRole("code").filter({ hasText: "tokens login" })` — substring match scoped to the active tabpanel. Green rerun preserved as `...-10_22_33` report pair.
 - Prevention: Check the component for decorative inline children (prompt prefixes, icons) before writing exact-text locators on rendered output. Prefer role-scoped `filter({ hasText })` for command rows. When a locator fails, read the error-context a11y snapshot first — it shows the text as the tree actually exposes it.
 
+## LESSON-20260918-640-test-migrations-database-url: test:migrations needs DATABASE_URL, bare run fails with url undefined
+
+- Date: 2026-09-18
+- Tags: validation, migrations, database-url, env-prerequisite
+- Applicable scenarios: Running `bun run test:migrations` locally; before claiming migration tests passed or failed; when the checker errors with `url: undefined`
+- Severity: low
+- Source: `09-18-scripts-ref-and-automation` 验证轮（裸跑 `bun run test:migrations` 报 `Please provide required params for Postgres driver: url: undefined`，补 env 后同轮即绿）
+- Problem: `bun run test:migrations` without env exits 1 with `url: undefined` — looks like a checker regression but is only a missing env prerequisite.
+- Root cause: The migrations checker opens a real Postgres connection; the spec's Quality Check lists the bare command without the connection string. Local Postgres is OrbStack compose at `127.0.0.1:5433`.
+- Fix: `DATABASE_URL="postgresql://tokens:tokens@127.0.0.1:5433/tokens" bun run test:migrations`.
+- Prevention: Any repo validation command that touches the DB needs `DATABASE_URL` set first; treat `url: undefined` as an env issue, not a code failure. The same prefix applies to the Playwright e2e runs in this repo.
+
 <!-- lessons:640:end -->
