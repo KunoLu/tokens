@@ -18,7 +18,7 @@ Feature: 文档页的安装入口
       And macOS 的 serve 说明文字带「CLI 手册」跳转链接
       And macOS 平台不出现 brew services（常驻服务读不到 shell alias）
       And Windows 的登录与提交使用预安装脚本装好的 tokens 命令（不用 bunx 直跑，确保指向本站）
-      And 各平台在命令列表下方始终展示「重开终端（Windows 可执行 `. $PROFILE`）后再登录」的说明（含移动端视口）
+      And 各平台在命令列表下方始终展示本平台专属的重开终端说明（macOS/Linux 为重开终端与 alias，Windows 为重开 PowerShell 与 function，含移动端视口），不混入其他平台指引
 
     Scenario: 文档页提供常驻自动化脚本入口
       When 访客打开文档页

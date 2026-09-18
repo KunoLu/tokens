@@ -207,7 +207,7 @@ export default async function DocsPage() {
                 ]}
               />
               <p className="text-sm leading-relaxed text-muted-foreground">
-                {t(locale, "docs.reloadNote")}
+                {t(locale, "docs.reloadNote.posix")}
               </p>
               <p className="text-sm leading-relaxed text-muted-foreground">
                 <code className="font-mono text-[13px]">tokens serve</code>{" "}
@@ -234,7 +234,7 @@ export default async function DocsPage() {
                 ]}
               />
               <p className="text-sm leading-relaxed text-muted-foreground">
-                {t(locale, "docs.reloadNote")}
+                {t(locale, "docs.reloadNote.posix")}
               </p>
               <p className="text-sm leading-relaxed text-muted-foreground">
                 <code className="font-mono text-[13px]">tokens serve</code>{" "}
@@ -251,7 +251,7 @@ export default async function DocsPage() {
                 ]}
               />
               <p className="text-sm leading-relaxed text-muted-foreground">
-                {t(locale, "docs.reloadNote")}
+                {t(locale, "docs.reloadNote.windows")}
               </p>
               <p className="text-sm leading-relaxed text-muted-foreground">
                 {t(locale, "docs.windowsNote")}

@@ -24,6 +24,7 @@ test("Docs 页安装入口指向本站", async ({ page }) => {
   expect(html).not.toContain("tokens.ci");
   await expect(page.getByText(/raw\.githubusercontent\.com\/KunoLu\/tokens\/(?:v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?|[0-9a-f]{40})\/pre-install-tokens\.sh/).first()).toBeVisible();
   expect(html).toContain("reopen the terminal");
+  await expect(page.getByRole("tabpanel", { name: /macos/i }).getByText(/\. \$PROFILE/)).toHaveCount(0);
   const brewPos = html.indexOf("brew install");
   const piPos = html.indexOf("pre-install-tokens.sh");
   const loginPos = html.indexOf("tokens login");
