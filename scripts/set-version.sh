@@ -60,10 +60,10 @@ for (const dir of dirs) {
   console.log(`  ${file} -> ${version}`);
 }
 NODE
-
-# Docs scripts ref: point the docs page, manual and READMEs at the tag about
-# to be created (set-version -> commit -> tag -> deploy). Preconditions were
-# validated above, before any manifest write.
+# Docs scripts ref: advance the docs page, manual and READMEs to the
+# v<version> tag about to be created. Raw GitHub URLs resolve as soon as the
+# tag itself is pushed (git push origin v<version>) — the tag carries its
+# commit object, so pushing the branch is not required for the raw ref.
 if [ "${CUR_REF}" != "${NEW_REF}" ]; then
   for f in ${REF_FILES}; do
     count=$(grep -cF "${CUR_REF}" "${f}")
