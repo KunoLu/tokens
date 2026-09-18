@@ -27,4 +27,4 @@
 - resolver 三态 eval：默认 SHA / `v9.9.9-test` 覆盖 / 非法值 warn+回退；页面级覆盖在 `:3100` 实例验证（URL 全改 tag）。
 - `set-version.sh 99.0.0` 临时副本演练：4 文件替换计数正确；删脚本后 fail-closed（rc=1，零 mutation）。
 - 正式 e2e 最终轮 passed（2.3s），报告对：`tests/e2e/reports/html/playwright-report-docs-page-feature_teamboard-teams-auth-2026_09_18-11_25_49.html/.md`；中间轮 11_22_15、11_24_39 均封存。
-- Release Readiness Review: **blocked**。未执行的核心平台验证：① Linux systemd 实跑（`systemctl --user is-enabled tokens`、override.conf 内容、服务指向本站）；② Windows pwsh `-DryRun` + 计划任务注册实跑（本机无 pwsh）。可选检查的残留风险**尚未取得 owner（用户）显式接受**；归档/完成以用户接受或真机证据为前提。
+- Release Readiness Review: **blocked（仅剩 Windows）**。① Linux systemd 实跑已通过：jrei/systemd-ubuntu:22.04（amd64 仿真，systemd 249）+ linger 用户，经本站 install.sh 装 CLI 生成 base unit 后实跑 `enable-tokens-service.sh`——`is-enabled=enabled`，`override.conf` 含 `Environment=TOKENS_API_URL=http://localhost:3000`，`systemctl --user show tokens -p Environment` 确认 drop-in 生效且不带上游指向，幂等重跑与换址（→127.0.0.1）均正确，容器已清理。is-active 为 activating/exit-1 属无凭据的预期路径（脚本已警告）。② Windows pwsh `-DryRun` + 任务注册实跑仍未执行（本机无 pwsh）——归档需用户显式接受残留风险或提供 Windows 真机证据。
