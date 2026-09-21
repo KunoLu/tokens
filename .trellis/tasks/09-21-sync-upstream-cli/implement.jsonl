@@ -1,0 +1,2 @@
+{"file": "docs/upstream_policy.md", "reason": "Pick/skip and mixed-commit rules"}
+{"file": ".trellis/tasks/09-21-sync-upstream-cli/design.md", "reason": "53082d75 path filter and later SHA table"}

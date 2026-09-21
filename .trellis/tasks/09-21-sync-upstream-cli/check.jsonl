@@ -1,0 +1,2 @@
+{"file": "docs/upstream_policy.md", "reason": "Verify path-filtered cherry-picks against policy"}
+{"file": ".trellis/tasks/09-21-sync-upstream-cli/implement.md", "reason": "Skip list and validation commands"}
