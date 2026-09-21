@@ -92,7 +92,7 @@ clear old credentials, and pin it to your site — runnable straight from the
 repo's public GitHub (pinned to a reviewed tag or commit, never a moving branch):
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/KunoLu/tokens/v1.0.0/pre-install-tokens.sh | bash -s -- https://<your-domain>
+curl -fsSL https://raw.githubusercontent.com/KunoLu/tokens/v1.0.1/pre-install-tokens.sh | bash -s -- https://<your-domain>
 ```
 
 After onboarding, `enable-tokens-service.sh` (Linux) and
