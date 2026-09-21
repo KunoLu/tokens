@@ -1,9 +1,9 @@
 # Quality Guidelines: Rust CLI
 
-> Hard rules and cross-repo invariants for `cli/`. The only automated gates
-> are `cargo check --manifest-path cli/Cargo.toml --workspace --all-targets`
-> and clippy (see `docs/upstream_policy.md`); the repo has no CLI integration
-> test suite.
+> Hard rules and cross-repo invariants for `cli/`. Automated gates are
+> `cargo check --manifest-path cli/Cargo.toml --workspace --all-targets`,
+> **`cargo test --manifest-path cli/Cargo.toml --workspace`**, and clippy
+> (see `docs/upstream_policy.md` §4.1).
 
 ---
 
@@ -51,23 +51,26 @@
 
 ## Tests
 
-- Unit tests live in inline `#[cfg(test)] mod tests` inside `tokens-core`
-  source files (e.g. `pricing/lookup.rs`, `pricing/openrouter.rs`,
-  `sessions/cline.rs`), using `tempfile` fixtures. There is no `tests/`
-  integration directory.
-- `tokens-cli` has `assert_cmd`/`predicates` dev-dependencies reserved but no
-  test modules yet; do not claim CLI integration coverage that does not exist.
+- Inline `#[cfg(test)]` modules remain in `tokens-core` source files.
+- After the 2026-09-21 upstream CLI sync, `cli/tokens-core/tests/` also holds
+  integration tests and fixtures. Do not strip those tests on cherry-pick
+  unless they require TUI/report modules this fork does not carry.
+- `tokens-cli` still has little binary-level coverage; do not claim a CLI
+  integration suite that does not exist.
 
 ## Upstream sync (Tokscale fork policy)
 
-Per `docs/upstream_policy.md`:
+Canonical rules: `docs/upstream_policy.md`. Do not fork a second policy here.
 
 - **Always merge**: new provider/client scanners, parser fixes, submit-pipeline
-  and correctness fixes. Translate paths: `crates/tokscale-core` →
+  and correctness fixes. Path map for `grand`: `crates/tokscale-core` →
   `cli/tokens-core`.
-- **Skip**: TUI, report commands, CLI display/interaction polish — this fork
-  deleted them (~11k lines); such commits will not even apply.
-- Never merge branding (`tokscale` names, logos, copy).
+- **Skip**: TUI themes, report commands, CLI display polish.
+- **Never merge**: `tokscale` / `tokens.ci` branding and marketing copy.
+  **Do merge** `.github/assets/client-*` scanner icons; `web` `build` copies
+  them to gitignored `public/clients/`.
+- Mixed core-sync (e.g. tokscale 4.17.0): `cherry-pick -n`, keep `/clients`
+  catalog and version `1.0.0`, then commit with `(cherry picked from …)`.
 
 ## Forbidden patterns
 

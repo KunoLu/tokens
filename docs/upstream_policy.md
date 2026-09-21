@@ -59,7 +59,7 @@ grand     https://github.com/junhoyeo/tokscale.git
 
 下面两节决定了后面所有规则。**必须先分清哪些已经落地、哪些只是计划**——用计划态去判断上游改动，会把本该直接合并的提交误判成需要重写。
 
-T0–T12 已在 `feature/teamboard-teams-auth` 落地。`web/` 与 `upstream/main` 已有实质分歧（邮箱认证、Team/Group、Teamboard、i18n、迁移 `0024`–`0026`）；`cli/` 与 `packages/` 仍与上游一致。任何时候都可以自己确认：
+T0–T12 已在 `feature/teamboard-teams-auth` 落地。`web/` 与 `upstream/main` 已有实质分歧（邮箱认证、Team/Group、Teamboard、i18n、迁移 `0024`–`0026`、self-host 删除 Workers）。`cli/` 与 `packages/` **不是产品分叉**：命令集仍按 missuo 的 CLI 设计。2026-09-21 已拣入 9 个 CLI SHA（`53082d75` 及后续解析器/客户端修复），两点 diff 现在主要是版本线 `1.0.0`（upstream `27.1.1`）。任何时候都可以自己确认：
 
 ```bash
 # 比较两端完整的已提交代码树（两点语法）
@@ -70,14 +70,20 @@ git status --short -- web cli packages
 
 **注意必须用两点 `A B`，不能用三点 `A...B`**：`git diff` 的三点语法比较的是 `merge-base(A,B)` 与 `B`，只回答"HEAD 自分叉点以来改了什么"，完全忽略 `upstream/main` 在分叉点之后独有的提交。pathspec 也要用 `web` 而不是 `web/src`，否则漏掉 `web/next.config.ts`、`web/scripts/` 这类顶层文件。
 
+2026-09-21 拣入后核对（已提交树 `HEAD=70b8245b`；`git diff --shortstat` 用两点语法，不含工作区）：
 
-T9 核对（2026-09-15）：`git diff --stat upstream/main HEAD -- web cli packages` 对 `web/` 约 148 files / +20600 / −2446；`cli/` 与 `packages/` 无输出。干净工作树上 `git status --short -- web cli packages` 为空。
+- `git diff --shortstat upstream/main HEAD -- web` → 182 files, +21825 / −4163
+- `git diff --shortstat upstream/main HEAD -- cli packages` → 11 files, +20 / −20（`cli/Cargo.toml` / `cli/Cargo.lock` / `packages/cli*/package.json` 的 version `1.0.0` vs `27.1.1`）
+
+拣入前 `cli/` 两点曾是 144 files / +5866 / −107076，表示当时 **HEAD 缺少** upstream 解析器/core；那次快照不要再用。三点语法 `merge-base...HEAD` 才会显示本仓库自己的 CLI 改动；其中有意保留的是版本 `1.0.0`。`git merge-base main upstream/main` 仍为 `f114057f`。
+
+T9（2026-09-15）时 `cli/` 与 `packages/` 两点无输出，该快照已过期，不要再用。
 
 ### 2.1 现状
 
 | | tokscale（原始） | missuo/tokens（直接上游） | 本仓库现状 |
 |---|---|---|---|
-| CLI | 完整 TUI 面板 + 报表命令 | 无 TUI 与 `models` / `monthly` / `hourly` / `graph` / `wrapped` / `pricing` 等报表命令；保留提交、账户管理、后台提交、导入与各 provider 集成命令（顶层 `Commands` 共 15 个：`login`、`logout`、`whoami`、`status`、`import`、`submit`、`serve`、`autosubmit`、`headless`、`codex`、`cursor`、`antigravity`、`trae`、`warp`、`delete-submitted-data`） | 与直接上游一致，**且本次改造也不打算改动** |
+| CLI | 完整 TUI 面板 + 报表命令 | 无 TUI 与 `models` / `monthly` / `hourly` / `graph` / `wrapped` / `pricing` 等报表命令；保留提交、账户管理、后台提交、导入与各 provider 集成命令（顶层 `Commands` 共 15 个：`login`、`logout`、`whoami`、`status`、`import`、`submit`、`serve`、`autosubmit`、`headless`、`codex`、`cursor`、`antigravity`、`trae`、`warp`、`delete-submitted-data`） | 命令集仍与 missuo 同一设计（无 TUI/报表，**不打算改 CLI 产品形态**）。解析器/core 已与 `upstream/main` 27.1.1 对齐（9 个 CLI SHA）；版本线为 **`1.0.0`**，不跟随 `27.x`。按 §3 总是合并后续 provider/解析器修复，见 §4.1 |
 | 报表 | 终端内 | Web 端 | 与直接上游一致 |
 | 托管 | 自建 Docker + 同机 Postgres | Cloudflare Workers（OpenNext）+ Neon Postgres（经 Hyperdrive）；Worker 定点到数据库所在区域 `aws:us-west-2` | **自建 Node**（`next build` + `next start`）+ 自建 Postgres。Workers/Hyperdrive 层已在 self-host cutover 中整层删除（2026-09-16，`09-16-self-host-cutover`）；本地开发用 OrbStack Compose（`docs/deploy/local-orbstack-compose.md`），云上清单见 `docs/deploy/self-host-production.md` |
 | 缓存 | — | R2 渲染页 + Durable Objects 标签失效；`/api/og` 与 SVG 图片端点另有显式 edge cache | Next 默认 cache handler（`.next/cache` + 进程内存）承载 `unstable_cache` / `revalidateTag`；无边缘 HTML 缓存，OG/embed/badge 每次回源渲染 |
@@ -107,6 +113,7 @@ T9 核对（2026-09-15）：`git diff --stat upstream/main HEAD -- web cli packa
 | 多语言（i18n） | T10 / T11 | **全站 UI 文案被包裹进字典**；上游任何文案调整需要映射到字典 key，不能直接合并文本 | `web/src/lib/i18n/**`、全部页面 `page.tsx` / 组件 |
 | 徽章 | T2 | **`verified` 徽章整体移除**（D-3 取 C）。上游对已删文件的改动**直接丢弃**；其他文件新增徽章渲染点同样丢弃该片段。**社交链接本身不是分歧区**——`social_links` 与 `ProfileSocialLinks.tsx` 与上游一致，照常采纳 | 删除 `web/src/lib/socialVerification.ts`、`web/src/components/ui/VerifiedBadge.tsx`；改写 `getLeaderboard` / `types`、`Leaderboard.tsx`、`ProfileView.tsx`、`ProfilePageClient.tsx`、`docs/page.tsx` |
 | 品牌块 | T12 | 导航 `TokensMark` 底色 `#7C3AED`；favicon / 安装图标位图不重着色 | `web/src/components/layout/Navigation.tsx`、`docs/demo/teamboard-demo.html` |
+| 托管与 Worker | `09-16-self-host-cutover` | 删除 OpenNext Worker / wrangler / Hyperdrive；自建 `next start`。上游对 `web/worker.ts`、edge cache、Caddy/PG 拓扑的改动**直接丢弃** | `web/worker.ts`、`web/wrangler.jsonc`、`web/open-next.config.ts`、`web/next.config.ts` |
 
 `Navigation.tsx`、`schema.ts`、`getLeaderboard.ts` 是冲突最集中的三个文件；i18n 字典包裹让几乎所有页面文案都成为分歧点。
 
@@ -121,15 +128,16 @@ T9 已把上表各行从本节迁入 §2.1。**目前无待迁入行。** 以后
 
 | 类别 | 决策 | 例子 |
 |---|---|---|
-| 品牌、命名、域名、文案 | **永不合并** | 任何出现 `tokscale` / `tokens.ci` 的内容；logo；上游营销文案 |
-| 新 provider、新客户端扫描器、解析器修复 | **总是合并** | 支持新 IDE / CLI；修正的 token 字段 |
+| 品牌、命名、域名、文案 | **永不合并** | 任何出现 `tokscale` / `tokens.ci` 的内容；Tokens 品牌标；上游营销文案。**不含** `.github/assets/client-*`（扫描器图标，见 §4.1） |
+| 上游发布与版本号 | **永不合并** | `chore(release)`；把 `cli/Cargo.toml` / `packages/**/package.json` 写成 `27.x`。本仓库版本线为 `1.0.0` |
+| 新 provider、新客户端扫描器、解析器修复 | **总是合并** | 支持新 IDE / CLI；修正的 token 字段。这类修复通常首发于 `grand`（`junhoyeo/tokscale`），不能只等 `upstream`。web catalog（`SUPPORTED_CLIENT_TYPES` / display 名）随新 id 走，3-way 合进本仓 `/clients` 路径 |
 | 前端**数据能力** | **合并能力，重写实现** | 新增图表维度或统计口径 → 取数据逻辑，用我们的组件重画 |
 | 前端**样式、组件、布局** | **永不合并** | 上游的 styled-components、HeroUI 用法、配色、间距 |
-| CLI 展示、交互、报表功能 | **跳过** | TUI 主题、更漂亮的表格、wrapped 图片 |
+| CLI 展示、交互、报表功能 | **跳过** | TUI 主题、更漂亮的表格、wrapped 图片。**不是**本仓 `cli/tokens-cli/src/commands/usage/helpers.rs`（keychain / 密钥原子写）；`ae163d78` 这类 helpers 修复要合并 |
 | 提交管线、安全、正确性 | **总是合并** | 解析溢出、重复计数、去重 |
 | **认证与身份** | 身份提供方类改动默认拒绝，逐个人工评估。会话机制安全修复按 §3.2 合并 | 上游的 OAuth 改动与本仓库的邮箱体系不兼容 |
 | **team / group 相关** | 默认拒绝 | 上游若恢复 group 排行榜，其语义与本仓库的 Team 不同，不可混用 |
-| 部署、缓存、SEO 元数据 | **保留本仓库运行拓扑，逐项评估** | Worker 区域定点、图片端点的 edge cache、per-page OG card——上游改动不可直接覆盖 |
+| 部署、缓存、SEO 元数据 | **保留本仓库运行拓扑；Worker / edge cache / verified badge 直接丢弃** | `web/worker.ts`、wrangler、R2/DO、edge HTML cache、公开 profile 的 edge 缓存窗口、verified badge 刷新。本仓库已删徽章与 Workers，不要把这些当 web bugfix 移植。社交链接刷新仍按 §2.1 定时任务行评估 |
 | 数据库迁移 | **逐条人工评审** | 见 §5 |
 | 不确定的 | **开一个 draft PR，列出提交并询问** | — |
 
@@ -160,23 +168,30 @@ T9 已把上表各行从本节迁入 §2.1。**目前无待迁入行。** 以后
 
 有共同历史（`git merge-base main upstream/main` 返回 `f114057f`），cherry-pick 是常规手段。
 
+**禁止**把 `upstream/main` merge 或 rebase 进 `origin/main`，也禁止 GitHub 的 Sync fork。GitHub 比较页上的 "N commits ahead / M behind" 只说明两边都在动，不是全量合入的理由。
+
 ```bash
 git fetch upstream
+git fetch grand --no-tags
 git switch -c sync/upstream-$(date +%Y%m%d) main
 git log --oneline main..upstream/main        # 先读一遍再动手
-git cherry-pick -x <sha>                     # -x 记录来源提交
+git cherry-pick -x <sha>                     # 一次一个 SHA；-x 记录来源提交
 ```
 
-1. 从 `main` 开分支，用 `-x` cherry-pick 以记录来源。**挑之前先看父提交数**：`upstream/main` 里目前有 7 个真正的多父 merge commit（例如 `42667fd4`，两个父 `192efd63` + `497ef504`），对这类 SHA 不指定 mainline 的 `git cherry-pick` 会直接报错停下。
+1. 从 `main` 开分支，**一次只** `git cherry-pick -x <sha>` 一个提交，不要一批 SHA。挑之前先看父提交数：`main..upstream/main` 里目前有 7 个真正的多父 merge commit（例如 `3ee911c1` Merge PR #72，两个父 `ce0817e0` + `b4f64595`），对这类 SHA 不指定 mainline 的 `git cherry-pick` 会直接报错停下。本轮不 `-m` 拣 merge：GitHub PR merge 的内容已由对应单父 SHA 进入；`deploy/self-hosted` 的 merge 丢弃。
 
    ```bash
    git show --no-patch --format=%P <sha>    # 输出一个 SHA = 单父，两个 = merge commit
    ```
 
-   单父提交沿用上面的命令即可。GitHub PR 的 merge commit，在确认第一个父确实位于 `upstream/main` 主线后用 `git cherry-pick -m 1 -x <sha>`；否则直接去挑该 PR 里的单父提交，**不要猜 mainline**。注意提交信息以 `Merge pull request` 开头并不代表它是 merge commit——上游存在被压平成单父的这类提交（如 `f114057f`），只看 message 会判断错。
-2. 在 PR 描述里列出**跳过的提交及每一条的理由**。没有理由的跳过，会在下一次同步时变成一个谜。
+   单父提交沿用上面的命令即可。GitHub PR 的 merge commit，在确认第一个父确实位于 `upstream/main` 主线后用 `git cherry-pick -m 1 -x <sha>`；否则直接去挑该 PR 里的单父提交，**不要猜 mainline**。注意提交信息以 `Merge pull request` 开头并不代表它是 merge commit——上游存在被压平成单父的这类提交（如 `f114057f`），只看 message 会判断错。版本文件冲突时**保留 `1.0.0`**，不要改成 `27.x`。不要假设冲突「只在 version 行」：`53082d75`（tokscale 4.17.0 core sync）是 137 files / +106k 的混合树（解析器、tokens-cli、helpers、`tui_signal`、client 图标、web catalog）。
+
+   对此类混合 core-sync：**不要整 SHA 丢弃，也不要只 checkout `cli/tokens-core`。** 解析器与新客户端是 §3 总是合并；tokens-cli 集成（antigravity/cursor/import/main 等）需要一起取，否则编不过。实测流程：`git cherry-pick -n <sha>`，检查 web 是否仍走本仓 `/clients` 路径、version 是否仍为 `1.0.0`，再自己 commit 并写 `(cherry picked from <sha>)`。干净的后续 SHA 用 `git cherry-pick -x`。
+
+   **`.github/assets/client-*` 必须留下。** `web/package.json` 的 `build` 执行 `cp ../.github/assets/client-* public/clients/`（`public/clients/` gitignore）。新客户端 logo 进 `.github/assets`，不要只写 `web/public/clients/`。`tui_signal.rs` / `wiki.rs` 若被 `tokens-core` 模块声明，留下以保证编译，不要当 TUI 命令剥掉。
+2. 在 PR 描述里列出**跳过的提交及每一条的理由**。没有理由的跳过，会在下一次同步时变成一个谜。跳过清单属于该次 PR，不要写进本文件。分类时对照 `grand`：解析器修复可能已在 tokscale，尚未进入 missuo。
 3. 运行 `cargo check --manifest-path cli/Cargo.toml --workspace --all-targets` 与 **`cargo test --manifest-path cli/Cargo.toml --workspace`**（CI 会跑后者，本地先跑可以省一轮往返），以及 `web/` 下的 `bun run lint` 与 `bun run typecheck`。
-4. 额外运行 `bun run test:migrations`。T0 已修掉 checker 对已删 `groups` 表的断言和 journal 尾 snapshot 缺口。本仓库自有迁移到 `0026`；失败即本仓库问题，不再当上游既存缺陷。
+4. 额外运行 `bun run test:migrations`。该脚本是 `drizzle-kit migrate && bun scripts/check-migrations.ts`，**两段都要求 `DATABASE_URL`**。没有本地 Postgres 时不要把失败当成迁移被同步破坏；CLI 同步未改 journal 时记环境 blocked。有 URL 时失败才是本仓库问题。T0 已修掉 checker 对已删 `groups` 表的断言和 journal 尾 snapshot 缺口。本仓库自有迁移到 `0026`。
 
 ### 4.2 从原始项目（`junhoyeo/tokscale`）
 
@@ -248,7 +263,7 @@ Grok 的 `turn_completed` 解析器修复就是这么落地的：修复前我们
 
 ## 6. 本策略不覆盖的范围
 
-上游的发布流程、CI 与打包不在跟踪范围内。我们的发布管线是我们自己的——它发布不同的平台包，来自不同的 workspace 路径，且不含 TUI 的可选特性。
+上游的发布流程、CI 与打包不在跟踪范围内。我们的发布管线是我们自己的——它发布不同的平台包，来自不同的 workspace 路径，且不含 TUI 的可选特性。因此 `chore(release)`、OIDC npm publish、以及把版本写成 `27.x` 的提交一律跳过；本仓库版本线保持 `1.0.0`。
 
 ---
 
@@ -262,3 +277,5 @@ Grok 的 `turn_completed` 解析器修复就是这么落地的：修复前我们
 | 每季度 | 用 §2 的两条命令复核 §2.1 现状表与 §2.2 各行的生效状态；已生效的行从 §2.2 移入 §2.1 |
 
 同步 PR 不要与功能开发混在一个分支里。功能分支（如 `feature/*`）与同步分支的评审关注点完全不同——前者看行为是否正确，后者看有没有把不该带的东西带进来。
+
+GitHub 对 `missuo/tokens:main` 显示 ahead/behind 是长期 fork 的正常状态。不要用 Sync fork 或 merge 消除它；按本节节奏分类后 cherry-pick。
