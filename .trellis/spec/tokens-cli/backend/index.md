@@ -53,8 +53,9 @@ Before changing code under `cli/`:
 
 Before considering CLI work done:
 
-- `cargo check --manifest-path cli/Cargo.toml --workspace --all-targets` passes
-  (the repo's only automated CLI gate per `docs/upstream_policy.md`).
+- `cargo check --manifest-path cli/Cargo.toml --workspace --all-targets` and
+  `cargo test --manifest-path cli/Cargo.toml --workspace` pass
+  (`docs/upstream_policy.md` §4.1).
 - Clippy is clean — `tokens-core` enforces `#![deny(clippy::all)]` at
   `cli/tokens-core/src/lib.rs:1`.
 - No log output on stdout for `--json` commands (see
