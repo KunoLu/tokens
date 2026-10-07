@@ -5066,11 +5066,22 @@ fn apply_pricing_if_available(
         return;
     };
 
-    let calculated_cost = pricing.calculate_cost_with_provider(
+    let base_cost = pricing.calculate_cost_with_provider(
         &message.model_id,
         Some(&message.provider_id),
         &message.tokens,
-    ) * pricing_multiplier(message);
+    );
+    let cache_write_1h_surcharge = if base_cost > 0.0 {
+        pricing.cache_write_1h_surcharge(
+            &message.model_id,
+            Some(&message.provider_id),
+            &message.tokens,
+            message.cache_write_1h,
+        )
+    } else {
+        0.0
+    };
+    let calculated_cost = (base_cost + cache_write_1h_surcharge) * pricing_multiplier(message);
 
     if calculated_cost > 0.0 {
         message.cost = calculated_cost;
@@ -6567,6 +6578,7 @@ pub fn parsed_to_unified(msg: &ParsedMessage, cost: f64) -> UnifiedMessage {
         session_title: None,
         is_turn_start: false,
         model_attribution_conflicted: false,
+        cache_write_1h: 0,
     }
 }
 
