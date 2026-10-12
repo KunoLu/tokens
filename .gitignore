@@ -146,3 +146,19 @@ tests/e2e/**/*.trace.zip
 
 # ---------- AI Tools ----------
 .worktrees/
+
+/docs/handoffs
+/graft
+/.graft
+/.sbtd
+
+# ---------- SBTD ----------
+# Shared task documents stay trackable; task reports stay local at every depth.
+/ai/tasks/**/reports
+
+.impeccable/config.local.json
+
+# ---------- Graft ----------
+
+# Onboard backup-then-overwrite: AGENTS.md.YYYY-MM-DD-N beside the live file
+/AGENTS.md.*

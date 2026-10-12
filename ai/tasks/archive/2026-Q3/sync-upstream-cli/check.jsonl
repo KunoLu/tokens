@@ -1,0 +1,2 @@
+{"file": "docs/upstream_policy.md", "reason": "Verify path-filtered cherry-picks against policy"}
+{"file": "ai/tasks/archive/2026-Q3/sync-upstream-cli/implement.md", "reason": "Skip list and validation commands"}
