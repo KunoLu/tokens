@@ -212,7 +212,62 @@ struct SessionCandidate {
     artifact_path: Option<String>,
 }
 
-pub fn run_antigravity_sync() -> Result<()> {
+#[derive(Debug, Clone, Default)]
+pub struct SyncAntigravityResult {
+    pub synced: bool,
+    pub sessions: usize,
+    pub connections: usize,
+    pub error: Option<String>,
+}
+
+pub fn has_antigravity_cache() -> bool {
+    let sessions_dir = match get_antigravity_sessions_dir() {
+        Ok(dir) => dir,
+        Err(_) => return false,
+    };
+    if !sessions_dir.exists() {
+        return false;
+    }
+    match fs::read_dir(sessions_dir) {
+        Ok(entries) => entries
+            .filter_map(|entry| entry.ok())
+            .any(|entry| entry.path().extension().is_some_and(|ext| ext == "jsonl")),
+        Err(_) => false,
+    }
+}
+
+pub fn sync_antigravity_cache_with_connections(
+    connections: &[AntigravityConnection],
+    explicit: bool,
+) -> SyncAntigravityResult {
+    if !explicit && connections.is_empty() {
+        return SyncAntigravityResult {
+            synced: false,
+            sessions: 0,
+            connections: 0,
+            error: None,
+        };
+    }
+    match sync_antigravity_cache_impl(connections, explicit) {
+        Ok(count) => SyncAntigravityResult {
+            synced: true,
+            sessions: count,
+            connections: connections.len(),
+            error: None,
+        },
+        Err(err) => SyncAntigravityResult {
+            synced: false,
+            sessions: 0,
+            connections: connections.len(),
+            error: Some(err.to_string()),
+        },
+    }
+}
+
+fn sync_antigravity_cache_impl(
+    connections: &[AntigravityConnection],
+    explicit: bool,
+) -> Result<usize> {
     use colored::Colorize;
 
     let cache_dir = get_antigravity_cache_dir()?;
@@ -224,8 +279,7 @@ pub fn run_antigravity_sync() -> Result<()> {
     let _lock = SyncLockGuard::acquire(&cache_dir)?;
 
     let manifest = load_antigravity_manifest()?;
-    let connections = detect_antigravity_connections()?;
-    let summaries = list_trajectory_summaries(&connections)?;
+    let summaries = list_trajectory_summaries(connections)?;
     let filesystem_candidates = scan_filesystem_session_candidates()?;
     let export_candidates = merge_export_candidates(&manifest, &summaries, &filesystem_candidates);
     let mut next_manifest = AntigravityManifest {
@@ -245,10 +299,11 @@ pub fn run_antigravity_sync() -> Result<()> {
     // One budget for the whole sync: the enrichment RPCs it bounds all run
     // under the exclusive cache lock acquired above.
     let mut enrichment = TrajectoryEnrichmentBudget::new();
+    let mut synced_sessions: usize = 0;
 
     for candidate in &export_candidates {
         if let Some(summary) = find_summary_for_candidate(&summaries, &candidate.session_id) {
-            if let Some(artifact) = fetch_session_artifact(summary, &connections, &mut enrichment)?
+            if let Some(artifact) = fetch_session_artifact(summary, connections, &mut enrichment)?
             {
                 let path = write_session_artifact(&summary.session_id, &artifact.contents)?;
                 let relative_path = to_relative_artifact_path(&path)?;
@@ -261,6 +316,7 @@ pub fn run_antigravity_sync() -> Result<()> {
                     connection_fingerprint: summary.connection_fingerprint.clone(),
                     artifact_hash: artifact.artifact_hash,
                 });
+                synced_sessions += 1;
                 continue;
             } else if let Some(previous) = manifest
                 .sessions
@@ -281,11 +337,12 @@ pub fn run_antigravity_sync() -> Result<()> {
 
         if let Some(entry) = fetch_historical_session_artifact(
             &candidate.session_id,
-            &connections,
+            connections,
             candidate,
             &mut enrichment,
         )? {
             next_manifest.sessions.push(entry);
+            synced_sessions += 1;
             continue;
         }
 
@@ -316,44 +373,53 @@ pub fn run_antigravity_sync() -> Result<()> {
     save_antigravity_manifest(&next_manifest)?;
     cleanup_stale_session_artifacts(&manifest, &next_manifest)?;
 
-    println!("\n  {}", "Antigravity sync".cyan());
-    println!(
-        "  {}",
-        "Synced local Antigravity cache from running language servers.".bright_black()
-    );
-    println!(
-        "  {}",
-        format!("cache: {}", cache_dir.display()).bright_black()
-    );
-    println!(
-        "  {}",
-        format!("known sessions: {}", manifest.sessions.len()).bright_black()
-    );
-    println!(
-        "  {}",
-        format!("detected connections: {}", connections.len()).bright_black()
-    );
-    println!(
-        "  {}",
-        format!("detected sessions: {}", summaries.len()).bright_black()
-    );
-    println!(
-        "  {}",
-        format!("filesystem candidates: {}", filesystem_candidates.len()).bright_black()
-    );
-    println!(
-        "  {}",
-        format!("export candidates: {}", export_candidates.len()).bright_black()
-    );
-    println!(
-        "  {}",
-        format!(
-            "cached sessions after sync: {}",
-            next_manifest.sessions.len()
-        )
-        .bright_black()
-    );
-    println!();
+    if explicit {
+        println!("\n  {}", "Antigravity sync".cyan());
+        println!(
+            "  {}",
+            "Synced local Antigravity cache from running language servers.".bright_black()
+        );
+        println!(
+            "  {}",
+            format!("cache: {}", cache_dir.display()).bright_black()
+        );
+        println!(
+            "  {}",
+            format!("known sessions: {}", manifest.sessions.len()).bright_black()
+        );
+        println!(
+            "  {}",
+            format!("detected connections: {}", connections.len()).bright_black()
+        );
+        println!(
+            "  {}",
+            format!("detected sessions: {}", summaries.len()).bright_black()
+        );
+        println!(
+            "  {}",
+            format!("filesystem candidates: {}", filesystem_candidates.len()).bright_black()
+        );
+        println!(
+            "  {}",
+            format!("export candidates: {}", export_candidates.len()).bright_black()
+        );
+        println!(
+            "  {}",
+            format!(
+                "cached sessions after sync: {}",
+                next_manifest.sessions.len()
+            )
+            .bright_black()
+        );
+        println!();
+    }
+
+    Ok(synced_sessions)
+}
+
+pub fn run_antigravity_sync() -> Result<()> {
+    let connections = detect_antigravity_connections()?;
+    sync_antigravity_cache_impl(&connections, true)?;
     Ok(())
 }
 
@@ -5658,5 +5724,35 @@ mod tests {
             4096,
             "the remainder is still consumed; bytes left in the pipe are what block the child"
         );
+    }
+
+    #[test]
+    #[serial]
+    fn sync_antigravity_cache_non_explicit_short_circuits_without_connections() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let _guard = TestEnvGuard::redirect_to(temp_dir.path());
+
+        let result = sync_antigravity_cache_with_connections(&[], false);
+        assert!(!result.synced);
+        assert_eq!(result.sessions, 0);
+        assert_eq!(result.connections, 0);
+        assert!(result.error.is_none());
+    }
+
+    #[test]
+    #[serial]
+    fn has_antigravity_cache_detects_empty_and_populated_states() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let _guard = TestEnvGuard::redirect_to(temp_dir.path());
+
+        assert!(!has_antigravity_cache());
+
+        let sessions_dir = get_antigravity_sessions_dir().unwrap();
+        fs::create_dir_all(&sessions_dir).unwrap();
+        assert!(!has_antigravity_cache());
+
+        let dummy_file = sessions_dir.join("test-session.jsonl");
+        fs::write(&dummy_file, "{\"type\":\"session_meta\"}\n").unwrap();
+        assert!(has_antigravity_cache());
     }
 }
