@@ -178,6 +178,8 @@ web/features/        BDD behavior specs (Chinese scenarios, English keywords)
 tests/e2e/           Playwright end-to-end tests
 ```
 
+Project workflow rules follow the SBTD `v2.0.0-rc.4` project template plus the managed Graft block. Before changing a package or layer, read its guidelines under [docs/spec](docs/spec/); use the [lessons entry](docs/spec/lessons.md) and [lesson index](docs/lessons/index.md). Shared task history lives in `ai/tasks/`; task reports, local state and handoffs stay ignored. The retired Trellis tree is not an active workflow entry.
+
 ## License
 
 MIT — see [LICENSE](./LICENSE).

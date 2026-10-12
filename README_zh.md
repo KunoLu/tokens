@@ -143,6 +143,8 @@ web/features/        BDD 行为规格（中文场景 + 英文关键词）
 tests/e2e/           Playwright 端到端测试
 ```
 
+项目工作流规则采用 SBTD `v2.0.0-rc.4` 项目模板及受管 Graft 块。修改包或层之前先读 [docs/spec](docs/spec/) 对应规范；经验记录从[短入口](docs/spec/lessons.md)及[索引](docs/lessons/index.md)按需读取。共享任务历史位于 `ai/tasks/`，任务报告、本地状态与 handoff 保持忽略；已退役 Trellis 树不再作为有效工作流入口。
+
 ## 许可证
 
 MIT——见 [LICENSE](./LICENSE)。
