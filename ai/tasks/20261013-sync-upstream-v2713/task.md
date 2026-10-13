@@ -4,11 +4,11 @@ id: 20261013-sync-upstream-v2713
 workflow_mode: strict
 mode_source: user
 mode_note: 用户明确要求 strict；确认方案为三 CLI 修复、图表体积修复，以及按本仓入口重做私密模式。
-status: "checking"
-branch: sync/upstream-20261013
+status: "done"
+branch: "main"
 created_at: '2026-10-13T12:10:20.800774+08:00'
-updated_at: "2026-10-13T12:53:42.567752+08:00"
-completed_at: null
+updated_at: "2026-10-13T13:08:50.710714+08:00"
+completed_at: "2026-10-13T13:08:50.710714+08:00"
 ---
 # 上游 v27.1.3 同步
 
@@ -74,3 +74,5 @@ Required tests: 迁移检查、私密不变量、CLI 随补丁测试、图表 `b
 |---|---|---|---|---|
 | 2026-10-13T12:10:27.758320+08:00 | planned | in-progress | 用户确认方案，开始在 sync/upstream-20261013 上实现 | ai/tasks/20261013-sync-upstream-v2713/task.md |
 | 2026-10-13T12:53:42.567752+08:00 | in-progress | checking | CLI、图表和私密模式检查已通过，准备提交并合入 | cargo test 2432 passed; bun test usageChartPaths 7 passed; bun run typecheck pass; DATABASE_URL local test:migrations and test:private pass |
+| 2026-10-13T13:08:49.681902+08:00 | checking | checking | Explicit branch rebinding from "sync/upstream-20261013" to "main": 开发分支已在 PR #5 admin merge 后删除，记录改绑到 main | origin/main 36a687d5 merge commit; local branch sync/upstream-20261013 deleted |
+| 2026-10-13T13:08:50.710714+08:00 | checking | done | PR #5 已 admin merge，复核缺陷已修并推到 main，本地 Compose 验收通过 | https://github.com/KunoLu/tokens/pull/5 merged 36a687d5; follow-up b39a875d; local curl leaderboard/teamboard/login 200; badge cache-control private, no-store |
