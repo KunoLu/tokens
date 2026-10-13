@@ -720,6 +720,8 @@ const en = {
   "profile.devices.heading": "Devices · all-time",
   "profile.devices.caption": "Usage by device",
   "profile.devices.device": "Device",
+  "devices.cloud.session": "{n} session",
+  "devices.cloud.sessions": "{n} sessions",
 
   "profile.models.caption": "Model usage",
   "profile.models.share": "Share",
@@ -1647,6 +1649,8 @@ const zh: Record<keyof typeof en, string> = {
   "profile.devices.caption": "按设备统计的用量",
   "profile.devices.device": "设备",
   "profile.devices.lastSubmittedPrefix": "上次提交于",
+  "devices.cloud.session": "{n} 个会话",
+  "devices.cloud.sessions": "{n} 个会话",
   "profile.models.caption": "模型用量",
   "profile.models.share": "占比",
   "profile.models.usedAria": "使用过的模型",

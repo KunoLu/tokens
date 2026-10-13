@@ -6,6 +6,8 @@
 // and update-time normalization. Keeping them here prevents a class of bugs
 // where one endpoint accepts an empty string and another doesn't.
 
+import { parseCloudDeviceKey } from "./cloud";
+
 export const LEGACY_DEVICE_KEY = "legacy-default";
 
 /** Fallback label used when `submitted_devices.display_name` is null/empty. */
@@ -16,6 +18,8 @@ export function deviceDisplayLabel(
   const trimmed = displayName?.trim();
   if (trimmed) return trimmed;
   if (deviceKey === LEGACY_DEVICE_KEY) return "Legacy submissions";
+  const cloud = parseCloudDeviceKey(deviceKey);
+  if (cloud) return cloud.label;
   return "Unnamed device";
 }
 
