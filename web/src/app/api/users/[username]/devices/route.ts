@@ -1,6 +1,6 @@
 import { getPublicProfileDevicesResponse } from "@/lib/publicProfileDevices";
 
-export const revalidate = 60;
+export const dynamic = "force-dynamic";
 
 interface RouteParams {
   params: Promise<{ username: string }>;

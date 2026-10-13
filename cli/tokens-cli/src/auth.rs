@@ -334,11 +334,82 @@ fn open_browser(url: &str) -> bool {
     #[allow(unreachable_code)]
     false
 }
+const READ_TOKEN_PREFIX: &str = "tkr_";
 
-pub async fn login() -> Result<()> {
+fn is_valid_read_token(token: &str) -> bool {
+    token
+        .strip_prefix(READ_TOKEN_PREFIX)
+        .is_some_and(|rest| !rest.is_empty() && rest.chars().all(|c| c.is_ascii_hexdigit()))
+}
+
+async fn enable_private_mode(
+    client: &reqwest::Client,
+    base_url: &str,
+    api_token: &str,
+) -> Result<()> {
+    use colored::Colorize;
+
+    let response = client
+        .post(format!("{}/api/me/private", base_url))
+        .header("Authorization", format!("Bearer {}", api_token))
+        .json(&serde_json::json!({ "tokenName": get_device_name() }))
+        .send()
+        .await?;
+
+    let status = response.status();
+    if status == reqwest::StatusCode::NOT_FOUND {
+        anyhow::bail!("This Tokens server does not support private mode yet.");
+    }
+    if !status.is_success() {
+        let body: serde_json::Value = response.json().await.unwrap_or_default();
+        let error = body
+            .get("error")
+            .and_then(|value| value.as_str())
+            .map(sanitize_server_text)
+            .unwrap_or_else(|| "Failed to enable private mode".to_string());
+        anyhow::bail!("{} ({})", error, status);
+    }
+
+    let data: serde_json::Value = response.json().await?;
+    let read_token = data
+        .get("readToken")
+        .and_then(|value| value.get("token"))
+        .and_then(|value| value.as_str())
+        .filter(|token| is_valid_read_token(token))
+        .ok_or_else(|| anyhow::anyhow!("Server did not return a valid read token."))?;
+
+    println!(
+        "  {}",
+        "Private mode is on. Your profile, devices, badges and embeds are hidden,".green()
+    );
+    println!("{}", "  and you are no longer on the leaderboard.".green());
+    println!();
+    println!("{}", "  Your read token (shown only once — copy it now):".white());
+    println!("{}", format!("  {}", read_token).green().bold());
+    println!(
+        "{}",
+        "  Use it as `Authorization: Bearer <token>`, or append `?token=<token>` to a".bright_black()
+    );
+    println!("{}", "  badge or embed URL.".bright_black());
+    println!(
+        "{}",
+        format!("  Manage privacy at {}/settings\n", base_url).bright_black()
+    );
+    Ok(())
+}
+
+pub async fn login(private: bool) -> Result<()> {
     use colored::Colorize;
 
     if let Some(creds) = load_credentials() {
+        if private {
+            let base_url = get_api_base_url();
+            let client = reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(30))
+                .build()?;
+            println!();
+            return enable_private_mode(&client, &base_url, &creds.token).await;
+        }
         println!(
             "\n  {}",
             format!("Already logged in as {}", creds.username.bold()).yellow()
@@ -448,6 +519,10 @@ pub async fn login() -> Result<()> {
                                 "  You can now use 'tokens submit' to share your usage.\n"
                                     .bright_black()
                             );
+                            if private {
+                                println!();
+                                return enable_private_mode(&client, &base_url, &credentials.token).await;
+                            }
                             return Ok(());
                         }
                     }
@@ -487,7 +562,7 @@ pub async fn login() -> Result<()> {
     }
 }
 
-pub async fn login_with_token(token: &str) -> Result<()> {
+pub async fn login_with_token(token: &str, private: bool) -> Result<()> {
     use colored::Colorize;
 
     let token = token.trim();
@@ -537,6 +612,10 @@ pub async fn login_with_token(token: &str) -> Result<()> {
         "  You can now use 'tokens submit' to share your usage.\n".bright_black()
     );
 
+    if private {
+        println!();
+        return enable_private_mode(&client, &base_url, &credentials.token).await;
+    }
     Ok(())
 }
 
@@ -593,5 +672,18 @@ pub fn whoami() -> Result<()> {
     println!();
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_valid_read_token;
+
+    #[test]
+    fn read_token_must_be_prefixed_hex() {
+        assert!(is_valid_read_token("tkr_0123456789abcdef"));
+        assert!(!is_valid_read_token("tkr_"));
+        assert!(!is_valid_read_token("tt_0123456789abcdef"));
+        assert!(!is_valid_read_token("tkr_abc def"));
+    }
 }
 

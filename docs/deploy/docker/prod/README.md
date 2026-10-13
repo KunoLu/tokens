@@ -2,7 +2,7 @@
 
 把「上线」变成一份配置 + 一条命令。本目录是生产编排**本体**：`Dockerfile`（仓库根 context 的多阶段构建）、`docker-compose.yml`（`postgres:16` 内部网络 + `web` 生产镜像）、`.env.example`（环境变量模板）。
 
-与 `docs/deploy/self-host-production.md` 的分工：本目录只把编排可重复化；**不替代**那份清单——HTTPS 反代、`NEXT_PUBLIC_URL`、用户侧 `TOKENS_API_URL`、迁移到 0026 等 blocker 与外网验收项以它为准。先读清单，再用本目录执行。
+与 `docs/deploy/self-host-production.md` 的分工：本目录只把编排可重复化；**不替代**那份清单——HTTPS 反代、`NEXT_PUBLIC_URL`、用户侧 `TOKENS_API_URL`、迁移到 0027 等 blocker 与外网验收项以它为准。先读清单，再用本目录执行。
 
 ## 拓扑
 
@@ -21,7 +21,7 @@ cp .env.example .env
 # NEXT_PUBLIC_URL=https://你的域名 / CRON_SECRET，按需配 CONTACT_EMAIL、
 # RESEND_API_KEY、EMAIL_FROM。占位值一个都不许留。
 docker compose up -d --build
-# 建库迁移（在 web 容器内跑 drizzle-kit migrate，目标 0026）：
+# 建库迁移（在 web 容器内跑 drizzle-kit migrate，目标 0027）：
 docker compose exec web bun run --cwd web db:migrate
 ```
 

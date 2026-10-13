@@ -196,3 +196,13 @@ Feature: 排行榜与团队榜
       Given 团队 "Neon Ravens" 中有一名成员已被封禁
       When 访客在团队榜页选中 "Neon Ravens"
       Then 该成员不出现在列表中
+
+  Rule: 私密账号不出现在公开排名
+
+    # 账号私密与团队可见性不是同一个词。完整开关、资料页和读令牌见
+    # web/features/private-mode.feature。
+    Scenario: 私密成员不出现在公开团队榜
+      Given 开发者 "mira" 属于公开团队 "Neon Ravens" 且已打开私密模式
+      When 访客在团队榜页选中 "Neon Ravens"
+      Then 列表中不出现 "mira"
+      And 小组人数不把 "mira" 计算在内

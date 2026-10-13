@@ -12,6 +12,7 @@
 
     "test:migrations": "drizzle-kit migrate && bun scripts/check-migrations.ts",
     "test:teams": "bun scripts/check-teams-invariants.ts",
+    "test:private": "bun scripts/check-private-mode.ts",
 
 
 

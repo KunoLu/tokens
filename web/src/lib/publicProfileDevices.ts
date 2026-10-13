@@ -8,7 +8,8 @@ import {
   normalizeUsernameCacheKey,
   usernameEqualsIgnoreCase,
 } from "@/lib/db/usernameLookup";
-import { deviceDisplayLabel, toIsoString } from "@/lib/devices/shared";
+import { deviceDisplayLabel, publicDeviceDisplayLabel, toIsoString } from "@/lib/devices/shared";
+import { PRIVATE_CACHE_CONTROL, getViewerAccess } from "@/lib/privacy";
 
 interface PublicProfileDevicesRouteParams {
   params: Promise<{ username: string }>;
@@ -25,7 +26,7 @@ interface PublicProfileDevicesRouteParams {
  * the user just submitted from is always first.
  */
 export async function getPublicProfileDevicesResponse(
-  _request: Request,
+  request: Request,
   { params }: PublicProfileDevicesRouteParams,
 ) {
   try {
@@ -38,6 +39,7 @@ export async function getPublicProfileDevicesResponse(
         displayName: users.displayName,
         avatarUrl: users.avatarUrl,
         bannedAt: users.bannedAt,
+        isPrivate: users.isPrivate,
       })
       .from(users)
       .where(usernameEqualsIgnoreCase(username))
@@ -59,6 +61,14 @@ export async function getPublicProfileDevicesResponse(
         devices: [],
       });
     }
+
+    const access = await getViewerAccess(request, user);
+    if (!access.allowed) {
+      return NextResponse.json({ error: "User not found" }, { status: 404 });
+    }
+    const visibilityHeaders = user.isPrivate || access.isOwner
+      ? { headers: { "Cache-Control": PRIVATE_CACHE_CONTROL } }
+      : undefined;
 
     const rows = await db
       .select({
@@ -102,8 +112,10 @@ export async function getPublicProfileDevicesResponse(
         // Public consumers render the resolved fallback label; `customName`
         // carries the raw nullable value so owners (settings UI) can
         // distinguish "user typed this" from "fallback label".
-        displayName: deviceDisplayLabel(row.deviceKey, row.displayName),
-        customName: row.displayName,
+        displayName: access.isOwner
+          ? deviceDisplayLabel(row.deviceKey, row.displayName)
+          : publicDeviceDisplayLabel(row.deviceKey, row.displayName),
+        customName: access.isOwner ? row.displayName : null,
         createdAt: toIsoString(row.createdAt),
         lastSubmittedAt: toIsoString(row.lastSubmittedAt),
         totalTokens: Number(row.totalTokens) || 0,
@@ -114,7 +126,7 @@ export async function getPublicProfileDevicesResponse(
         firstDay: row.firstDay,
         lastDay: row.lastDay,
       })),
-    });
+    }, visibilityHeaders);
   } catch (error) {
     console.error("Get user devices error:", error);
     return NextResponse.json(

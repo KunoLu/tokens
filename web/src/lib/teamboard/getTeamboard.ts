@@ -1,6 +1,7 @@
 import { unstable_cache } from "next/cache";
-import { and, eq, gte, isNull, lte, or, sql } from "drizzle-orm";
+import { and, eq, gte, lte, or, sql } from "drizzle-orm";
 import { dailyBreakdown, db, groupMembers, groups, submissions, teamMembers, teams, users } from "@/lib/db";
+import { publicUserCondition } from "@/lib/privacy";
 import type { LeaderboardGroupRef, LeaderboardTeamRef, LeaderboardUser, Period, SortBy } from "@/lib/leaderboard/types";
 import {
   MAX_PAGE,
@@ -134,10 +135,11 @@ async function fetchTeamboardBundle(teamId: string): Promise<TeamboardBundle | n
       .select({
         id: groups.id,
         name: groups.name,
-        memberCount: sql<number>`COUNT(${groupMembers.id})`.as("member_count"),
+        memberCount: sql<number>`COUNT(${users.id})`.as("member_count"),
       })
       .from(groups)
       .leftJoin(groupMembers, eq(groupMembers.groupId, groups.id))
+      .leftJoin(users, and(eq(users.id, groupMembers.userId), publicUserCondition()))
       .where(and(eq(groups.teamId, teamId), eq(groups.status, "active")))
       .groupBy(groups.id, groups.name)
       .orderBy(groups.name),
@@ -163,7 +165,7 @@ async function fetchTeamboardBundle(teamId: string): Promise<TeamboardBundle | n
         groups,
         and(eq(groups.id, groupMembers.groupId), eq(groups.status, "active"))
       )
-      .where(and(eq(teamMembers.teamId, teamId), isNull(users.bannedAt)))
+      .where(and(eq(teamMembers.teamId, teamId), publicUserCondition()))
       .groupBy(users.id, users.username, users.displayName, users.avatarUrl, groups.id, groups.name)
       .orderBy(
         sql`COALESCE(SUM(${submissions.totalTokens}), 0) DESC`,
@@ -254,7 +256,7 @@ async function fetchTeamboardPeriodRows(
         eq(teamMembers.teamId, teamId),
         gte(dailyBreakdown.date, dateRange.start),
         lte(dailyBreakdown.date, dateRange.end),
-        isNull(users.bannedAt)
+        publicUserCondition()
       )
     );
 
@@ -318,7 +320,7 @@ async function fetchAllTimeDirectiveMembers(
     .where(
       and(
         eq(teamMembers.teamId, teamId),
-        isNull(users.bannedAt),
+        publicUserCondition(),
         ...directiveConditions
       )
     )

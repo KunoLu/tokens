@@ -8,9 +8,10 @@ import {
   getSingleUsernameMatch,
   usernameEqualsIgnoreCase,
 } from "@/lib/db/usernameLookup";
-import { deviceDisplayLabel, toIsoString } from "@/lib/devices/shared";
+import { deviceDisplayLabel, publicDeviceDisplayLabel, toIsoString } from "@/lib/devices/shared";
+import { getViewerAccess } from "@/lib/privacy";
 
-export const revalidate = 60;
+export const dynamic = "force-dynamic";
 
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -29,7 +30,7 @@ interface RouteParams {
  * `deviceId` must be a valid uuid. Reject other shapes early so we don't even
  * touch the DB for obviously bogus input.
  */
-export async function GET(_request: Request, { params }: RouteParams) {
+export async function GET(request: Request, { params }: RouteParams) {
   try {
     const { username, deviceId } = await params;
 
@@ -47,6 +48,7 @@ export async function GET(_request: Request, { params }: RouteParams) {
         displayName: users.displayName,
         avatarUrl: users.avatarUrl,
         bannedAt: users.bannedAt,
+        isPrivate: users.isPrivate,
       })
       .from(users)
       .where(usernameEqualsIgnoreCase(username))
@@ -61,6 +63,11 @@ export async function GET(_request: Request, { params }: RouteParams) {
     // endpoint (src/lib/publicProfileDevices.ts) hands out no device ids for
     // them, so this detail view must not answer for one either.
     if (user.bannedAt) {
+      return NextResponse.json({ error: "Device not found" }, { status: 404 });
+    }
+
+    const access = await getViewerAccess(request, user);
+    if (!access.allowed) {
       return NextResponse.json({ error: "Device not found" }, { status: 404 });
     }
 
@@ -128,7 +135,9 @@ export async function GET(_request: Request, { params }: RouteParams) {
       device: {
         id: device.id,
         deviceKey: device.deviceKey,
-        displayName: deviceDisplayLabel(device.deviceKey, device.displayName),
+        displayName: access.isOwner
+          ? deviceDisplayLabel(device.deviceKey, device.displayName)
+          : publicDeviceDisplayLabel(device.deviceKey, device.displayName),
         createdAt: toIsoString(device.createdAt),
         lastSubmittedAt: toIsoString(device.lastSubmittedAt),
       },

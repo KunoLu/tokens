@@ -6,7 +6,8 @@ import {
   normalizeUsernameCacheKey,
   usernameEqualsIgnoreCase,
 } from "@/lib/db/usernameLookup";
-import { eq, desc, sql, and, or, gte, lte, isNull } from "drizzle-orm";
+import { eq, desc, sql, and, or, gte, lte } from "drizzle-orm";
+import { publicUserCondition } from "@/lib/privacy";
 import type {
   LeaderboardData,
   LeaderboardGroupRef,
@@ -417,7 +418,7 @@ async function fetchPeriodLeaderboardRows(
       and(
         gte(dailyBreakdown.date, dateRange.start),
         lte(dailyBreakdown.date, dateRange.end),
-        isNull(users.bannedAt)
+        publicUserCondition()
       )
     );
 
@@ -500,7 +501,7 @@ async function fetchLeaderboardData(
       .leftJoin(teams, and(eq(teams.id, teamMembers.teamId), eq(teams.status, "active")))
       .leftJoin(groupMembers, eq(groupMembers.userId, users.id))
       .leftJoin(groups, and(eq(groups.id, groupMembers.groupId), eq(groups.status, "active")))
-      .where(and(isNull(users.bannedAt), ...directiveConditions))
+      .where(and(publicUserCondition(), ...directiveConditions))
       .groupBy(
         users.id,
         users.username,
@@ -552,7 +553,7 @@ async function fetchLeaderboardData(
       })
       .from(submissions)
       .innerJoin(users, eq(submissions.userId, users.id))
-      .where(isNull(users.bannedAt));
+      .where(publicUserCondition());
 
     return {
       users: (results as RankedLeaderboardDbRow[]).map((row) => ({
@@ -601,7 +602,7 @@ async function fetchLeaderboardData(
     .leftJoin(teams, and(eq(teams.id, teamMembers.teamId), eq(teams.status, "active")))
     .leftJoin(groupMembers, eq(groupMembers.userId, users.id))
     .leftJoin(groups, and(eq(groups.id, groupMembers.groupId), eq(groups.status, "active")))
-    .where(isNull(users.bannedAt))
+    .where(publicUserCondition())
     .groupBy(
       users.id,
       users.username,
@@ -631,7 +632,7 @@ async function fetchLeaderboardData(
       })
       .from(submissions)
       .innerJoin(users, eq(submissions.userId, users.id))
-      .where(isNull(users.bannedAt)),
+      .where(publicUserCondition()),
   ]);
 
   const totalUsers = Number(globalStats[0]?.uniqueUsers) || 0;
@@ -786,7 +787,7 @@ async function fetchAllTimeUserRank(
       avatarUrl: users.avatarUrl,
     })
     .from(users)
-    .where(and(usernameEqualsIgnoreCase(username), isNull(users.bannedAt)))
+    .where(and(usernameEqualsIgnoreCase(username), publicUserCondition()))
     .limit(USERNAME_LOOKUP_LIMIT);
 
   const user = getSingleUsernameMatch(userResult, username);
@@ -830,7 +831,7 @@ async function fetchAllTimeUserRank(
           })
           .from(submissions)
           .innerJoin(users, eq(submissions.userId, users.id))
-          .where(isNull(users.bannedAt))
+          .where(publicUserCondition())
           .groupBy(submissions.userId)
           .having(sql`${compareColumn} > ${userCompareValue}`)
           .as("higher_ranked")

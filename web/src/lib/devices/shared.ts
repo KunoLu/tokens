@@ -19,6 +19,22 @@ export function deviceDisplayLabel(
   return "Unnamed device";
 }
 
+/** Public device label. Fixed asterisks so the mask does not reveal length. */
+export function maskDeviceName(name: string): string {
+  const chars = Array.from(name.trim());
+  if (chars.length === 0) return "";
+  if (chars.length <= 4) return `${chars[0]}***`;
+  return `${chars.slice(0, 2).join("")}****${chars.slice(-2).join("")}`;
+}
+
+export function publicDeviceDisplayLabel(
+  deviceKey: string,
+  displayName: string | null | undefined,
+): string {
+  const trimmed = displayName?.trim();
+  return trimmed ? maskDeviceName(trimmed) : deviceDisplayLabel(deviceKey, displayName);
+}
+
 /** Coerce any drizzle timestamp / Date / string into a stable ISO string. */
 export function toIsoString(value: Date | string | null | undefined): string | null {
   if (!value) return null;

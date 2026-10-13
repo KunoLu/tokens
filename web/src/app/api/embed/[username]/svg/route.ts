@@ -33,8 +33,9 @@ import {
   renderIsometric3DErrorSvg,
 } from "@/lib/embed/renderIsometric3DSvg";
 import { isValidGitHubUsername } from "@/lib/validation/username";
+import { PRIVATE_CACHE_CONTROL, embedAudience } from "@/lib/privacy";
 
-export const revalidate = 60;
+export const dynamic = "force-dynamic";
 
 function parseTheme(searchParams: URLSearchParams): EmbedTheme {
   return searchParams.get("theme") === "light" ? "light" : "dark";
@@ -92,9 +93,10 @@ interface RouteParams {
 async function getContributionsWithEvidence(
   username: string,
   template: EmbedTemplate | "3d",
+  allowPrivate = false,
 ) {
   try {
-    return await getUserEmbedContributions(username);
+    return await getUserEmbedContributions(username, allowPrivate);
   } catch (error) {
     console.warn("[embed-svg] contribution fetch failed", {
       username,
@@ -159,7 +161,20 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
   }
 
   try {
-    const data = await getUserEmbedStats(username, sortBy);
+    const audience = await embedAudience(request, username);
+    const allowPrivate = audience === "private";
+    if (audience === "hidden") {
+      const svg =
+        view === "3d"
+          ? renderIsometric3DErrorSvg(`User @${username} was not found`, { theme })
+          : renderProfileEmbedErrorSvg(`User @${username} was not found`, {
+              theme,
+              color,
+              compact,
+            });
+      return createSvgResponse(svg, { status: 200 });
+    }
+    const data = await getUserEmbedStats(username, sortBy, allowPrivate);
 
     if (!data) {
       const svg =
@@ -182,7 +197,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     }
 
     if (view === "3d") {
-      const contributions = await getContributionsWithEvidence(username, "3d");
+      const contributions = await getContributionsWithEvidence(username, "3d", allowPrivate);
 
       if (!contributions) {
         const svg = renderIsometric3DErrorSvg(
@@ -209,7 +224,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         compact,
       });
 
-      return createSvgResponse(svg);
+      return createSvgResponse(svg, allowPrivate ? { cacheControl: PRIVATE_CACHE_CONTROL } : undefined);
     }
 
     const contributionDataRequired = requiresContributions(
@@ -224,9 +239,9 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     const wantsToday = template === "detailed" || showToday;
     const [contributions, todayUsage] = await Promise.all([
       wantsContributions
-        ? getContributionsWithEvidence(username, template)
+        ? getContributionsWithEvidence(username, template, allowPrivate)
         : null,
-      wantsToday ? getUserEmbedToday(username).catch(() => null) : null,
+      wantsToday ? getUserEmbedToday(username, allowPrivate).catch(() => null) : null,
     ]);
 
     if (contributionDataRequired && !contributions) {
@@ -306,7 +321,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       graph: showGraph,
     });
 
-    return createSvgResponse(svg);
+    return createSvgResponse(svg, allowPrivate ? { cacheControl: PRIVATE_CACHE_CONTROL } : undefined);
   } catch (error) {
     console.error("[embed-svg] failed", {
       username,

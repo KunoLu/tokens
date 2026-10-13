@@ -24,6 +24,9 @@ TOKENS_API_URL=http://localhost:3000 tokens login
 # 3. 上报并看榜
 TOKENS_API_URL=http://localhost:3000 tokens submit
 #    浏览器开 http://localhost:3000/leaderboard 就能看到自己的用量
+
+# 4. 可选：对公开排名隐藏这个账号，并打印一次性读令牌
+TOKENS_API_URL=http://localhost:3000 tokens login --private
 ```
 
 可选：

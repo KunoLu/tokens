@@ -106,6 +106,27 @@ export default function ProfilePageClient({
 }: ProfilePageClientProps) {
   const router = useRouter();
   const [isEmbedOpen, setIsEmbedOpen] = useState(false);
+  const [devices, setDevices] = useState(initialDevices);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function refreshOwnerDevices() {
+      const sessionResponse = await fetch("/api/auth/session");
+      if (!sessionResponse.ok) return;
+      const session = (await sessionResponse.json()) as {
+        user?: { username?: string } | null;
+      };
+      if (session.user?.username?.toLowerCase() !== username.toLowerCase()) return;
+      const devicesResponse = await fetch(`/api/users/${encodeURIComponent(username)}/devices`);
+      if (!devicesResponse.ok || cancelled) return;
+      const payload = (await devicesResponse.json()) as { devices?: ProfileDevice[] };
+      if (!cancelled && Array.isArray(payload.devices)) setDevices(payload.devices);
+    }
+    void refreshOwnerDevices().catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [username]);
 
   const [contributionView, setContributionView] =
     useState<ProfileContributionView>("2d");
@@ -361,8 +382,8 @@ export default function ProfilePageClient({
         // renders null when the list is empty, and ProfileView cannot tell the
         // difference from the outside.
         devices={
-          initialDevices && initialDevices.length > 0 ? (
-            <ProfileDevices devices={initialDevices} />
+          devices && devices.length > 0 ? (
+            <ProfileDevices devices={devices} />
           ) : undefined
         }
         membership={
