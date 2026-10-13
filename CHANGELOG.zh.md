@@ -1,6 +1,14 @@
 # 更新日志
 
+[English](./CHANGELOG.md)
+
 本文件只记录本仓库发布的 tag。版本线是 `1.0.x`。`v27.x` 属于上游 `missuo/tokens`，不是本 fork 的发布版本。
+
+## [Unreleased]
+
+### 变更
+
+- README 顶栏按语言分成两行。`Changelog`、`Deploy`、`CLI` 打开英文文档；`更新日志`、`部署`、`手册` 打开中文文档。英文部署清单和 CLI 手册是 `docs/deploy/self-host-production.en.md` 与 `docs/deploy/tokens-cli-usage.en.md`。
 
 ## [1.0.2] - 2026-10-13
 

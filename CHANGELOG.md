@@ -1,7 +1,15 @@
 # Changelog
 
+[中文](./CHANGELOG.zh.md)
+
 This file records tags published by this repository. The version line is `1.0.x`.
 Tags such as `v27.x` belong to upstream `missuo/tokens` and are not releases of this fork.
+
+## [Unreleased]
+
+### Changed
+
+- README headers split by language. `Changelog`, `Deploy`, and `CLI` open the English documents. `更新日志`, `部署`, and `手册` open the Chinese documents. The English deploy checklist and CLI guide are `docs/deploy/self-host-production.en.md` and `docs/deploy/tokens-cli-usage.en.md`.
 
 ## [1.0.2] - 2026-10-13
 

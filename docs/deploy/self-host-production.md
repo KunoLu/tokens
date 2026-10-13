@@ -1,5 +1,7 @@
 # 云服务器自建部署清单（Web + Postgres）
 
+[English](./self-host-production.en.md)
+
 本 fork 的部署：**自建 Postgres + Node 跑本仓 `web/`**。Cloudflare Workers 层（`wrangler.jsonc`、`worker.ts`、OpenNext 配置与依赖）已在 self-host cutover 中整层删除；Neon + Hyperdrive 是直接上游 `missuo/tokens` 的历史拓扑。
 
 相关：本地开发栈 `docs/local-dev-database.md`、`docs/deploy/local-orbstack-compose.md`（OrbStack Compose，仅本地 dev）。生产容器化资产在 `docs/deploy/docker/prod/`（Dockerfile + compose + runbook，编排可重复化）；本文件是上线前必须满足的条件清单，两者配合使用。
