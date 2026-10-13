@@ -4,11 +4,11 @@ id: 20261013-docs-private-mode
 workflow_mode: strict
 mode_source: user
 mode_note: 用户明确要求 strict，并确认文档页只补私密模式、登录授权句和五条命令文案，不同步 brew services 或 bunx。
-status: "checking"
+status: "done"
 branch: docs/private-mode-section
 created_at: '2026-10-13T13:48:36.117407+08:00'
-updated_at: "2026-10-13T13:55:09.072224+08:00"
-completed_at: null
+updated_at: "2026-10-13T13:55:35.380119+08:00"
+completed_at: "2026-10-13T13:55:35.380119+08:00"
 ---
 # 文档页补私密模式说明
 
@@ -61,3 +61,4 @@ Status: not-required。不改库、缓存或提交数据。
 |---|---|---|---|---|
 | 2026-10-13T13:48:36.609056+08:00 | planned | in-progress | 用户确认文档页调整范围，开始在 docs/private-mode-section 上实现 | 对话确认的三处文案调整 |
 | 2026-10-13T13:55:09.072224+08:00 | in-progress | checking | 文档页文案已改，typecheck 与本地 /docs 中英文渲染已核对 | bun run typecheck pass; curl /docs contains Private mode and 私密模式; no tokens.ci, brew services, or bunx tokens-cli |
+| 2026-10-13T13:55:35.380119+08:00 | checking | done | 文档页已按确认范围改完，本地 /docs 中英文渲染核对通过，准备 admin merge | commit 7dfcfe61; curl /docs English and Chinese; Playwright browser binary missing so spec not run |
