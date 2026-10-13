@@ -7,8 +7,9 @@ import {
   type BadgeStyle,
 } from "@/lib/embed/renderProfileBadgeSvg";
 import { isValidGitHubUsername } from "@/lib/validation/username";
+import { PRIVATE_CACHE_CONTROL, embedAudience } from "@/lib/privacy";
 
-export const revalidate = 60;
+export const dynamic = "force-dynamic";
 
 const VALID_METRICS: BadgeMetric[] = ["tokens", "cost", "rank"];
 
@@ -64,7 +65,14 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
   }
 
   try {
-    const data = await getUserEmbedStats(username, sortBy);
+    const audience = await embedAudience(request, username);
+    if (audience === "hidden") {
+      return createSvgResponse(renderBadgeErrorSvg("not found", { style, label }), {
+        status: 200,
+        cacheControl: "public, max-age=0, s-maxage=60, stale-while-revalidate=300",
+      });
+    }
+    const data = await getUserEmbedStats(username, sortBy, audience === "private");
 
     if (!data) {
       const svg = renderBadgeErrorSvg("not found", { style, label });
@@ -81,7 +89,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       sortBy,
     });
 
-    return createSvgResponse(svg);
+    return createSvgResponse(svg, audience === "private" ? { cacheControl: PRIVATE_CACHE_CONTROL } : undefined);
   } catch (error) {
     console.error("[badge-svg] failed", {
       username,

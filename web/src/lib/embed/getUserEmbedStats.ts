@@ -68,9 +68,18 @@ export interface UserEmbedStats {
   };
 }
 
+function embedUserVisible(username: string, allowPrivate = false) {
+  return and(
+    usernameEqualsIgnoreCase(username),
+    isNull(users.bannedAt),
+    allowPrivate ? undefined : eq(users.isPrivate, false),
+  );
+}
+
 async function fetchUserEmbedStats(
   username: string,
   sortBy: EmbedSortBy,
+  allowPrivate = false,
 ): Promise<UserEmbedStats | null> {
   const matchingUsers = await db
     .select({
@@ -91,7 +100,7 @@ async function fetchUserEmbedStats(
     .leftJoin(submissions, eq(submissions.userId, users.id))
     // Banned users render as "not found": embed badges are exactly the
     // advertising surface a leaderboard cheater is after.
-    .where(and(usernameEqualsIgnoreCase(username), isNull(users.bannedAt)))
+    .where(embedUserVisible(username, allowPrivate))
     .limit(USERNAME_LOOKUP_LIMIT);
   const result = getSingleUsernameMatch(matchingUsers, username);
 
@@ -155,7 +164,9 @@ async function fetchUserEmbedStats(
 export function getUserEmbedStats(
   username: string,
   sortBy: EmbedSortBy = "tokens",
+  allowPrivate = false,
 ): Promise<UserEmbedStats | null> {
+  if (allowPrivate) return fetchUserEmbedStats(username, sortBy, true);
   const usernameCacheKey = normalizeUsernameCacheKey(username);
 
   return unstable_cache(
@@ -174,11 +185,12 @@ export function getUserEmbedStats(
 
 async function fetchUserEmbedContributions(
   username: string,
+  allowPrivate = false,
 ): Promise<EmbedContributionDay[] | null> {
   const matchingUsers = await db
     .select({ id: users.id })
     .from(users)
-    .where(and(usernameEqualsIgnoreCase(username), isNull(users.bannedAt)))
+    .where(embedUserVisible(username, allowPrivate))
     .limit(USERNAME_LOOKUP_LIMIT);
   const user = getSingleUsernameMatch(matchingUsers, username);
 
@@ -238,7 +250,9 @@ async function fetchUserEmbedContributions(
 
 export function getUserEmbedContributions(
   username: string,
+  allowPrivate = false,
 ): Promise<EmbedContributionDay[] | null> {
+  if (allowPrivate) return fetchUserEmbedContributions(username, true);
   const usernameCacheKey = normalizeUsernameCacheKey(username);
 
   return unstable_cache(
@@ -258,11 +272,14 @@ function emptyModelAcc(): ModelAccumulator {
   return { tokens: 0, cost: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, messages: 0 };
 }
 
-async function fetchUserEmbedToday(username: string): Promise<EmbedTodayUsage | null> {
+async function fetchUserEmbedToday(
+  username: string,
+  allowPrivate = false,
+): Promise<EmbedTodayUsage | null> {
   const matchingUsers = await db
     .select({ id: users.id })
     .from(users)
-    .where(and(usernameEqualsIgnoreCase(username), isNull(users.bannedAt)))
+    .where(embedUserVisible(username, allowPrivate))
     .limit(USERNAME_LOOKUP_LIMIT);
   const user = getSingleUsernameMatch(matchingUsers, username);
 
@@ -343,7 +360,11 @@ async function fetchUserEmbedToday(username: string): Promise<EmbedTodayUsage | 
   return { date: today, tokens: totalTokens, cost: totalCost, clients: clientList };
 }
 
-export function getUserEmbedToday(username: string): Promise<EmbedTodayUsage | null> {
+export function getUserEmbedToday(
+  username: string,
+  allowPrivate = false,
+): Promise<EmbedTodayUsage | null> {
+  if (allowPrivate) return fetchUserEmbedToday(username, true);
   const usernameCacheKey = normalizeUsernameCacheKey(username);
 
   return unstable_cache(

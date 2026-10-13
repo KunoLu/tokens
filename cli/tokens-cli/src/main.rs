@@ -34,6 +34,8 @@ enum Commands {
     Login {
         #[arg(long, help = "Save an existing Tokens API token without browser auth")]
         token: Option<String>,
+        #[arg(long, help = "Hide this account from public rankings and profiles")]
+        private: bool,
     },
     #[command(about = "Logout from Tokens")]
     Logout,
@@ -339,10 +341,10 @@ fn main() -> Result<()> {
 
     init_tracing();
 
-    // Install user-configured model aliases once, before any scan runs, so
-    // model-name variants fold consistently across every command. An empty or
-    // absent config is a strict no-op.
-    tokens_core::model_alias::set_global(&settings::load_model_aliases());
+    // Normalize configured alias keys with the same prefix rules as scanned IDs.
+    let settings = settings::Settings::load();
+    tokens_core::model_normalization::set_prefixes_to_strip(&settings.model_id_prefixes_to_strip);
+    tokens_core::model_alias::set_global(&settings.model_aliases);
 
     // Install OpenCode's configured model display names alongside the aliases.
     // Presentation only — the model id used for pricing, caching, and submit is
@@ -352,8 +354,8 @@ fn main() -> Result<()> {
     );
 
     match cli.command {
-        Some(Commands::Login { token }) => {
-            run_login_command(token)
+        Some(Commands::Login { token, private }) => {
+            run_login_command(token, private)
         }
         Some(Commands::Logout) => {
             run_logout_command()
@@ -1432,14 +1434,14 @@ fn to_ts_token_contribution_data(
     }
 }
 
-fn run_login_command(token: Option<String>) -> Result<()> {
+fn run_login_command(token: Option<String>, private: bool) -> Result<()> {
     use tokio::runtime::Runtime;
 
     let rt = Runtime::new()?;
     rt.block_on(async {
         match token {
-            Some(token) => auth::login_with_token(&token).await,
-            None => auth::login().await,
+            Some(token) => auth::login_with_token(&token, private).await,
+            None => auth::login(private).await,
         }
     })
 }

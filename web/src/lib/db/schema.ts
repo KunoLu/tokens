@@ -10,6 +10,7 @@ import {
   date,
   jsonb,
   integer,
+  boolean,
   index,
   unique,
   uniqueIndex,
@@ -53,6 +54,12 @@ export const users = pgTable(
      */
     bannedAt: timestamp("banned_at", { withTimezone: true }),
     banReason: text("ban_reason"),
+    /**
+     * Private accounts are omitted from public rankings. Their profile, devices,
+     * badges and embeds answer as missing unless the caller is the owner or
+     * holds a read token. Banned accounts still render the ban notice.
+     */
+    isPrivate: boolean("is_private").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -161,6 +168,33 @@ export const apiTokens = pgTable(
     index("idx_api_tokens_token").on(table.token),
     index("idx_api_tokens_user_id").on(table.userId),
     unique("api_tokens_user_name_unique").on(table.userId, table.name),
+  ]
+);
+
+// ============================================================================
+// READ TOKENS
+// ============================================================================
+/**
+ * Read-only credentials for a private account. Separate from api_tokens so a
+ * submit token (`tt_`) can never be accepted as a read token (`tkr_`).
+ */
+export const readTokens = pgTable(
+  "read_tokens",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    tokenHash: varchar("token_hash", { length: 64 }).notNull().unique(),
+    name: varchar("name", { length: 100 }).notNull(),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("idx_read_tokens_user_id").on(table.userId),
+    unique("read_tokens_user_name_unique").on(table.userId, table.name),
   ]
 );
 
@@ -652,6 +686,8 @@ export type Session = typeof sessions.$inferSelect;
 export type NewSession = typeof sessions.$inferInsert;
 export type ApiToken = typeof apiTokens.$inferSelect;
 export type NewApiToken = typeof apiTokens.$inferInsert;
+export type ReadToken = typeof readTokens.$inferSelect;
+export type NewReadToken = typeof readTokens.$inferInsert;
 export type DeviceCode = typeof deviceCodes.$inferSelect;
 export type NewDeviceCode = typeof deviceCodes.$inferInsert;
 export type Submission = typeof submissions.$inferSelect;

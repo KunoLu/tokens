@@ -12,6 +12,7 @@ import { tw } from "@/lib/tw";
 import { cn, formatNumber, formatCurrency } from "@/lib/utils";
 import { formatRelativeTime } from "@/lib/formatRelativeTime";
 import { intlTag, useI18n, type Translate } from "@/lib/i18n";
+import PrivacySection from "./PrivacySection";
 
 interface User {
   id: string;
@@ -1195,6 +1196,8 @@ export default function SettingsClient() {
             </TokenList>
           )}
         </Section>
+
+        <PrivacySection />
 
         <DangerSection>
           <DangerSectionTitle>

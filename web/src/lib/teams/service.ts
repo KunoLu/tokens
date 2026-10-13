@@ -965,7 +965,7 @@ export async function searchUsers(actorId: string, q: string) {
         avatarUrl: users.avatarUrl,
       })
       .from(users)
-      .where(sql`lower(${users.email}) = ${query.toLowerCase()}`)
+      .where(and(sql`lower(${users.email}) = ${query.toLowerCase()}`, eq(users.isPrivate, false)))
       .limit(1);
     return rows;
   }
@@ -979,7 +979,10 @@ export async function searchUsers(actorId: string, q: string) {
     })
     .from(users)
     .where(
-      or(ilike(users.username, pattern), ilike(users.displayName, pattern))
+      and(
+        eq(users.isPrivate, false),
+        or(ilike(users.username, pattern), ilike(users.displayName, pattern)),
+      ),
     )
     .limit(10);
 }

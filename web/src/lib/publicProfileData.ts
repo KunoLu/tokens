@@ -10,6 +10,7 @@ import {
   usernameEqualsIgnoreCase,
 } from "@/lib/db/usernameLookup";
 import { buildSubmissionFreshness } from "@/lib/submissionFreshness";
+import { PRIVATE_CACHE_CONTROL, getViewerAccess } from "@/lib/privacy";
 
 const LEGACY_CLIENT_ALIASES: Record<string, string> = { kilocode: "kilo" };
 function normalizeClientId(id: string): string {
@@ -114,6 +115,7 @@ export async function getPublicProfileResponse(
         createdAt: users.createdAt,
         bannedAt: users.bannedAt,
         banReason: users.banReason,
+        isPrivate: users.isPrivate,
       })
       .from(users)
       .where(usernameEqualsIgnoreCase(username))
@@ -148,6 +150,14 @@ export async function getPublicProfileResponse(
         },
       });
     }
+
+    const access = await getViewerAccess(request, user);
+    if (!access.allowed) {
+      return NextResponse.json({ error: "User not found" }, { status: 404 });
+    }
+    const visibilityHeaders = user.isPrivate
+      ? { headers: { "Cache-Control": PRIVATE_CACHE_CONTROL } }
+      : undefined;
 
     const dailyBreakdownFilter = periodRange
       ? and(
@@ -667,7 +677,7 @@ export async function getPublicProfileResponse(
       hasBackfill: archivedDayCount > 0,
       modelUsage,
       contributions: graphContributions,
-    });
+    }, visibilityHeaders);
   } catch (error) {
     if (error instanceof AmbiguousUsernameError) {
       return NextResponse.json(

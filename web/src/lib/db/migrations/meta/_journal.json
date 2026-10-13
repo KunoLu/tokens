@@ -190,6 +190,13 @@
       "when": 1789483200000,
       "tag": "0026_invitation_group_id",
       "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1791865556264,
+      "tag": "0027_private_mode",
+      "breakpoints": true
     }
   ]
 }

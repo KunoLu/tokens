@@ -215,6 +215,7 @@ try {
     WHERE table_schema = 'public'
       AND table_name IN (
         'api_tokens',
+        'read_tokens',
         'daily_breakdown',
         'device_codes',
         'email_verification_tokens',
@@ -232,6 +233,7 @@ try {
   const tableNames = new Set(requiredTables.map((row) => row.table_name));
   const missingTables = [
     "api_tokens",
+    "read_tokens",
     "daily_breakdown",
     "device_codes",
     "email_verification_tokens",
@@ -265,7 +267,8 @@ try {
       AND (
         (table_name = 'submissions' AND column_name IN ('reasoning_tokens', 'schema_version', 'submit_count'))
         OR (table_name = 'daily_breakdown' AND column_name IN ('submitted_device_id', 'active_time_ms'))
-        OR (table_name = 'users' AND column_name IN ('password_hash', 'email_verified_at', 'github_id'))
+        OR (table_name = 'users' AND column_name IN ('password_hash', 'email_verified_at', 'github_id', 'is_private'))
+        OR (table_name = 'read_tokens' AND column_name IN ('token_hash', 'user_id'))
         OR (table_name = 'teams' AND column_name IN ('visibility', 'status'))
         OR (table_name = 'team_invitations' AND column_name IN ('group_id'))
       )
@@ -299,6 +302,15 @@ try {
   expect(
     "github_id is nullable (email accounts carry no GitHub id)",
     columns.get("users.github_id")?.is_nullable === "YES"
+  );
+  expect(
+    "users.is_private defaults to false and is required",
+    columns.get("users.is_private")?.is_nullable === "NO" &&
+      (columns.get("users.is_private")?.column_default ?? "").includes("false")
+  );
+  expect(
+    "read token hash is required",
+    columns.get("read_tokens.token_hash")?.is_nullable === "NO"
   );
   expect(
     "teams.visibility defaults to private",

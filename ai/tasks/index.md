@@ -1,0 +1,25 @@
+# Shared tasks
+
+<!-- sbtd-task-index:start -->
+- [00-bootstrap-guidelines](archive/2026-Q3/00-bootstrap-guidelines/task.md)
+- [20261013-sync-upstream-v2713](20261013-sync-upstream-v2713/task.md)
+- [brand-sweep](archive/2026-Q3/brand-sweep/task.md)
+- [prod-docker-assets](archive/2026-Q3/prod-docker-assets/task.md)
+- [scripts-ref-and-automation](archive/2026-Q3/scripts-ref-and-automation/task.md)
+- [self-host-cutover](archive/2026-Q3/self-host-cutover/task.md)
+- [sync-upstream-cli](archive/2026-Q3/sync-upstream-cli/task.md)
+- [t0-baseline-migrations](archive/2026-Q3/t0-baseline-migrations/task.md)
+- [t1-remove-shame-nav](archive/2026-Q3/t1-remove-shame-nav/task.md)
+- [t10-i18n-infra](archive/2026-Q3/t10-i18n-infra/task.md)
+- [t11-i18n-copy](archive/2026-Q3/t11-i18n-copy/task.md)
+- [t12-brand-purple](archive/2026-Q3/t12-brand-purple/task.md)
+- [t2-email-auth](archive/2026-Q3/t2-email-auth/task.md)
+- [t3-team-schema](archive/2026-Q3/t3-team-schema/task.md)
+- [t4-team-api](archive/2026-Q3/t4-team-api/task.md)
+- [t5-team-ui](archive/2026-Q3/t5-team-ui/task.md)
+- [t6-leaderboard-columns](archive/2026-Q3/t6-leaderboard-columns/task.md)
+- [t7-teamboard-page](archive/2026-Q3/t7-teamboard-page/task.md)
+- [t8-profile-membership](archive/2026-Q3/t8-profile-membership/task.md)
+- [t9-docs-wrapup](archive/2026-Q3/t9-docs-wrapup/task.md)
+- [teamboard-teams-auth](archive/2026-Q3/teamboard-teams-auth/task.md)
+<!-- sbtd-task-index:end -->

@@ -93,7 +93,7 @@ T9（2026-09-15）时 `cli/` 与 `packages/` 两点无输出，该快照已过�
 | 反作弊 | — | 跨设备去重、重复提交单调性校验、封禁、**公开 Hall of Shame** | 封禁机制仍在；**无公开 Hall of Shame**（T1：`/shame` 404，导航为 Teamboard） |
 | 身份 | 用户名 | GitHub OAuth + 社交链接验证徽章 | **邮箱 + PBKDF2**；GitHub OAuth 与 `verified` 徽章已移除（T2）。`social_links` 与 Profile 社交图标仍在 |
 | 组织 | team / group 排行榜 | 已移除，仅一张全局榜 | **Team / Group 两级**（T3–T8）：表 `teams` / `team_members` / `groups` / `group_members` / `team_invitations`；Leaderboard 有 Team/Group 列；Teamboard 按 Team 单选 + Group 多选 |
-| 迁移序号 | 已到 `0029` | 停在 `0023` | 本仓库停在 **`0026`**（`0024` 密码认证、`0025` teams/groups、`0026` invitation `group_id`） |
+| 迁移序号 | 已到 `0029` | 停在 `0023` | 本仓库停在 **`0027`**（`0024` 密码认证、`0025` teams/groups、`0026` invitation `group_id`、`0027` 私密模式） |
 | 测试 | 有 | 保留 Rust 内联测试并由 CI 运行（`cargo test --manifest-path cli/Cargo.toml`）；另有迁移集成检查 `web/package.json` 的 `test:migrations`；web 侧只有 lint + typecheck，无单元测试 | Rust 测试与 `test:migrations` 仍在；另有 `test:teams` 与 Playwright E2E（`tests/e2e/`）。不引入 web 通用单测框架 |
 | 仓库布局 | `crates/`、`packages/frontend/` | `cli/`、`web/` | 与直接上游一致 |
 | 文档与规划产物 | 有 provider / 解析器与恢复方案等设计文档（`docs/9router-bridge.md`、`docs/providers/`、`docs/ratchet-inflation-recovery.md`、`docs/sessions-column-budget.md`）；通常只作为理解提交意图的材料，不直接合并 | 仅 `docs/upstream_policy.md`（且不含 `AGENTS.md`） | **本仓库独有**：`docs/prd-teamboard-teams-auth.md`、`docs/demo/`、`web/features/`、`.trellis/`、`AGENTS.md`；`docs/upstream_policy.md`（本文件）被整篇改写 |
@@ -191,7 +191,7 @@ git cherry-pick -x <sha>                     # 一次一个 SHA；-x 记录来�
    **`.github/assets/client-*` 必须留下。** `web/package.json` 的 `build` 执行 `cp ../.github/assets/client-* public/clients/`（`public/clients/` gitignore）。新客户端 logo 进 `.github/assets`，不要只写 `web/public/clients/`。`tui_signal.rs` / `wiki.rs` 若被 `tokens-core` 模块声明，留下以保证编译，不要当 TUI 命令剥掉。
 2. 在 PR 描述里列出**跳过的提交及每一条的理由**。没有理由的跳过，会在下一次同步时变成一个谜。跳过清单属于该次 PR，不要写进本文件。分类时对照 `grand`：解析器修复可能已在 tokscale，尚未进入 missuo。
 3. 运行 `cargo check --manifest-path cli/Cargo.toml --workspace --all-targets` 与 **`cargo test --manifest-path cli/Cargo.toml --workspace`**（CI 会跑后者，本地先跑可以省一轮往返），以及 `web/` 下的 `bun run lint` 与 `bun run typecheck`。
-4. 额外运行 `bun run test:migrations`。该脚本是 `drizzle-kit migrate && bun scripts/check-migrations.ts`，**两段都要求 `DATABASE_URL`**。没有本地 Postgres 时不要把失败当成迁移被同步破坏；CLI 同步未改 journal 时记环境 blocked。有 URL 时失败才是本仓库问题。T0 已修掉 checker 对已删 `groups` 表的断言和 journal 尾 snapshot 缺口。本仓库自有迁移到 `0026`。
+4. 额外运行 `bun run test:migrations`。该脚本是 `drizzle-kit migrate && bun scripts/check-migrations.ts`，**两段都要求 `DATABASE_URL`**。没有本地 Postgres 时不要把失败当成迁移被同步破坏；CLI 同步未改 journal 时记环境 blocked。有 URL 时失败才是本仓库问题。T0 已修掉 checker 对已删 `groups` 表的断言和 journal 尾 snapshot 缺口。本仓库自有迁移到 `0027`。
 
 ### 4.2 从原始项目（`junhoyeo/tokscale`）
 

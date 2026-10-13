@@ -13,4 +13,4 @@
 
 ## prod/ — 生产编排
 
-`prod/` 把「上线」变成一份配置 + 一条命令：`Dockerfile`（context 为仓库根的多阶段构建）、`docker-compose.yml`（postgres + web）、`.env.example`（全占位环境变量模板）、`README.md`（首次上线 / 发版 / 回滚 / cron 操作手册）。它只做编排可重复化；上线前必须满足的 blocker（HTTPS、`NEXT_PUBLIC_URL`、迁移到 0026 等）与外网验收清单仍在 `docs/deploy/self-host-production.md`，两者配合使用。
+`prod/` 把「上线」变成一份配置 + 一条命令：`Dockerfile`（context 为仓库根的多阶段构建）、`docker-compose.yml`（postgres + web）、`.env.example`（全占位环境变量模板）、`README.md`（首次上线 / 发版 / 回滚 / cron 操作手册）。它只做编排可重复化；上线前必须满足的 blocker（HTTPS、`NEXT_PUBLIC_URL`、迁移到 0027 等）与外网验收清单仍在 `docs/deploy/self-host-production.md`，两者配合使用。
