@@ -4,11 +4,11 @@ id: 20261013-archive-changelog-v102
 workflow_mode: lite
 mode_source: user
 mode_note: 用户明确要求 lite。补充要求发布 v1.0.2，并把该版本写入两份 changelog。
-status: "in-progress"
+status: "done"
 branch: docs/archive-and-changelog
 created_at: '2026-10-13T14:21:28.651117+08:00'
-updated_at: "2026-10-13T14:21:29.141928+08:00"
-completed_at: null
+updated_at: "2026-10-13T14:31:25.848614+08:00"
+completed_at: "2026-10-13T14:31:25.848614+08:00"
 ---
 # 归档 TODO、删除 demo、补 changelog 并发布 v1.0.2
 
@@ -40,3 +40,5 @@ completed_at: null
 | at | from | to | reason | evidence |
 |---|---|---|---|---|
 | 2026-10-13T14:21:29.141928+08:00 | planned | in-progress | 用户确认归档、删 demo、changelog，并要求打 v1.0.2 | docs/archive-and-changelog |
+| 2026-10-13T14:31:24.895320+08:00 | in-progress | checking | 发版提交和 v1.0.2 tag 已在本地创建 | commit cea9b975; tag v1.0.2 |
+| 2026-10-13T14:31:25.848614+08:00 | checking | done | 归档、删 demo、changelog 和 v1.0.2 发版提交已完成，准备合并 | tag v1.0.2 at cea9b975; docs/TODO.md moved; docs/demo deleted |
