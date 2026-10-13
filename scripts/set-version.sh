@@ -22,7 +22,7 @@ done
 NEW_REF="v${VERSION}"
 CUR_REF=$(grep -oE 'PINNED_SCRIPTS_REF = "[^"]+"' web/src/lib/scriptsRef.ts | cut -d'"' -f2)
 [ -n "${CUR_REF}" ] || { echo "ERROR: cannot read PINNED_SCRIPTS_REF from web/src/lib/scriptsRef.ts" >&2; exit 1; }
-REF_FILES="web/src/lib/scriptsRef.ts README.md README_zh.md docs/deploy/tokens-cli-usage.md"
+REF_FILES="web/src/lib/scriptsRef.ts README.md README_zh.md docs/deploy/tokens-cli-usage.md docs/deploy/tokens-cli-usage.en.md"
 if [ "${CUR_REF}" != "${NEW_REF}" ]; then
   for f in ${REF_FILES}; do
     grep -qF "${CUR_REF}" "${f}" || { echo "ERROR: ${f} has no occurrence of ${CUR_REF}" >&2; exit 1; }

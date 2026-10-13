@@ -3,10 +3,13 @@
   <h1>Tokens</h1>
   <p><strong>AI 编程用量排行榜——自托管。</strong></p>
   <p>
-    <a href="./README.md">English</a> ·
+    <a href="./README.md">English</a><br />
     <a href="./CHANGELOG.zh.md">更新日志</a> ·
-    <a href="./docs/deploy/self-host-production.md">部署清单</a> ·
-    <a href="./docs/deploy/tokens-cli-usage.md">CLI 手册</a>
+    <a href="./docs/deploy/self-host-production.md">部署</a> ·
+    <a href="./docs/deploy/tokens-cli-usage.md">手册</a><br />
+    <a href="./CHANGELOG.md">Changelog</a> ·
+    <a href="./docs/deploy/self-host-production.en.md">Deploy</a> ·
+    <a href="./docs/deploy/tokens-cli-usage.en.md">CLI</a>
   </p>
 </div>
 

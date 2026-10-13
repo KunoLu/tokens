@@ -1,5 +1,7 @@
 # Tokens CLI 使用手册（自建站）
 
+[English](./tokens-cli-usage.en.md)
+
 本手册面向两个场景：开发者在本地把 CLI 接到 `localhost:3000` 自测；以及站点上线后，最终用户接入线上站。最后一章是给部署方用的预安装脚本说明。
 
 CLI 的铁律：**它只认 `TOKENS_API_URL`，默认上游 `https://tokens.ci`；凭据 `credentials.json` 不记站点，换站先 `tokens logout`。**

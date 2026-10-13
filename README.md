@@ -3,10 +3,13 @@
   <h1>Tokens</h1>
   <p><strong>The leaderboard for AI coding usage — self-hosted.</strong></p>
   <p>
-    <a href="./README_zh.md">中文文档</a> ·
+    <a href="./README_zh.md">中文文档</a><br />
     <a href="./CHANGELOG.md">Changelog</a> ·
-    <a href="./docs/deploy/self-host-production.md">Deploy</a> ·
-    <a href="./docs/deploy/tokens-cli-usage.md">CLI guide</a>
+    <a href="./docs/deploy/self-host-production.en.md">Deploy</a> ·
+    <a href="./docs/deploy/tokens-cli-usage.en.md">CLI</a><br />
+    <a href="./CHANGELOG.zh.md">更新日志</a> ·
+    <a href="./docs/deploy/self-host-production.md">部署</a> ·
+    <a href="./docs/deploy/tokens-cli-usage.md">手册</a>
   </p>
 </div>
 
@@ -107,13 +110,13 @@ After onboarding, `enable-tokens-service.sh` (Linux) and
 `register-tokens-submit-task.ps1` (Windows) set up resident auto-submission —
 your deployed site serves them; the docs page shows the exact commands.
 
-See [docs/deploy/tokens-cli-usage.md](./docs/deploy/tokens-cli-usage.md).
+See [docs/deploy/tokens-cli-usage.en.md](./docs/deploy/tokens-cli-usage.en.md).
 
 ## Self-host the site
 
 Production is a Node server plus a Postgres database, both yours:
 
-- **Deploy checklist** — [docs/deploy/self-host-production.md](./docs/deploy/self-host-production.md)
+- **Deploy checklist** — [docs/deploy/self-host-production.en.md](./docs/deploy/self-host-production.en.md)
   (blockers, env vars, acceptance)
 - **Production Docker assets** — [docs/deploy/docker/prod/](./docs/deploy/docker/prod/)
   (multi-stage Dockerfile, compose, runbook; `docker compose up -d --build`
