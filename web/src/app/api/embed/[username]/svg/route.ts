@@ -75,9 +75,9 @@ function createSvgResponse(
       "Content-Type": "image/svg+xml; charset=utf-8",
       "Cache-Control":
         init?.cacheControl ??
-        "public, max-age=0, s-maxage=60, stale-while-revalidate=300",
-      // Same reason as /api/og: Next's RSC `Vary` would keep this out of the
-      // edge cache, and an embed card has one representation per URL.
+        "private, no-store, max-age=0",
+      // Visibility can change, and this self-host has no shared-cache purge.
+      // Do not let a reverse proxy keep a public SVG after the account goes private.
       Vary: "Accept-Encoding",
       "X-Content-Type-Options": "nosniff",
       "Content-Security-Policy":

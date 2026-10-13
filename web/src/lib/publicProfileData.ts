@@ -211,7 +211,7 @@ export async function getPublicProfileResponse(
             s.user_id,
             SUM(s.total_tokens) as total_tokens
           FROM submissions s
-          JOIN users u ON u.id = s.user_id AND u.banned_at IS NULL
+          JOIN users u ON u.id = s.user_id AND u.banned_at IS NULL AND u.is_private = false
           GROUP BY s.user_id
         ),
         ranked AS (

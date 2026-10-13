@@ -130,7 +130,7 @@ async function fetchUserEmbedStats(
               }
           ) AS rank
         FROM submissions s
-        JOIN users u ON u.id = s.user_id AND u.banned_at IS NULL
+        JOIN users u ON u.id = s.user_id AND u.banned_at IS NULL AND u.is_private = false
       )
       SELECT rank, (SELECT COUNT(*)::int FROM ranked) AS total
       FROM ranked WHERE user_id = ${result.id}

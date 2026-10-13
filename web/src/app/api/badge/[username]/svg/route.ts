@@ -36,7 +36,7 @@ function createSvgResponse(svg: string, init?: { status?: number; cacheControl?:
     status: init?.status ?? 200,
     headers: {
       "Content-Type": "image/svg+xml; charset=utf-8",
-      "Cache-Control": init?.cacheControl ?? "public, max-age=0, s-maxage=60, stale-while-revalidate=300",
+      "Cache-Control": init?.cacheControl ?? "private, no-store, max-age=0",
       "X-Content-Type-Options": "nosniff",
       "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline';",
     },
@@ -69,7 +69,6 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     if (audience === "hidden") {
       return createSvgResponse(renderBadgeErrorSvg("not found", { style, label }), {
         status: 200,
-        cacheControl: "public, max-age=0, s-maxage=60, stale-while-revalidate=300",
       });
     }
     const data = await getUserEmbedStats(username, sortBy, audience === "private");

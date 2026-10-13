@@ -6,7 +6,7 @@ import {
   parseCustomDateRange,
 } from "@/lib/leaderboard/dateRange";
 
-export const revalidate = 60;
+export const dynamic = "force-dynamic";
 
 const VALID_PERIODS: Period[] = [
   "all",

@@ -101,15 +101,15 @@ export async function getViewerAccess(
 export function revalidateUserVisibility(username: string): void {
   const usernameCacheKey = normalizeUsernameCacheKey(username);
   try {
-    revalidateTag("leaderboard", "max");
-    revalidateTag(`user:${usernameCacheKey}`, "max");
-    revalidateTag("user-rank", "max");
-    revalidateTag(`user-rank:${usernameCacheKey}`, "max");
-    revalidateTag(`embed-user:${usernameCacheKey}`, "max");
-    revalidateTag(`embed-user:${usernameCacheKey}:tokens`, "max");
-    revalidateTag(`embed-user:${usernameCacheKey}:cost`, "max");
-    revalidateTag(`embed-contrib:${usernameCacheKey}`, "max");
-    revalidateTag(`embed-today:${usernameCacheKey}`, "max");
+    revalidateTag("leaderboard", { expire: 0 });
+    revalidateTag(`user:${usernameCacheKey}`, { expire: 0 });
+    revalidateTag("user-rank", { expire: 0 });
+    revalidateTag(`user-rank:${usernameCacheKey}`, { expire: 0 });
+    revalidateTag(`embed-user:${usernameCacheKey}`, { expire: 0 });
+    revalidateTag(`embed-user:${usernameCacheKey}:tokens`, { expire: 0 });
+    revalidateTag(`embed-user:${usernameCacheKey}:cost`, { expire: 0 });
+    revalidateTag(`embed-contrib:${usernameCacheKey}`, { expire: 0 });
+    revalidateTag(`embed-today:${usernameCacheKey}`, { expire: 0 });
     revalidatePath("/leaderboard");
     revalidatePath("/teamboard");
     revalidateUsernamePaths(username);
