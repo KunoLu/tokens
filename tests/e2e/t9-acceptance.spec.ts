@@ -46,6 +46,12 @@ test("Docs 页安装入口指向本站", async ({ page }) => {
   await expect(windowsPanel.getByText(/\. \$PROFILE/)).toBeVisible();
   await page.getByRole("tab", { name: /linux/i }).click();
   await expect(page.getByRole("tabpanel").getByRole("code").filter({ hasText: "localhost:3000/enable-tokens-service.sh" })).toBeVisible();
+  await expect(page.getByText("Register on this site and stay signed in before you run tokens login.")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Private mode" })).toBeVisible();
+  await expect(page.getByRole("code").filter({ hasText: "tokens login --private" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Privacy in Settings" })).toHaveAttribute("href", "/settings");
+  expect(html).toContain("These five cover submitting usage.");
+  expect(html).not.toContain("Five commands cover the whole workflow.");
 });
 
 test("页脚只保留版权与署名行", async ({ page }) => {

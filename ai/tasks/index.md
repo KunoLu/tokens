@@ -2,6 +2,7 @@
 
 <!-- sbtd-task-index:start -->
 - [00-bootstrap-guidelines](archive/2026-Q3/00-bootstrap-guidelines/task.md)
+- [20261013-docs-private-mode](20261013-docs-private-mode/task.md)
 - [20261013-sync-upstream-v2713](20261013-sync-upstream-v2713/task.md)
 - [brand-sweep](archive/2026-Q3/brand-sweep/task.md)
 - [prod-docker-assets](archive/2026-Q3/prod-docker-assets/task.md)
