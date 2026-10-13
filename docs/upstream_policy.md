@@ -96,7 +96,7 @@ T9（2026-09-15）时 `cli/` 与 `packages/` 两点无输出，该快照已过�
 | 迁移序号 | 已到 `0029` | 停在 `0023` | 本仓库停在 **`0027`**（`0024` 密码认证、`0025` teams/groups、`0026` invitation `group_id`、`0027` 私密模式） |
 | 测试 | 有 | 保留 Rust 内联测试并由 CI 运行（`cargo test --manifest-path cli/Cargo.toml`）；另有迁移集成检查 `web/package.json` 的 `test:migrations`；web 侧只有 lint + typecheck，无单元测试 | Rust 测试与 `test:migrations` 仍在；另有 `test:teams` 与 Playwright E2E（`tests/e2e/`）。不引入 web 通用单测框架 |
 | 仓库布局 | `crates/`、`packages/frontend/` | `cli/`、`web/` | 与直接上游一致 |
-| 文档与规划产物 | 有 provider / 解析器与恢复方案等设计文档（`docs/9router-bridge.md`、`docs/providers/`、`docs/ratchet-inflation-recovery.md`、`docs/sessions-column-budget.md`）；通常只作为理解提交意图的材料，不直接合并 | 仅 `docs/upstream_policy.md`（且不含 `AGENTS.md`） | **本仓库独有**：`docs/prd-teamboard-teams-auth.md`、`docs/demo/`、`web/features/`、`.trellis/`、`AGENTS.md`；`docs/upstream_policy.md`（本文件）被整篇改写 |
+| 文档与规划产物 | 有 provider / 解析器与恢复方案等设计文档（`docs/9router-bridge.md`、`docs/providers/`、`docs/ratchet-inflation-recovery.md`、`docs/sessions-column-budget.md`）；通常只作为理解提交意图的材料，不直接合并 | 仅 `docs/upstream_policy.md`（且不含 `AGENTS.md`） | **本仓库独有**：`docs/prd-teamboard-teams-auth.md`、`docs/archive/`、`web/features/`、`AGENTS.md`；`docs/upstream_policy.md`（本文件）被整篇改写。`docs/demo/` 已于 v1.0.2 删除 |
 
 **代码类上游改动仍按 §3 评估。** 下表是原 §2.2 已落地行（T9 逐条迁入）。上游改这些路径默认「读意图、重新实现」，不能按逐字节一致 cherry-pick。
 
@@ -112,7 +112,7 @@ T9（2026-09-15）时 `cli/` 与 `packages/` 两点无输出，该快照已过�
 | Teamboard | T7 | 新增页面、组件、查询与 API，不改动上一行列出的路径 | `web/src/app/(main)/teamboard/**`、`web/src/components/teamboard/**`、`web/src/app/api/teamboard/**` |
 | 多语言（i18n） | T10 / T11 | **全站 UI 文案被包裹进字典**；上游任何文案调整需要映射到字典 key，不能直接合并文本 | `web/src/lib/i18n/**`、全部页面 `page.tsx` / 组件 |
 | 徽章 | T2 | **`verified` 徽章整体移除**（D-3 取 C）。上游对已删文件的改动**直接丢弃**；其他文件新增徽章渲染点同样丢弃该片段。**社交链接本身不是分歧区**——`social_links` 与 `ProfileSocialLinks.tsx` 与上游一致，照常采纳 | 删除 `web/src/lib/socialVerification.ts`、`web/src/components/ui/VerifiedBadge.tsx`；改写 `getLeaderboard` / `types`、`Leaderboard.tsx`、`ProfileView.tsx`、`ProfilePageClient.tsx`、`docs/page.tsx` |
-| 品牌块 | T12 | 导航 `TokensMark` 底色 `#7C3AED`；favicon / 安装图标位图不重着色 | `web/src/components/layout/Navigation.tsx`、`docs/demo/teamboard-demo.html` |
+| 品牌块 | T12 | 导航 `TokensMark` 底色 `#7C3AED`；favicon / 安装图标位图不重着色 | `web/src/components/layout/Navigation.tsx`。当时的 demo 文件已删除 |
 | 托管与 Worker | `09-16-self-host-cutover` | 删除 OpenNext Worker / wrangler / Hyperdrive；自建 `next start`。上游对 `web/worker.ts`、edge cache、Caddy/PG 拓扑的改动**直接丢弃** | `web/worker.ts`、`web/wrangler.jsonc`、`web/open-next.config.ts`、`web/next.config.ts` |
 
 `Navigation.tsx`、`schema.ts`、`getLeaderboard.ts` 是冲突最集中的三个文件；i18n 字典包裹让几乎所有页面文案都成为分歧点。

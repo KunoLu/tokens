@@ -1,6 +1,8 @@
 # Teamboard / Teams / Auth 实施 TODO
 
-本文件是**推进依据**。每完成一项立刻勾选并写完成日期；新增或调整任务同步改这里，不要只改聊天记录。
+> 归档于 2026-10-13。清单内事项均已完成，本文件不再作为推进依据。原文保留。文中的 `docs/demo/teamboard-demo.html` 已删除，现行界面以站点为准。
+
+本文件曾是推进依据。每完成一项立刻勾选并写完成日期；新增或调整任务同步改这里，不要只改聊天记录。
 
 完整需求与技术细节：`docs/prd-teamboard-teams-auth.md`  
 Trellis 父任务：`.trellis/tasks/09-10-teamboard-teams-auth/`  

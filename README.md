@@ -4,6 +4,7 @@
   <p><strong>The leaderboard for AI coding usage — self-hosted.</strong></p>
   <p>
     <a href="./README_zh.md">中文文档</a> ·
+    <a href="./CHANGELOG.md">Changelog</a> ·
     <a href="./docs/deploy/self-host-production.md">Deploy</a> ·
     <a href="./docs/deploy/tokens-cli-usage.md">CLI guide</a>
   </p>
@@ -29,8 +30,9 @@ profiles, contribution graphs, and embeddable cards.
 ## This fork vs upstream
 
 Fork chain: [junhoyeo/tokscale](https://github.com/junhoyeo/tokscale) →
-[missuo/tokens](https://github.com/missuo/tokens) → this repository. The CLI is
-unchanged from upstream; everything about the site has diverged:
+[missuo/tokens](https://github.com/missuo/tokens) → this repository. The CLI
+command set follows upstream, and parser fixes are cherry-picked onto this
+fork's `1.0.x` line. The site has diverged:
 
 | | Upstream (missuo/tokens) | This fork |
 |---|---|---|
@@ -40,6 +42,7 @@ unchanged from upstream; everything about the site has diverged:
 | Brand | Upstream blue | Brand purple `#7C3AED` |
 | Deployment | Cloudflare Workers + Neon Postgres via Hyperdrive | Self-hosted Node (`next start`) + your own Postgres, with production Docker assets |
 | Anti-cheat | Cross-device dedup, monotonicity checks, public Hall of Shame | Same guards; the public shame page is removed, bans still apply |
+| Privacy | Public profiles and leaderboards | Optional private mode: hidden from public rankings; visitors see a missing user. `tokens login --private` prints a one-time read token |
 
 **Upstream sync policy** lives in
 [docs/upstream_policy.md](./docs/upstream_policy.md): data capabilities and
@@ -70,11 +73,15 @@ brew install owo-network/brew/tokens
 curl -fsSL https://<your-domain>/install.sh | sh
 ```
 
-**Windows** (or a one-off anywhere with Bun/Node 18+)
+**Windows**
 
 ```sh
-npm i -g tokens-cli        # or: bunx tokens-cli@latest <command>
+npm i -g tokens-cli
 ```
+
+Do not use `bunx tokens-cli@latest` to log in or submit. It skips the site pin
+and talks to the upstream default. Use the pre-install script below, or set
+`TOKENS_API_URL` on every command.
 
 Then, on any platform:
 
@@ -82,6 +89,7 @@ Then, on any platform:
 tokens logout                                     # clears any credentials from another site
 TOKENS_API_URL=https://<your-domain> tokens login  # browser opens <your-domain>/device
 TOKENS_API_URL=https://<your-domain> tokens submit
+TOKENS_API_URL=https://<your-domain> tokens login --private   # optional: hide this account
 ```
 
 `TOKENS_API_URL` must be set on every command (or exported once per shell) —
@@ -92,7 +100,7 @@ clear old credentials, and pin it to your site — runnable straight from the
 repo's public GitHub (pinned to a reviewed tag or commit, never a moving branch):
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/KunoLu/tokens/v1.0.1/pre-install-tokens.sh | bash -s -- https://<your-domain>
+curl -fsSL https://raw.githubusercontent.com/KunoLu/tokens/v1.0.2/pre-install-tokens.sh | bash -s -- https://<your-domain>
 ```
 
 After onboarding, `enable-tokens-service.sh` (Linux) and
@@ -114,11 +122,10 @@ Production is a Node server plus a Postgres database, both yours:
   (OrbStack/Docker Compose reference copy)
 
 ## Supported clients
-
-All 41 are detected automatically — if it is installed and has written
-sessions, it is counted. The CLI core is unchanged from upstream, so every
-parser, pricing feed, and correctness fix that lands upstream keeps working
-here.
+54 clients in the scanner catalog are detected automatically — if one is
+installed and has written sessions, it is counted. The docs page renders the
+live list from that catalog. Parser and pricing fixes are taken from upstream;
+this fork does not republish them as `27.x`.
 
 <details>
 <summary>Where each one stores its data</summary>
@@ -169,11 +176,12 @@ rate used per model.
 ## Repository layout
 
 ```text
-cli/                 Rust workspace — the tokens CLI (unchanged from upstream)
+cli/                 Rust workspace — tokens CLI (upstream command set, 1.0.x version line)
 web/                 Next.js app — leaderboard, teamboard, auth, profiles, embeds
 packages/            npm distribution packages (CLI + platform binaries)
 docs/deploy/         Self-host deployment (checklist, Docker assets, CLI guide)
-docs/upstream_policy.md   How upstream changes are evaluated and merged
+docs/archive/        Finished planning checklists, not an active tracker
+CHANGELOG.md         This fork's tagged releases
 web/features/        BDD behavior specs (Chinese scenarios, English keywords)
 tests/e2e/           Playwright end-to-end tests
 ```

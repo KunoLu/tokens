@@ -6,7 +6,7 @@
 | 目标仓库 | `KunoLu/tokens`（fork 自 `missuo/tokens`，其上游为 `junhoyeo/tokscale`） |
 | 实施分支 | `feature/teamboard-teams-auth` |
 | Trellis 父任务 | `.trellis/tasks/09-10-teamboard-teams-auth/` |
-| UI 验收物 | `docs/demo/teamboard-demo.html` |
+| UI 验收物 | `docs/demo/teamboard-demo.html`（已于 v1.0.2 删除；现行界面以站点为准） |
 | 关联文档 | `docs/upstream_policy.md`（同步策略，本次一并改写） |
 
 ---
