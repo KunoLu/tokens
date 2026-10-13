@@ -258,6 +258,9 @@ export default async function DocsPage() {
               </p>
             </TabsContent>
           </Tabs>
+          <p className="mt-4 text-sm leading-relaxed text-muted-foreground">
+            {t(locale, "docs.loginHint")}
+          </p>
         </Section>
 
 
@@ -269,6 +272,35 @@ export default async function DocsPage() {
           <CommandBlock commands={localize(locale, EVERYDAY)} />
         </Section>
 
+        <Section
+          id="private"
+          title={t(locale, "docs.privateTitle")}
+          description={t(locale, "docs.privateDesc")}
+        >
+          <div className="flex flex-col gap-4">
+            <CommandBlock
+              commands={[
+                {
+                  command: "tokens login --private",
+                  note: t(locale, "docs.privateCommandNote"),
+                },
+              ]}
+            />
+            <p className="text-sm leading-relaxed text-muted-foreground">
+              {t(locale, "docs.privateOnOff")}{" "}
+              <a href="/settings" className="text-foreground underline underline-offset-4">
+                {t(locale, "docs.privateSettingsLink")}
+              </a>{" "}
+              {t(locale, "docs.privateOnOffAfter")}
+            </p>
+            <p className="text-sm leading-relaxed text-muted-foreground">
+              {t(locale, "docs.privateTokens")}
+            </p>
+            <p className="text-sm leading-relaxed text-muted-foreground">
+              {t(locale, "docs.privateDevices")}
+            </p>
+          </div>
+        </Section>
 
         <Section
           id="clients"
