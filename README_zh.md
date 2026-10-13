@@ -4,6 +4,7 @@
   <p><strong>AI 编程用量排行榜——自托管。</strong></p>
   <p>
     <a href="./README.md">English</a> ·
+    <a href="./CHANGELOG.zh.md">更新日志</a> ·
     <a href="./docs/deploy/self-host-production.md">部署清单</a> ·
     <a href="./docs/deploy/tokens-cli-usage.md">CLI 手册</a>
   </p>
@@ -21,7 +22,7 @@
 
 ## 本 fork 与上游的差异
 
-Fork 链路：[junhoyeo/tokscale](https://github.com/junhoyeo/tokscale) → [missuo/tokens](https://github.com/missuo/tokens) → 本仓库。CLI 与上游完全一致；站点全面分叉：
+Fork 链路：[junhoyeo/tokscale](https://github.com/junhoyeo/tokscale) → [missuo/tokens](https://github.com/missuo/tokens) → 本仓库。CLI 命令集跟随上游，解析器修复拣入本仓的 `1.0.x` 版本线。站点已分叉：
 
 | | 上游（missuo/tokens） | 本 fork |
 |---|---|---|
@@ -31,6 +32,7 @@ Fork 链路：[junhoyeo/tokscale](https://github.com/junhoyeo/tokscale) → [mis
 | 品牌 | 上游蓝色 | 品牌紫 `#7C3AED` |
 | 部署 | Cloudflare Workers + Neon（经 Hyperdrive） | 自建 Node（`next start`）+ 自建 Postgres，带生产 Docker 资产 |
 | 反作弊 | 跨设备去重、单调性校验、公开 Hall of Shame | 同样保留校验与封禁；公示页已移除 |
+| 隐私 | 资料和排行榜默认公开 | 可选私密模式：不进公开排名，访客看到的和找不到用户一样。`tokens login --private` 会打印一次性读令牌 |
 
 **上游同步策略**见 [docs/upstream_policy.md](./docs/upstream_policy.md)：数据能力与正确性修复照收，UI 实现不照搬。
 
@@ -54,11 +56,13 @@ brew install owo-network/brew/tokens
 curl -fsSL https://<你的域名>/install.sh | sh
 ```
 
-**Windows**（或任何有 Bun/Node 18+ 的环境一次性使用）
+**Windows**
 
 ```sh
-npm i -g tokens-cli        # 或：bunx tokens-cli@latest <命令>
+npm i -g tokens-cli
 ```
+
+不要用 `bunx tokens-cli@latest` 登录或提交。它不会带上本站地址，会走到上游默认站。用下面的预安装脚本，或给每条命令设置 `TOKENS_API_URL`。
 
 然后任意平台：
 
@@ -66,12 +70,13 @@ npm i -g tokens-cli        # 或：bunx tokens-cli@latest <命令>
 tokens logout                                       # 清掉其他站的旧凭据
 TOKENS_API_URL=https://<你的域名> tokens login       # 浏览器打开 <你的域名>/device 授权
 TOKENS_API_URL=https://<你的域名> tokens submit
+TOKENS_API_URL=https://<你的域名> tokens login --private   # 可选：隐藏这个账号
 ```
 
 每条命令都要带 `TOKENS_API_URL`（或在当前 shell 里 export 一次）——CLI 默认指向上游站，凭据也不记自己属于哪个站。仓库根目录还提供 `pre-install-tokens.sh` / `pre-install-tokens.ps1` 一键预安装脚本：装 CLI、清旧凭据、把默认指向固定到你的站。可直接从本仓库的 GitHub 公开地址远程执行（钉住审过的 tag 或 commit，不跟随分支漂移）：
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/KunoLu/tokens/v1.0.1/pre-install-tokens.sh | bash -s -- https://<你的域名>
+curl -fsSL https://raw.githubusercontent.com/KunoLu/tokens/v1.0.2/pre-install-tokens.sh | bash -s -- https://<你的域名>
 ```
 
 预装完成后，`enable-tokens-service.sh`（Linux）与 `register-tokens-submit-task.ps1`（Windows）可配置常驻自动提交——由你部署的站点提供下载，docs 页有现成命令，详见手册。
@@ -88,7 +93,7 @@ curl -fsSL https://raw.githubusercontent.com/KunoLu/tokens/v1.0.1/pre-install-to
 
 ## 支持的客户端
 
-41 个客户端全部自动检测——只要装过并写过会话，就会被统计。CLI 核心与上游一致，上游的解析器、定价源和正确性修复在本仓库持续可用。
+扫描目录里有 54 个客户端，装过并写过会话就会被统计。文档页的列表由该目录生成。解析器和定价修复从上游拣入，本仓不把它们重新发布成 `27.x`。
 
 <details>
 <summary>各客户端的数据存放位置</summary>
@@ -134,10 +139,12 @@ curl -fsSL https://raw.githubusercontent.com/KunoLu/tokens/v1.0.1/pre-install-to
 ## 仓库结构
 
 ```text
-cli/                 Rust workspace——tokens CLI（与上游一致）
+cli/                 Rust workspace——tokens CLI（命令集跟随上游，版本线 1.0.x）
 web/                 Next.js 应用——排行榜、团队榜、认证、个人主页、embed
 packages/            npm 分发包（CLI 主包 + 各平台二进制）
 docs/deploy/         自托管部署（清单、Docker 资产、CLI 手册）
+docs/archive/        已完成的规划清单，不是当前推进依据
+CHANGELOG.zh.md      本 fork 已打 tag 的版本说明
 docs/upstream_policy.md   上游改动的评估与合并策略
 web/features/        BDD 行为规格（中文场景 + 英文关键词）
 tests/e2e/           Playwright 端到端测试
