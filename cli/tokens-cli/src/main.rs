@@ -2456,6 +2456,19 @@ fn run_submit_command(
                         )
                         .bright_black()
                     );
+                } else if sync_result.partial {
+                    println!(
+                        "{}",
+                        format!(
+                            "  Antigravity sync was partial: {} session{} refreshed, {} retained from cache, {} failed: {}",
+                            sync_result.sessions,
+                            if sync_result.sessions == 1 { "" } else { "s" },
+                            sync_result.retained_sessions,
+                            sync_result.failed_sessions,
+                            sync_result.error.as_deref().unwrap_or("unknown sync error")
+                        )
+                        .yellow()
+                    );
                 } else if let Some(err) = sync_result.error {
                     if has_antigravity_cache {
                         println!(
