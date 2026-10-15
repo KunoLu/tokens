@@ -2355,7 +2355,14 @@ fn rpc_timeout_for_deadline(deadline: Option<&SyncDeadline>) -> Result<Duration>
 /// handed to a configured remote proxy together with the CSRF token and the
 /// RPC body. The non-Windows path gets the same guarantee from `reqwest`'s
 /// `.no_proxy()`.
-#[cfg(any(target_os = "windows", test))]
+///
+/// Test-only default-timeout wrapper around
+/// [`windows_curl_rpc_args_with_timeout`]: the Windows caller passes a dynamic
+/// `--max-time`, so this wrapper has no production caller. It must stay
+/// `cfg(test)` — gating it with `any(target_os = "windows", test)` compiles
+/// it into the Windows binary with no caller there, which fails CI's
+/// `-D warnings` (`dead_code`) on the Windows job only.
+#[cfg(test)]
 fn windows_curl_rpc_args(url: &str) -> Vec<&str> {
     windows_curl_rpc_args_with_timeout(url, "10")
 }
