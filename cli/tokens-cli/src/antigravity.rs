@@ -506,7 +506,7 @@ fn sync_antigravity_cache_impl_with_deadline(
 
     let count = next_manifest.sessions.len();
 
-    if explicit && outcome.partial_error.is_none() {
+    if explicit {
         println!("\n  {}", "Antigravity sync".cyan());
         println!(
             "  {}",
@@ -547,7 +547,34 @@ fn sync_antigravity_cache_impl_with_deadline(
 }
 
 pub fn run_antigravity_sync() -> Result<()> {
-    let result = sync_antigravity_cache(true);
+    report_sync_outcome(sync_antigravity_cache(true))
+}
+
+fn report_sync_outcome(result: SyncAntigravityResult) -> Result<()> {
+    use colored::Colorize;
+
+    // A session the language server no longer recognizes fails its metadata
+    // RPC, which is routine: the manifest and the filesystem both outlive the
+    // trajectories a running server will answer for. Those sessions are kept
+    // from the cache, the manifest is persisted, and the summary above already
+    // printed — so report the gap and still succeed. Only a sync that
+    // produced nothing usable (discovery or lock failure) is an error.
+    if result.partial {
+        if let Some(err) = result.error {
+            eprintln!(
+                "  {}",
+                format!(
+                    "Warning: {} session{} could not be refreshed and {} were kept from the cache: {err}",
+                    result.failed_sessions,
+                    if result.failed_sessions == 1 { "" } else { "s" },
+                    result.retained_sessions,
+                )
+                .yellow()
+            );
+        }
+        return Ok(());
+    }
+
     if let Some(err) = result.error {
         anyhow::bail!("{err}");
     }
@@ -6057,5 +6084,50 @@ mod tests {
         let dummy_file = sessions_dir.join("test-session.jsonl");
         fs::write(&dummy_file, "{\"type\":\"session_meta\"}\n").unwrap();
         assert!(has_antigravity_cache());
+    }
+
+    #[test]
+    #[serial]
+    fn explicit_sync_keeps_its_cache_and_succeeds_when_a_session_cannot_be_refreshed() {
+        // `antigravity sync` walks every manifest and filesystem candidate,
+        // not just the trajectories the running server lists, so a candidate
+        // whose metadata RPC fails is routine. The sync persists what it has
+        // and must still exit zero; before this guard a single such session
+        // failed the whole command and suppressed its summary.
+        let temp_dir = tempfile::tempdir().unwrap();
+        let _guard = TestEnvGuard::redirect_to(temp_dir.path());
+        let summaries = serde_json::json!({
+            "cascadeTrajectories": [{
+                "cascadeId": "evicted-session",
+                "lastModifiedTime": 1,
+                "stepCount": 1
+            }]
+        })
+        .to_string();
+        let (port, _seen) = serve_rpc_methods(move |method| match method {
+            "GetAllCascadeTrajectories" => Some(summaries.clone()),
+            _ => None,
+        });
+        remember_rpc_transport(port, RpcTransport::PlainHttp);
+
+        let result = sync_antigravity_cache_with_connections(&[enrichment_test_connection(port)], true);
+        assert!(result.partial, "a recoverable metadata failure is partial");
+        assert_eq!(result.failed_sessions, 1);
+        assert!(result.error.is_some());
+        assert!(
+            get_antigravity_manifest_path().unwrap().exists(),
+            "the manifest must be persisted even when a session could not be refreshed"
+        );
+
+        report_sync_outcome(result).expect("a partial sync must not fail `antigravity sync`");
+
+        let hard_failure = SyncAntigravityResult {
+            error: Some("Another tokens antigravity sync is in progress; aborting".to_string()),
+            ..SyncAntigravityResult::default()
+        };
+        assert!(
+            report_sync_outcome(hard_failure).is_err(),
+            "a sync that produced nothing usable must still fail"
+        );
     }
 }
