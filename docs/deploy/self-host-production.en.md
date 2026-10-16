@@ -4,7 +4,7 @@
 
 This fork runs **your Postgres and this repo's `web/` on Node**. The Cloudflare Workers layer (`wrangler.jsonc`, `worker.ts`, OpenNext config and dependencies) was removed in the self-host cutover. Neon + Hyperdrive is the old topology of upstream `missuo/tokens`.
 
-Related: local database notes in `docs/local-dev-database.md`, and `docs/deploy/local-orbstack-compose.md` (OrbStack Compose, local dev only). Production container assets are in `docs/deploy/docker/prod/` (Dockerfile, compose, and a Chinese runbook). This file is the condition list that must pass before go-live. Use both.
+Related: local database notes in `docs/local-dev-database.md`, and `docs/deploy/local-orbstack-compose.md` (OrbStack Compose, local dev only). Production container assets are in `docs/deploy/docker/prod/` (Dockerfile, compose, and a Chinese runbook). This file is the condition list that must pass before go-live. Use both. Vercel Hobby is a separate path (`docs/deploy/vercel/`); it does not change this checklist or `docs/deploy/docker/prod/`.
 
 ## Outcome
 

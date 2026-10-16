@@ -62,12 +62,17 @@
 | resend-verification | empty | **required cookie** |
 
 Mutating POSTs need `hasAllowedOrigin`. Missing/disallowed Origin → 403.
-`authRateLimitAllowed` (`lib/auth/rateLimit.ts`) is an in-process fixed
-window (10 requests / 60s per client IP) on register, login,
-forgot-password, resend-verification. Behind a reverse proxy the key comes
-from `X-Forwarded-For` — the proxy must overwrite it. Counters are
-per-process; horizontal scaling needs a shared store. (This replaced the
-Cloudflare `AUTH_RATE_LIMITER` binding in the self-host cutover.)
+`authRateLimitAllowed` (`lib/auth/rateLimit.ts`) is a fixed window (10
+requests / 60s per client IP) on register, login, forgot-password,
+resend-verification. Default store is in-process. Both
+`UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` switch that window to
+Upstash; a Redis error or timeout fails closed and does not fall through to
+the process map. Self-host compose sets neither, so the in-process store
+stays the default. The default client key is the first `X-Forwarded-For` hop
+— the proxy must overwrite it. `VERCEL=1` or `TRUST_PROXY=1|true|yes` prefers
+`x-vercel-forwarded-for`, then `x-real-ip`, then that hop. Never
+`CF-Connecting-IP`. (This replaced the Cloudflare `AUTH_RATE_LIMITER` binding
+in the self-host cutover.)
 
 
 Login with no user or no `password_hash` (legacy OAuth account) still runs

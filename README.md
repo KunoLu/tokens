@@ -124,6 +124,12 @@ Production is a Node server plus a Postgres database, both yours:
 - **Local dev stack** — [docs/deploy/docker/dev/](./docs/deploy/docker/dev/)
   (OrbStack/Docker Compose reference copy)
 
+## Vercel (Hobby)
+
+Separate from the Docker stack. Project `kunolu-tokens`, free
+`https://kunolu-tokens.vercel.app` until a domain is purchased. See
+[docs/deploy/vercel/README.en.md](./docs/deploy/vercel/README.en.md).
+
 ## Supported clients
 54 clients in the scanner catalog are detected automatically — if one is
 installed and has written sessions, it is counted. The docs page renders the

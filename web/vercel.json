@@ -1,0 +1,11 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "installCommand": "if [ -f ../bun.lock ]; then cd ..; fi && bun install --frozen-lockfile",
+  "buildCommand": "if [ \"$VERCEL_ENV\" = \"production\" ]; then DATABASE_URL=\"${DATABASE_URL_UNPOOLED:-$DATABASE_URL}\" bun run db:migrate; fi && bun run build",
+  "crons": [
+    {
+      "path": "/api/cron/refresh-social-links",
+      "schedule": "17 3 * * *"
+    }
+  ]
+}

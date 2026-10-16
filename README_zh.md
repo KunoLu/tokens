@@ -94,6 +94,12 @@ curl -fsSL https://raw.githubusercontent.com/KunoLu/tokens/v1.0.2/pre-install-to
 - **生产 Docker 资产**——[docs/deploy/docker/prod/](./docs/deploy/docker/prod/)（多阶段 Dockerfile、compose、操作手册；`docker compose up -d --build` 即部署/发版）
 - **本地开发栈**——[docs/deploy/docker/dev/](./docs/deploy/docker/dev/)（OrbStack/Docker Compose 参考副本）
 
+## Vercel（Hobby）
+
+与 Docker 栈分开。项目名 `kunolu-tokens`，买域名之前用免费地址
+`https://kunolu-tokens.vercel.app`。见
+[docs/deploy/vercel/README.md](./docs/deploy/vercel/README.md)。
+
 ## 支持的客户端
 
 扫描目录里有 54 个客户端，装过并写过会话就会被统计。文档页的列表由该目录生成。解析器和定价修复从上游拣入，本仓不把它们重新发布成 `27.x`。
