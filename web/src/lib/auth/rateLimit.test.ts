@@ -4,10 +4,14 @@ import { afterEach, describe, expect, mock, test } from "bun:test";
 const upstash = {
   calls: 0,
   mode: "allow" as "allow" | "deny" | "throw" | "timeout",
+  prefix: undefined as string | undefined,
 };
 
 mock.module("@upstash/ratelimit", () => ({
   Ratelimit: class Ratelimit {
+    constructor(options: { prefix?: string }) {
+      upstash.prefix = options.prefix;
+    }
     static fixedWindow(tokens: number, window: string) {
       return { tokens, window };
     }
@@ -43,6 +47,7 @@ const ENV_KEYS = [
   "UPSTASH_REDIS_REST_URL",
   "UPSTASH_REDIS_REST_TOKEN",
   "VERCEL",
+  "VERCEL_ENV",
   "TRUST_PROXY",
 ] as const;
 
@@ -154,6 +159,28 @@ describe("authRateLimitAllowed fallback", () => {
       expect(await authRateLimitAllowed(requestFor(other))).toBe(true);
     }
     expect(await authRateLimitAllowed(requestFor(other))).toBe(false);
+  });
+
+  test("Upstash prefix includes VERCEL_ENV and defaults to local", async () => {
+    process.env.UPSTASH_REDIS_REST_URL = "https://example.upstash.io";
+    process.env.UPSTASH_REDIS_REST_TOKEN = "token";
+    const ip = freshIp();
+
+    process.env.VERCEL_ENV = "preview";
+    await authRateLimitAllowed(requestFor(ip));
+    expect(upstash.prefix).toBe("tokens:auth:preview");
+
+    process.env.VERCEL_ENV = "";
+    await authRateLimitAllowed(requestFor(ip));
+    expect(upstash.prefix).toBe("tokens:auth:local");
+
+    process.env.VERCEL_ENV = "production";
+    await authRateLimitAllowed(requestFor(ip));
+    expect(upstash.prefix).toBe("tokens:auth:production");
+
+    delete process.env.VERCEL_ENV;
+    await authRateLimitAllowed(requestFor(ip));
+    expect(upstash.prefix).toBe("tokens:auth:local");
   });
 
   test("uses Upstash when both env vars are set and does not consume the process bucket", async () => {

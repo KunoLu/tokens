@@ -5,8 +5,10 @@
  * Default store is the in-process map. Docker/self-host does not set Upstash
  * env, so that path is unchanged. Both UPSTASH_REDIS_REST_URL and
  * UPSTASH_REDIS_REST_TOKEN must be set before the same window is enforced in
- * Upstash instead. A Redis error or timeout fails closed and does not fall
- * through to the process map — that would split the budget across isolates.
+ * Upstash instead. Keys are prefixed `tokens:auth:${VERCEL_ENV||local}` so
+ * Preview and Production do not share a bucket on one Redis. A Redis error
+ * or timeout fails closed and does not fall through to the process map —
+ * that would split the budget across isolates.
  *
  * Client IP, default: first X-Forwarded-For hop, else 0.0.0.0. The self-host
  * reverse proxy overwrites XFF; a client must not pick its own bucket. Do NOT
@@ -60,6 +62,7 @@ function upstashConfigured(): boolean {
 }
 
 let shared: Ratelimit | undefined;
+let sharedPrefix: string | undefined;
 
 function upstashLimiter(): Ratelimit {
   const url = process.env.UPSTASH_REDIS_REST_URL?.trim();
@@ -67,14 +70,18 @@ function upstashLimiter(): Ratelimit {
   if (!url || !token) {
     throw new Error("Upstash rate limiter is not configured");
   }
-  if (!shared) {
+  const prefix = `tokens:auth:${process.env.VERCEL_ENV || "local"}`;
+  // Env is fixed in production. Tests and a module loaded before env is set
+  // must not keep a client whose keys belong to another environment.
+  if (!shared || sharedPrefix !== prefix) {
     shared = new Ratelimit({
       redis: new Redis({ url, token }),
       limiter: Ratelimit.fixedWindow(LIMIT, "60 s"),
-      prefix: "tokens:auth",
+      prefix,
       timeout: UPSTASH_TIMEOUT_MS,
       analytics: false,
     });
+    sharedPrefix = prefix;
   }
   return shared;
 }

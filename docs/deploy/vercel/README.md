@@ -57,6 +57,8 @@ Production 与 Preview 都要设（值按分支分开）：
 
 两个变量都非空才离开进程内限流。只设其中一个仍走进程内实现（与自建默认相同：10 次 / 60 秒 / 客户端 IP）。Vercel 上进程内 Map 只活在单个 isolate 里，跨实例无效，所以 Production 和 Preview 都要设这两个变量。
 
+Redis key 前缀是 `tokens:auth:${VERCEL_ENV}`，未设置 `VERCEL_ENV` 时为 `tokens:auth:local`。Preview 和 Production 共用一个 Upstash Redis；前缀带环境，两边不抢同一个限额桶。
+
 已配置 Upstash 时，Redis 报错或超时 **失败关闭**（拒绝该次认证请求），不会退回进程内桶，否则各 isolate 会各算一份额度。不要在 Docker compose 里设这两个变量；那条路径不设，限流保持进程内。
 
 ### 客户端 IP

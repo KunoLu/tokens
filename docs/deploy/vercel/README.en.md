@@ -57,6 +57,8 @@ Optional: `RESEND_API_KEY` / `EMAIL_FROM`, `CONTACT_EMAIL`, `GITHUB_CLIENT_ID` /
 
 Both variables must be non-empty to leave the in-process limiter. Setting only one keeps the in-process implementation (same as the self-host default: 10 requests / 60 seconds / client IP). On Vercel the in-process map lives in one isolate and does not limit across instances, so set both on Production and Preview.
 
+Redis keys use the prefix `tokens:auth:${VERCEL_ENV}`, or `tokens:auth:local` when `VERCEL_ENV` is unset. Preview and Production share one Upstash Redis; the env segment keeps their buckets apart.
+
 When Upstash is configured, a Redis error or timeout **fails closed** (that auth request is denied). It does not fall through to the process map, which would give each isolate its own budget. Do not set these on the Docker compose stack. That path leaves them unset and keeps the in-process limiter.
 
 ### Client IP
