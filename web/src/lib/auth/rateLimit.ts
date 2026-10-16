@@ -1,33 +1,86 @@
 /**
- * In-process fixed-window limiter for register / login / forgot-password /
- * resend-verification: 10 requests per 60 seconds per client IP. Replaced the
- * Cloudflare Rate Limiting binding when the Workers layer was removed.
+ * Fixed-window limiter for register / login / forgot-password /
+ * resend-verification: 10 requests per 60 seconds per client IP.
  *
- * The client key is X-Forwarded-For ONLY, and only because the reverse proxy
- * overwrites it — a client must never be able to pick its own bucket. Do NOT
- * honor `CF-Connecting-IP` here: on the self-host path there is no Cloudflare
- * in front, so a direct client could forge it and rotate through fresh
- * buckets.
+ * Default store is the in-process map. Docker/self-host does not set Upstash
+ * env, so that path is unchanged. Both UPSTASH_REDIS_REST_URL and
+ * UPSTASH_REDIS_REST_TOKEN must be set before the same window is enforced in
+ * Upstash instead. A Redis error or timeout fails closed and does not fall
+ * through to the process map — that would split the budget across isolates.
  *
- * ponytail: counters are per-process; a second instance would get its own
- * bucket map. If the deployment ever scales beyond one process, this needs a
- * shared store.
+ * Client IP, default: first X-Forwarded-For hop, else 0.0.0.0. The self-host
+ * reverse proxy overwrites XFF; a client must not pick its own bucket. Do NOT
+ * honor CF-Connecting-IP on that path.
+ *
+ * VERCEL=1 (set by the platform) or TRUST_PROXY=1|true|yes: prefer
+ * x-vercel-forwarded-for, then x-real-ip. Vercel writes those; an outer proxy
+ * can rewrite x-forwarded-for, so XFF is only the fallback. Still never
+ * CF-Connecting-IP.
  */
+import { Ratelimit } from "@upstash/ratelimit";
+import { Redis } from "@upstash/redis";
+
 const WINDOW_MS = 60_000;
 const LIMIT = 10;
+const MAX_BUCKETS = 10_000;
+const UPSTASH_TIMEOUT_MS = 2_000;
 
 const buckets = new Map<string, { count: number; resetAt: number }>();
 
-function clientKey(request: Request): string {
-  const forwarded = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
-  return forwarded || "0.0.0.0";
+function firstHop(header: string | null): string {
+  return header?.split(",")[0]?.trim() || "";
 }
 
-const MAX_BUCKETS = 10_000;
+function trustPlatformIp(): boolean {
+  const trust = process.env.TRUST_PROXY?.trim().toLowerCase();
+  return (
+    process.env.VERCEL === "1" ||
+    trust === "1" ||
+    trust === "true" ||
+    trust === "yes"
+  );
+}
 
-export async function authRateLimitAllowed(request: Request): Promise<boolean> {
+export function clientIp(request: Request): string {
+  if (trustPlatformIp()) {
+    const platform =
+      firstHop(request.headers.get("x-vercel-forwarded-for")) ||
+      request.headers.get("x-real-ip")?.trim() ||
+      "";
+    if (platform) return platform;
+  }
+  return firstHop(request.headers.get("x-forwarded-for")) || "0.0.0.0";
+}
+
+function upstashConfigured(): boolean {
+  return Boolean(
+    process.env.UPSTASH_REDIS_REST_URL?.trim() &&
+      process.env.UPSTASH_REDIS_REST_TOKEN?.trim(),
+  );
+}
+
+let shared: Ratelimit | undefined;
+
+function upstashLimiter(): Ratelimit {
+  const url = process.env.UPSTASH_REDIS_REST_URL?.trim();
+  const token = process.env.UPSTASH_REDIS_REST_TOKEN?.trim();
+  if (!url || !token) {
+    throw new Error("Upstash rate limiter is not configured");
+  }
+  if (!shared) {
+    shared = new Ratelimit({
+      redis: new Redis({ url, token }),
+      limiter: Ratelimit.fixedWindow(LIMIT, "60 s"),
+      prefix: "tokens:auth",
+      timeout: UPSTASH_TIMEOUT_MS,
+      analytics: false,
+    });
+  }
+  return shared;
+}
+
+function memoryAllowed(key: string): boolean {
   const now = Date.now();
-  const key = clientKey(request);
   let bucket = buckets.get(key);
   if (!bucket || bucket.resetAt <= now) {
     if (buckets.size >= MAX_BUCKETS) {
@@ -45,4 +98,28 @@ export async function authRateLimitAllowed(request: Request): Promise<boolean> {
   bucket.count += 1;
 
   return bucket.count <= LIMIT;
+}
+
+async function sharedAllowed(key: string): Promise<boolean> {
+  try {
+    const result = await upstashLimiter().limit(key);
+    // The library fail-opens on its own timeout. Auth limiting must not.
+    if (result.reason === "timeout") {
+      console.error("[rateLimit] Upstash timed out; denying");
+      return false;
+    }
+    void result.pending.catch((error: unknown) => {
+      console.error("[rateLimit] Upstash pending failed", error);
+    });
+    return result.success;
+  } catch (error) {
+    console.error("[rateLimit] Upstash limiter failed", error);
+    return false;
+  }
+}
+
+export async function authRateLimitAllowed(request: Request): Promise<boolean> {
+  const key = clientIp(request);
+  if (upstashConfigured()) return sharedAllowed(key);
+  return memoryAllowed(key);
 }
