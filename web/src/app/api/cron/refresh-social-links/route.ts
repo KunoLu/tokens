@@ -13,16 +13,17 @@ function safeEqual(a: string, b: string): boolean {
 }
 
 /**
- * Daily maintenance for the self-hosted deployment — the Node replacement for
- * the Worker cron trigger. Refreshes social-links snapshots, sweeps expired
+ * Daily maintenance. Refreshes social-links snapshots, sweeps expired
  * email-verification tokens, and expires overdue team invitations.
  *
  * Every job runs to completion inside the request and the response is the
  * scheduler's retry signal: 200 only when all three succeeded, 500 when any
  * failed. A failing job does not skip the others (they are independent), and
  * all three are idempotent sweeps, so retrying after a partial failure is
- * safe. Trigger it from the same host (system cron -> loopback) so no public
- * proxy timeout can cut a run short.
+ * safe. Self-host triggers POST from the same host (system cron -> loopback)
+ * so no public proxy timeout can cut a run short. Vercel Cron invokes GET
+ * (Hobby: once per day, web/vercel.json). GET and POST share this handler
+ * and the Bearer CRON_SECRET check.
  *
  * Scenarios: web/features/maintenance-cron.feature.
  */
@@ -82,4 +83,9 @@ export async function POST(request: Request) {
     expiredEmailTokens: emailTokens.expiredEmailTokens,
     expiredInvitations: invitations.expiredInvitations,
   });
+}
+
+/** Vercel Cron calls GET. Same Bearer check and jobs as POST. */
+export async function GET(request: Request) {
+  return POST(request);
 }
