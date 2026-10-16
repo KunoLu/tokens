@@ -57,9 +57,11 @@ Authorization: Bearer $CRON_SECRET
 `authRateLimitAllowed` is a fixed window (10 requests / 60s per client IP) on
 register, login, forgot-password, and resend-verification. Default store is
 in-process. Both `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN`
-switch the window to Upstash; errors and timeouts fail closed. Self-host
-compose sets neither. The default client key is `X-Forwarded-For` ONLY, and
-only because the reverse proxy overwrites it — never honor
+switch the window to Upstash; errors and timeouts fail closed. Keys are
+prefixed `tokens:auth:${VERCEL_ENV||local}` (compose leaves `VERCEL_ENV`
+unset, so `tokens:auth:local`). Self-host compose sets neither. The default
+client key is `X-Forwarded-For` ONLY, and only because the reverse proxy
+overwrites it — never honor
 `CF-Connecting-IP` on this path, or a direct client can forge its way into
 fresh buckets. `VERCEL=1` or `TRUST_PROXY=1|true|yes` prefers
 `x-vercel-forwarded-for`, then `x-real-ip`. Docker sets neither, so the first

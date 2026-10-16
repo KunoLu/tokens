@@ -67,7 +67,9 @@ requests / 60s per client IP) on register, login, forgot-password,
 resend-verification. Default store is in-process. Both
 `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` switch that window to
 Upstash; a Redis error or timeout fails closed and does not fall through to
-the process map. Self-host compose sets neither, so the in-process store
+the process map. Keys are prefixed `tokens:auth:${VERCEL_ENV||local}` so
+Preview and Production do not share a bucket on one Redis. Self-host compose
+sets neither, so the in-process store
 stays the default. The default client key is the first `X-Forwarded-For` hop
 — the proxy must overwrite it. `VERCEL=1` or `TRUST_PROXY=1|true|yes` prefers
 `x-vercel-forwarded-for`, then `x-real-ip`, then that hop. Never
