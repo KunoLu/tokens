@@ -80,6 +80,5 @@ GET 与 POST 共用 Bearer 检查和三个任务（社交链接刷新、过期�
 1. 在 Vercel 项目 `kunolu-tokens` 上绑定新域名。
 2. 把 `NEXT_PUBLIC_URL` 改成 `https://<新域名>`。
 3. **重新部署。** `NEXT_PUBLIC_*` 在构建期被内联。只改环境变量、不重新构建，device 链接、验证信、邀请链接、CSRF Origin、OG 和 embed 仍指向旧 origin。
-4. 若使用 GitHub OAuth（设置了 `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET`），把 OAuth App 的 callback URL 改成新域名。这两个变量是可选的。当前代码把它们当作 Basic 认证去提高 GitHub API 限额（`web/src/lib/githubSocials.ts`），仓库里没有 GitHub 登录 callback 路由。OAuth App 上若配置了 Authorization callback URL，改域名后必须同步更新，否则 GitHub 会拒绝 callback。
 
 用户机器上的 `TOKENS_API_URL` 也要改成新域名。凭据不存 API 基址，旧站登录过的用户要重新 `tokens login`。

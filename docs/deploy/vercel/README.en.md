@@ -80,6 +80,5 @@ Changing the domain later:
 1. Attach the domain on the Vercel project `kunolu-tokens`.
 2. Set `NEXT_PUBLIC_URL` to `https://<new-domain>`.
 3. **Redeploy.** `NEXT_PUBLIC_*` is inlined at build time. Changing the env var without a new build leaves device links, verification mail, invite links, the CSRF origin allowlist, OG cards, and embeds on the old origin.
-4. If GitHub OAuth is used (`GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` are set), update the OAuth App callback URL to the new domain. These variables are optional. The app currently sends them as Basic auth to raise the GitHub API rate limit (`web/src/lib/githubSocials.ts`); there is no in-repo GitHub login callback route. If the OAuth App has an Authorization callback URL configured, it must be updated after the domain change or GitHub rejects the callback.
 
 Also point `TOKENS_API_URL` on user machines at the new domain. Credentials do not store the API base, so users who logged in against the old host must run `tokens login` again.
