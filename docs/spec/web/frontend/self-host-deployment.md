@@ -49,15 +49,21 @@ Authorization: Bearer $CRON_SECRET
   invitation expiry). 200 with per-job counts only when all succeeded; 500
   when any failed — the scheduler retries on non-2xx. All three are
   idempotent sweeps, so retries are safe.
+- `GET` runs the same handler. Self-host cron still POSTs. Vercel Cron uses
+  GET; see [Vercel deploy](../../../deploy/vercel/README.en.md).
 
 ## Rate limiting
 
-`authRateLimitAllowed` is an in-process fixed window (10 requests / 60s per
-client IP) on register, login, forgot-password, and resend-verification. The
-client key is `X-Forwarded-For` ONLY, and only because the reverse proxy
-overwrites it — never honor `CF-Connecting-IP` on this path, or a direct
-client can forge its way into fresh buckets. Counters are per-process —
-horizontal scaling needs a shared store.
+`authRateLimitAllowed` is a fixed window (10 requests / 60s per client IP) on
+register, login, forgot-password, and resend-verification. Default store is
+in-process. Both `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN`
+switch the window to Upstash; errors and timeouts fail closed. Self-host
+compose sets neither. The default client key is `X-Forwarded-For` ONLY, and
+only because the reverse proxy overwrites it — never honor
+`CF-Connecting-IP` on this path, or a direct client can forge its way into
+fresh buckets. `VERCEL=1` or `TRUST_PROXY=1|true|yes` prefers
+`x-vercel-forwarded-for`, then `x-real-ip`. Docker sets neither, so the first
+XFF hop stays the key. In-process counters are per-process.
 
 
 ## Caching
