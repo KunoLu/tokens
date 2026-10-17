@@ -75,11 +75,11 @@ GET 与 POST 共用 Bearer 检查和三个任务（社交链接刷新、过期�
 
 ## 自定义域名
 
-买域名之前用免费地址 `https://kunolu-tokens.vercel.app`（项目名 `kunolu-tokens`）。`NEXT_PUBLIC_URL` 先设成这个地址并部署一次。
+买域名之前用免费地址 `https://tokens.vercel.app`（项目名 `tokens`）。`NEXT_PUBLIC_URL` 先设成这个地址并部署一次。
 
 以后改域名：
 
-1. 在 Vercel 项目 `kunolu-tokens` 上绑定新域名。
+1. 在 Vercel 项目 `tokens` 上绑定新域名。
 2. 把 `NEXT_PUBLIC_URL` 改成 `https://<新域名>`。
 3. **重新部署。** `NEXT_PUBLIC_*` 在构建期被内联。只改环境变量、不重新构建，device 链接、验证信、邀请链接、CSRF Origin、OG 和 embed 仍指向旧 origin。
 

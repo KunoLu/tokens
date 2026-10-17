@@ -75,11 +75,11 @@ GET and POST share the Bearer check and the three jobs (social-link refresh, exp
 
 ## Custom domain
 
-Until a domain is purchased, use the free address `https://kunolu-tokens.vercel.app` (project name `kunolu-tokens`). Set `NEXT_PUBLIC_URL` to that address and deploy once.
+Until a domain is purchased, use the free address `https://tokens.vercel.app` (project name `tokens`). Set `NEXT_PUBLIC_URL` to that address and deploy once.
 
 Changing the domain later:
 
-1. Attach the domain on the Vercel project `kunolu-tokens`.
+1. Attach the domain on the Vercel project `tokens`.
 2. Set `NEXT_PUBLIC_URL` to `https://<new-domain>`.
 3. **Redeploy.** `NEXT_PUBLIC_*` is inlined at build time. Changing the env var without a new build leaves device links, verification mail, invite links, the CSRF origin allowlist, OG cards, and embeds on the old origin.
 
