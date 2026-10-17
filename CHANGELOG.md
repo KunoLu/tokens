@@ -9,7 +9,6 @@ Tags such as `v27.x` belong to upstream `missuo/tokens` and are not releases of 
 
 ### Changed
 
-- README headers split by language. `Changelog`, `Deploy`, and `CLI` open the English documents. `更新日志`, `部署`, and `手册` open the Chinese documents. The English deploy checklist and CLI guide are `docs/deploy/self-host-production.en.md` and `docs/deploy/tokens-cli-usage.en.md`.
 - Vercel Git auto-deploy for `main` is disabled via `git.deploymentEnabled` in `web/vercel.json` (#11). Production deploys are triggered manually.
 
 ## [1.0.3] - 2026-10-17
@@ -27,6 +26,7 @@ Corresponds to commit `a752960`, the version running in Production on tokens.cam
 
 ### Changed
 
+- README headers split by language. `Changelog`, `Deploy`, and `CLI` open the English documents. `更新日志`, `部署`, and `手册` open the Chinese documents. The English deploy checklist and CLI guide are `docs/deploy/self-host-production.en.md` and `docs/deploy/tokens-cli-usage.en.md`. (#8)
 - Docs use the Vercel project name `tokens` in custom domain sections, and the Vercel free address is corrected to `tokens-blush.vercel.app`.
 
 ## [1.0.2] - 2026-10-13
