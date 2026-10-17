@@ -75,7 +75,7 @@ GET and POST share the Bearer check and the three jobs (social-link refresh, exp
 
 ## Custom domain
 
-Until a domain is purchased, use the free address `https://tokens.vercel.app` (project name `tokens`). Set `NEXT_PUBLIC_URL` to that address and deploy once.
+Until a domain is purchased, use the free address `https://tokens-blush.vercel.app` (project name `tokens`). Set `NEXT_PUBLIC_URL` to that address and deploy once.
 
 Changing the domain later:
 

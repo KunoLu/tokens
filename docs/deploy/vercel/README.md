@@ -75,7 +75,7 @@ GET 与 POST 共用 Bearer 检查和三个任务（社交链接刷新、过期�
 
 ## 自定义域名
 
-买域名之前用免费地址 `https://tokens.vercel.app`（项目名 `tokens`）。`NEXT_PUBLIC_URL` 先设成这个地址并部署一次。
+买域名之前用免费地址 `https://tokens-blush.vercel.app`（项目名 `tokens`）。`NEXT_PUBLIC_URL` 先设成这个地址并部署一次。
 
 以后改域名：
 
