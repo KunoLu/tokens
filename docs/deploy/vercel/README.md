@@ -84,3 +84,7 @@ GET 与 POST 共用 Bearer 检查和三个任务（社交链接刷新、过期�
 3. **重新部署。** `NEXT_PUBLIC_*` 在构建期被内联。只改环境变量、不重新构建，device 链接、验证信、邀请链接、CSRF Origin、OG 和 embed 仍指向旧 origin。
 
 用户机器上的 `TOKENS_API_URL` 也要改成新域名。凭据不存 API 基址，旧站登录过的用户要重新 `tokens login`。
+
+## 手动发布 Production
+
+`web/vercel.json` 设置了 `"git": { "deploymentEnabled": { "main": false } }`：推送到 `main` 不再自动上线，PR 和其他分支的 Preview 部署照常。上 Production 需要手动触发：`vercel deploy --prod`，或通过 API 指定分支和 SHA 创建部署。控制台的 Redeploy 只会重建旧部署对应的 commit。部署后核对线上部署的 SHA 与 `main` 一致。
