@@ -84,3 +84,7 @@ Changing the domain later:
 3. **Redeploy.** `NEXT_PUBLIC_*` is inlined at build time. Changing the env var without a new build leaves device links, verification mail, invite links, the CSRF origin allowlist, OG cards, and embeds on the old origin.
 
 Also point `TOKENS_API_URL` on user machines at the new domain. Credentials do not store the API base, so users who logged in against the old host must run `tokens login` again.
+
+## Manual Production deploys
+
+`web/vercel.json` sets `"git": { "deploymentEnabled": { "main": false } }`: pushes to `main` no longer go live, while PR and other branch Preview deploys continue. Trigger Production by hand with `vercel deploy --prod`, or create a deployment through the API with an explicit branch and SHA. Dashboard Redeploy only rebuilds the old deployment's commit. After deploying, check that the live deployment's SHA matches `main`.
