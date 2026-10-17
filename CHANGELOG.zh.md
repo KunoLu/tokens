@@ -8,7 +8,25 @@
 
 ### 变更
 
-- README 顶栏按语言分成两行。`Changelog`、`Deploy`、`CLI` 打开英文文档；`更新日志`、`部署`、`手册` 打开中文文档。英文部署清单和 CLI 手册是 `docs/deploy/self-host-production.en.md` 与 `docs/deploy/tokens-cli-usage.en.md`。
+- 通过 `web/vercel.json` 的 `git.deploymentEnabled` 关闭 `main` 的 Vercel Git 自动部署（#11）。Production 改为手动触发部署。
+
+## [1.0.3] - 2026-10-17
+
+对应提交 `a752960`，即 tokens.camp 上运行的 Production 版本。
+
+### 新增
+
+- 首个在 tokens.camp（https://tokens.camp）上线的生产版本。
+- Vercel Hobby 部署路径（#9）。只有同时设置 REST URL 和 token 时才启用 Upstash 限流；自托管和 Docker 继续用进程内 10/60s 限流。Vercel Cron 可用 GET 调用每日维护路由。新增 Vercel Hobby 部署手册。
+
+### 修复
+
+- Upstash 认证限流的 key 按 `VERCEL_ENV` 分命名空间（缺省为 `local`），Preview 与 Production 不再共用一个桶（#10）。
+
+### 变更
+
+- README 顶栏按语言分成两行。`Changelog`、`Deploy`、`CLI` 打开英文文档；`更新日志`、`部署`、`手册` 打开中文文档。英文部署清单和 CLI 手册是 `docs/deploy/self-host-production.en.md` 与 `docs/deploy/tokens-cli-usage.en.md`。（#8）
+- 文档的自定义域名章节使用 Vercel 项目名 `tokens`，Vercel 免费地址更正为 `tokens-blush.vercel.app`。
 
 ## [1.0.2] - 2026-10-13
 
