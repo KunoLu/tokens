@@ -7,7 +7,7 @@ import { toast } from "react-toastify";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
 import { avatarUrlFor } from "@/lib/avatar";
-import { isReservedCloudDeviceKey } from "@/lib/devices/cloud";
+import { groupCloudDevices, isReservedCloudDeviceKey } from "@/lib/devices/cloud";
 import { deviceDisplayLabel } from "@/lib/devices/shared";
 import { tw } from "@/lib/tw";
 import { cn, formatNumber, formatCurrency } from "@/lib/utils";
@@ -48,6 +48,8 @@ interface SettingsDevice {
   totalTokens: number;
   totalCost: number;
   activeDays: number;
+  /** Cloud session devices only: active days across the provider's sessions. */
+  cloudGroupActiveDays?: number;
 }
 
 // Mirror the server-side RenameBodySchema in
@@ -1124,7 +1126,9 @@ export default function SettingsClient() {
             </EmptyState>
           ) : (
             <TokenList>
-              {devices.map((device) => (
+              {/* One row per cloud provider, as on the profile: each cloud
+                  session is its own device, with a fixed label and no rename. */}
+              {groupCloudDevices(devices).map((device) => (
                 <TokenItem key={device.id}>
                   {editingDeviceId === device.id ? (
                     <DeviceEditRow>
@@ -1172,6 +1176,10 @@ export default function SettingsClient() {
                             {device.displayName}
                           </TokenName>
                           <SmallText style={{ color: "var(--muted-foreground)" }}>
+                            {device.cloudSessions != null &&
+                              `${t(device.cloudSessions === 1 ? "devices.cloud.session" : "devices.cloud.sessions", {
+                                n: device.cloudSessions.toLocaleString(intlTag(locale)),
+                              })} · `}
                             {t("settings.devices.tokens", { n: formatNumber(device.totalTokens, locale) })}
                             {" · "}
                             {formatCurrency(device.totalCost, locale)}
