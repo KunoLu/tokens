@@ -34,6 +34,8 @@ export interface ProfileDevice {
   activeDays: number;
   firstDay: string | null;
   lastDay: string | null;
+  /** Cloud session devices only: active days across the provider's sessions. */
+  cloudGroupActiveDays?: number;
 }
 
 export interface ProfileDevicesProps {

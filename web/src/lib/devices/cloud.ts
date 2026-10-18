@@ -26,7 +26,14 @@ export const CLOUD_DEVICE_PROVIDERS: Readonly<Record<string, CloudDeviceProvider
 
 export const CLOUD_DEVICE_KEY_PREFIX = "cloud_";
 
-const CLOUD_DEVICE_KEY_RE = /^cloud_([a-z]+)_([0-9a-f]{32})$/;
+/**
+ * Shape of a well-formed cloud device key. Also valid as a PostgreSQL regex
+ * (`~`), so SQL can select exactly the keys `parseCloudDeviceKey` accepts the
+ * shape of.
+ */
+export const CLOUD_DEVICE_KEY_PATTERN = "^cloud_([a-z]+)_([0-9a-f]{32})$";
+
+const CLOUD_DEVICE_KEY_RE = new RegExp(CLOUD_DEVICE_KEY_PATTERN);
 
 export interface CloudDeviceInfo extends CloudDeviceProvider {
   provider: string;
@@ -41,8 +48,9 @@ export function isReservedCloudDeviceKey(deviceKey: string): boolean {
 export function parseCloudDeviceKey(deviceKey: string): CloudDeviceInfo | null {
   const match = CLOUD_DEVICE_KEY_RE.exec(deviceKey);
   if (!match) return null;
-  const provider = CLOUD_DEVICE_PROVIDERS[match[1]];
-  return provider ? { provider: match[1], ...provider } : null;
+  // Own keys only: `cloud_constructor_…` must not resolve through the prototype.
+  if (!Object.hasOwn(CLOUD_DEVICE_PROVIDERS, match[1])) return null;
+  return { provider: match[1], ...CLOUD_DEVICE_PROVIDERS[match[1]] };
 }
 
 interface GroupableDevice {
@@ -53,6 +61,11 @@ interface GroupableDevice {
   totalTokens: number;
   totalCost: number;
   activeDays: number;
+  /**
+   * Distinct active days across all of this provider's cloud sessions,
+   * computed by the server. Optional: absent from older/cached responses.
+   */
+  cloudGroupActiveDays?: number;
 }
 
 export type GroupedDevice<T extends GroupableDevice> = T & {
@@ -64,8 +77,10 @@ export type GroupedDevice<T extends GroupableDevice> = T & {
  * Fold every cloud-session device of one provider into a single row for
  * display, so a profile shows "Claude Code cloud · 37 sessions" instead of 37
  * rows. Active days are a union across sessions, which the per-device totals
- * cannot reconstruct, so the folded row reports the largest single session's
- * count as a lower bound rather than a sum that would overstate it.
+ * cannot reconstruct, so the server sends that union as `cloudGroupActiveDays`
+ * on every session row and the folded row uses it. A response without it
+ * (older or cached) falls back to the largest single session's count, a lower
+ * bound, rather than a sum that would overstate it.
  *
  * Order is preserved: the folded row takes the position of its most recently
  * submitted session.
@@ -88,6 +103,7 @@ export function groupCloudDevices<T extends GroupableDevice>(devices: T[]): Grou
         id: `cloud:${cloud.provider}`,
         displayName: cloud.label,
         cloudSessions: 1,
+        activeDays: device.cloudGroupActiveDays ?? device.activeDays,
       };
       groups.set(cloud.provider, row);
       result.push(row);
@@ -97,7 +113,8 @@ export function groupCloudDevices<T extends GroupableDevice>(devices: T[]): Grou
     existing.cloudSessions = (existing.cloudSessions ?? 1) + 1;
     existing.totalTokens += device.totalTokens;
     existing.totalCost += device.totalCost;
-    existing.activeDays = Math.max(existing.activeDays, device.activeDays);
+    existing.activeDays =
+      device.cloudGroupActiveDays ?? Math.max(existing.activeDays, device.activeDays);
     if (
       device.lastSubmittedAt &&
       (!existing.lastSubmittedAt || device.lastSubmittedAt > existing.lastSubmittedAt)

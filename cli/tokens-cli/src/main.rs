@@ -172,8 +172,8 @@ enum CloudSubcommand {
         #[arg(
             long,
             value_name = "MINUTES",
-            default_value_t = 5,
-            help = "Skip if this session submitted less than MINUTES ago (0 = always submit)"
+            default_value_t = 0,
+            help = "Optional throttle: skip if this session submitted less than MINUTES ago (default 0 = submit every time, so a session's last turns are never dropped)"
         )]
         min_interval: u64,
         #[arg(long, help = "Submit even if the last submit was recent")]

@@ -341,7 +341,8 @@ fn state_path() -> PathBuf {
 }
 
 /// Whether the last successful submit for this device is recent enough to skip
-/// this one. Stop hooks fire after every turn; scanning on each would be waste.
+/// this one. Off by default (`--min-interval 0`): a cloud session has no reliable
+/// end hook, so a skipped final turn would never be reported.
 pub fn throttled(device_id: &str, min_interval_minutes: u64, now_ms: i64) -> bool {
     if min_interval_minutes == 0 {
         return false;

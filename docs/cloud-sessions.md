@@ -95,12 +95,12 @@ The provider and session are detected from `CLAUDE_CODE_REMOTE` and
 no cloud session and does nothing, so the hooks are safe for teammates who work
 locally.
 
-Submits are throttled to one per session every 5 minutes (`--min-interval`). A
-turn that ends inside that window is skipped and caught up by the session's next
-submit, including after a resume — but only if there is one: the usage of a
-session's last turns is not reported if the session ends within 5 minutes of
-its previous submit. Use `--min-interval 0` in the Stop hook to submit every
-turn, at the cost of one request per turn.
+Every Stop hook submits, one request per turn. There is no reliable hook for
+the end of a cloud session, so a turn that is skipped may never be caught up.
+`--min-interval MINUTES` throttles submits to one per session every MINUTES if
+you prefer fewer requests, at that cost: a turn that ends inside the window is
+reported only by the session's next submit, and the usage of a session's last
+turns is lost if the session ends within the window of its previous submit.
 
 ### Resumed sessions
 
@@ -146,7 +146,8 @@ its provider is added to `CloudProvider` (cli/tokens-cli/src/cloud.rs) and
 ## Tested
 
 End to end on 2026-10-13, Claude Code 2.1.42 on the web, against a local server
-reached through a tunnel, with the hooks above and `--min-interval 0`:
+reached through a tunnel, with the hooks above and `--min-interval 0` (the
+default since):
 
 - the Stop hook submits at the end of every turn; the device key matches
   `tokens cloud status`; the stored device name is empty (labelled by the
@@ -156,7 +157,8 @@ reached through a tunnel, with the hooks above and `--min-interval 0`:
   including after the VM was paused for 30 minutes and restored;
 - a second session is a second device and the account total is the sum; the
   profile shows one "Claude Code cloud · 2 sessions" row;
-- the default `--min-interval` skips a submit 2 minutes after the previous one;
+- `--min-interval 5` (then the default; the default is now 0) skips a submit 2
+  minutes after the previous one;
 - the server rejects a cloud device reporting another client, a malformed or
   unknown-provider key, and backfill provenance; a smaller same-day resubmit
   is preserved with a warning.

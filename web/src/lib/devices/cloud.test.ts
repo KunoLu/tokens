@@ -24,12 +24,29 @@ describe("parseCloudDeviceKey", () => {
     expect(parseCloudDeviceKey("cloud_claude_F4A8A3A17173AF3E2DF865616AF63456")).toBeNull();
     expect(parseCloudDeviceKey("cloud_devin_0123456789abcdef0123456789abcdef")).toBeNull();
   });
+
+  test("does not resolve providers through the prototype chain", () => {
+    for (const name of ["constructor", "tostring", "valueof", "hasownproperty"]) {
+      expect(parseCloudDeviceKey(`cloud_${name}_0123456789abcdef0123456789abcdef`)).toBeNull();
+    }
+  });
 });
 
 describe("device labels", () => {
   test("a cloud device shows its fixed, unmasked label", () => {
     expect(deviceDisplayLabel(CLAUDE_KEY, null)).toBe("Claude Code cloud");
     expect(publicDeviceDisplayLabel(CLAUDE_KEY, null)).toBe("Claude Code cloud");
+  });
+
+  test("a stored name never replaces a cloud device's fixed label", () => {
+    expect(deviceDisplayLabel(CLAUDE_KEY, "johns-macbook-pro")).toBe("Claude Code cloud");
+    expect(publicDeviceDisplayLabel(CLAUDE_KEY, "johns-macbook-pro")).toBe("Claude Code cloud");
+    expect(publicDeviceDisplayLabel(CODEX_KEY, "x")).toBe("Codex cloud");
+  });
+
+  test("ordinary devices keep their stored (masked in public) name", () => {
+    expect(deviceDisplayLabel("dev_laptop", "johns-macbook-pro")).toBe("johns-macbook-pro");
+    expect(publicDeviceDisplayLabel("dev_laptop", "johns-macbook-pro")).toBe("jo****ro");
   });
 });
 
@@ -55,6 +72,22 @@ describe("groupCloudDevices", () => {
     });
     expect(rows[1].cloudSessions).toBeUndefined();
     expect(rows[2]).toMatchObject({ displayName: "Codex cloud", cloudSessions: 1 });
+  });
+
+  test("uses the server's union of active days when present", () => {
+    const rows = groupCloudDevices([
+      { ...base, id: "a", deviceKey: CLAUDE_KEY, displayName: "x", totalTokens: 1, activeDays: 2, cloudGroupActiveDays: 4 },
+      { ...base, id: "c", deviceKey: CLAUDE_KEY_2, displayName: "y", totalTokens: 1, activeDays: 3, cloudGroupActiveDays: 4 },
+      { ...base, id: "d", deviceKey: CODEX_KEY, displayName: "z", totalTokens: 1, activeDays: 5, cloudGroupActiveDays: 5 },
+    ]);
+    expect(rows.map((row) => row.activeDays)).toEqual([4, 5]);
+  });
+
+  test("a single session uses the union too", () => {
+    const rows = groupCloudDevices([
+      { ...base, id: "a", deviceKey: CLAUDE_KEY, displayName: "x", totalTokens: 1, activeDays: 2, cloudGroupActiveDays: 2 },
+    ]);
+    expect(rows[0].activeDays).toBe(2);
   });
 });
 
@@ -108,6 +141,13 @@ describe("cloud device submission rules", () => {
     const result = validateSubmission(submission("cloud_claude_fake", "claude"));
     expect(result.valid).toBe(false);
     expect(result.errors.join("\n")).toContain("cloud_<provider>_<32 hex>");
+  });
+
+  test("a prototype-chain provider name is not a valid cloud key", () => {
+    const result = validateSubmission(
+      submission("cloud_constructor_0123456789abcdef0123456789abcdef", "claude")
+    );
+    expect(result.valid).toBe(false);
   });
 
   test("a cloud session may not submit imported history", () => {
