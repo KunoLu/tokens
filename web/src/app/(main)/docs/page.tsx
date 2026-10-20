@@ -39,11 +39,8 @@ export const metadata: Metadata = {
 /**
  * What the Supported clients grid renders.
  *
- * The scanned clients, plus Orca. Orca is not a client of its own — it runs
- * Codex against an isolated runtime home, and the scanner finds that directory
- * and counts what is there under Codex. It still belongs in this list, because
- * the question a reader has is "will my setup be picked up", and for Orca the
- * answer is yes.
+ * Scanned clients plus agent platforms whose native provider sessions are
+ * discovered by the scanner. Their usage stays attributed to those providers.
  */
 const CLIENT_GRID: ReadonlyArray<{ id: string; name: string; logo: string }> = [
   ...SUPPORTED_CLIENTS.map((client) => ({
@@ -52,6 +49,7 @@ const CLIENT_GRID: ReadonlyArray<{ id: string; name: string; logo: string }> = [
     logo: SOURCE_LOGOS[client],
   })),
   { id: "orca", name: "Orca", logo: "/clients/client-orca.png" },
+  { id: "paseo", name: "Paseo", logo: "/clients/client-paseo.svg" },
 ].sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
 
 // Commands stay literal; the notes beside them are dictionary keys resolved
@@ -310,6 +308,14 @@ export default async function DocsPage() {
           <div className="flex flex-col gap-4">
             <p className="text-sm leading-relaxed text-muted-foreground">
               {t(locale, "docs.clientsDetected", { n: CLIENT_GRID.length })}
+            </p>
+
+            <p className="text-sm leading-relaxed text-muted-foreground">
+              Paseo usage is counted under the underlying supported provider,
+              such as Claude Code or Codex CLI. Tokens also discovers absolute
+              Claude and Codex data-directory overrides in Paseo&apos;s provider
+              configuration. Run Tokens on the Paseo daemon host to submit those
+              sessions.
             </p>
 
             {/* A plain responsive grid rather than a table: these are names,
