@@ -1049,6 +1049,7 @@ fn add_row(day: &mut DayBuilder, client: &str, model: &str, tokens: TokenBreakdo
             tokens: TokenBreakdown::default(),
             cost: 0.0,
             messages: 0,
+            speed_breakdown: Vec::new(),
         });
     entry.tokens += &tokens;
     entry.cost += cost;

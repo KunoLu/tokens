@@ -20,6 +20,7 @@ import {
   USERS_USERNAME_LOWER_UNIQUE_INDEX,
   usernameLowerExpression,
 } from "./usernameIndex";
+import type { SpeedBreakdownEntry } from "../speedBreakdown";
 
 // ============================================================================
 // USERS
@@ -355,6 +356,8 @@ export const dailyBreakdown = pgTable(
             cacheWrite: number;
             reasoning: number;
             messages: number;
+            /** Known-speed usage only; absent/remainder means Unknown. */
+            speedBreakdown?: SpeedBreakdownEntry[];
           }>;
           provenance?: {
             schemaVersion: number;
