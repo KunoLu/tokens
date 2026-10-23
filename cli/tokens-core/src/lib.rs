@@ -466,7 +466,7 @@ pub struct ClientContribution {
     pub cost: f64,
     pub messages: i32,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub speed_breakdown: Vec<speed::SpeedBreakdown>,
+    pub speed_usage: Vec<speed::SpeedUsage>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]

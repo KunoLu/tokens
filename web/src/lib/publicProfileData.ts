@@ -12,7 +12,7 @@ import {
 import { buildSubmissionFreshness } from "@/lib/submissionFreshness";
 import { PRIVATE_CACHE_CONTROL, getViewerAccess } from "@/lib/privacy";
 import { addModelBreakdown, type ModelBreakdownData } from "@/lib/db/helpers";
-import { mergeSpeedBreakdowns } from "@/lib/speedBreakdown";
+import { mergeSpeedUsage } from "@/lib/speedUsage";
 
 const LEGACY_CLIENT_ALIASES: Record<string, string> = { kilocode: "kilo" };
 function normalizeClientId(id: string): string {
@@ -559,16 +559,16 @@ export async function getPublicProfileResponse(
 
     const modelUsageMap = new Map<
       string,
-      Pick<ModelBreakdownData, "tokens" | "cost" | "speedBreakdown">
+      Pick<ModelBreakdownData, "tokens" | "cost" | "speedUsage">
     >();
     for (const day of scopedContributions) {
       for (const [model, data] of Object.entries(day.models)) {
         const existing = modelUsageMap.get(model) || { tokens: 0, cost: 0 };
         existing.tokens += data.tokens;
         existing.cost += data.cost;
-        existing.speedBreakdown = mergeSpeedBreakdowns(
-          existing.speedBreakdown,
-          ...Object.values(day.clients).map((client) => client.models?.[model]?.speedBreakdown),
+        existing.speedUsage = mergeSpeedUsage(
+          existing.speedUsage,
+          ...Object.values(day.clients).map((client) => client.models?.[model]?.speedUsage),
         );
         modelUsageMap.set(model, existing);
       }
@@ -583,7 +583,7 @@ export async function getPublicProfileResponse(
         model,
         tokens: data.tokens,
         cost: data.cost,
-        speedBreakdown: data.speedBreakdown,
+        speedUsage: data.speedUsage,
         percentage: totalModelCost > 0 ? (data.cost / totalModelCost) * 100 : 0,
       }))
       .sort((a, b) => b.cost - a.cost || b.tokens - a.tokens);

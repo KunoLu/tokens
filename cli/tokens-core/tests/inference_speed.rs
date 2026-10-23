@@ -81,7 +81,7 @@ fn claude_uses_reported_speed_without_losing_streamed_or_unknown_usage() {
     assert_eq!(days[0].clients.len(), 1);
     assert_eq!(days[0].clients[0].model_id, "claude-opus-4-6");
     assert_eq!(
-        serde_json::to_value(&days[0].clients[0].speed_breakdown).unwrap(),
+        serde_json::to_value(&days[0].clients[0].speed_usage).unwrap(),
         json!([
             {"speed":"standard","source":"reported","tokens":15,"messages":1},
             {"speed":"fast","source":"reported","tokens":30,"messages":1},
@@ -233,7 +233,7 @@ fn aggregation_keeps_speed_evidence_separate_without_splitting_the_model() {
     assert_eq!(days[0].totals.cost, 250.0);
     assert_eq!(days[0].clients.len(), 1);
     assert_eq!(
-        serde_json::to_value(&days[0].clients[0].speed_breakdown).unwrap(),
+        serde_json::to_value(&days[0].clients[0].speed_usage).unwrap(),
         json!([
             {"speed":"fast","source":"reported","tokens":2500,"messages":250},
             {"speed":"fast","source":"selected","tokens":2500,"messages":250},
@@ -246,7 +246,7 @@ fn aggregation_keeps_speed_evidence_separate_without_splitting_the_model() {
     assert_eq!(sessions[0].totals.cost, 250.0);
     assert_eq!(sessions[0].clients.len(), 1);
     assert_eq!(
-        serde_json::to_value(&sessions[0].clients[0].speed_breakdown).unwrap(),
+        serde_json::to_value(&sessions[0].clients[0].speed_usage).unwrap(),
         json!([
             {"speed":"fast","source":"reported","tokens":2500,"messages":250},
             {"speed":"fast","source":"selected","tokens":2500,"messages":250},

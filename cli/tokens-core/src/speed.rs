@@ -58,14 +58,14 @@ impl InferenceSpeed {
 /// Known-speed counters within a client/model's existing totals. The remainder
 /// is unknown. No cost is attributed here: speed recognition does not reprice usage.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SpeedBreakdown {
+pub struct SpeedUsage {
     pub speed: Speed,
     pub source: SpeedSource,
     pub tokens: i64,
     pub messages: i32,
 }
 
-impl SpeedBreakdown {
+impl SpeedUsage {
     pub(crate) fn add_to(self, buckets: &mut Vec<Self>) {
         if let Some(bucket) = buckets
             .iter_mut()

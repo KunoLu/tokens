@@ -11,10 +11,10 @@ import { z } from "zod";
 import { SUPPORTED_CLIENT_TYPES } from "../types";
 import {
   INFERENCE_SPEEDS,
-  MAX_SPEED_BREAKDOWN_ENTRIES,
+  MAX_SPEED_USAGE_ENTRIES,
   SPEED_SOURCES,
-  mergeSpeedBreakdowns,
-} from "../speedBreakdown";
+  mergeSpeedUsage,
+} from "../speedUsage";
 
 // ============================================================================
 // SCHEMAS
@@ -65,7 +65,7 @@ const ClientContributionProvenanceSchema = z.object({
 });
 
 // Known-speed usage only; the uncovered remainder of a contribution is Unknown.
-const SpeedBreakdownEntrySchema = z.object({
+const SpeedUsageSchema = z.object({
   speed: z.enum(INFERENCE_SPEEDS),
   source: z.enum(SPEED_SOURCES),
   tokens: NonNegativeIntegerSchema,
@@ -86,7 +86,7 @@ const ClientContributionSchema = z.object({
   cost: NonNegativeNumberSchema,
   messages: NonNegativeIntegerSchema,
   provenance: ClientContributionProvenanceSchema.optional(),
-  speedBreakdown: z.array(SpeedBreakdownEntrySchema).max(MAX_SPEED_BREAKDOWN_ENTRIES).optional(),
+  speedUsage: z.array(SpeedUsageSchema).max(MAX_SPEED_USAGE_ENTRIES).optional(),
 }).superRefine((contribution, ctx) => {
   const maxRevision = contribution.client === "codex"
     ? MAX_SUPPORTED_CODEX_PROVENANCE_SCHEMA_VERSION
@@ -100,17 +100,17 @@ const ClientContributionSchema = z.object({
     });
   }
 
-  if (contribution.speedBreakdown) {
+  if (contribution.speedUsage) {
     const seenPairs = new Set<string>();
     let speedTokens = 0;
     let speedMessages = 0;
-    contribution.speedBreakdown.forEach((entry, entryIndex) => {
+    contribution.speedUsage.forEach((entry, entryIndex) => {
       const pair = `${entry.speed}/${entry.source}`;
       if (seenPairs.has(pair)) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          path: ["speedBreakdown", entryIndex],
-          message: `duplicate speedBreakdown entry ${pair}`,
+          path: ["speedUsage", entryIndex],
+          message: `duplicate speedUsage entry ${pair}`,
         });
       }
       seenPairs.add(pair);
@@ -122,15 +122,15 @@ const ClientContributionSchema = z.object({
     if (speedTokens > contributionTokens) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        path: ["speedBreakdown"],
-        message: `speedBreakdown tokens (${speedTokens}) exceed contribution tokens (${contributionTokens})`,
+        path: ["speedUsage"],
+        message: `speedUsage tokens (${speedTokens}) exceed contribution tokens (${contributionTokens})`,
       });
     }
     if (speedMessages > contribution.messages) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        path: ["speedBreakdown"],
-        message: `speedBreakdown messages (${speedMessages}) exceed contribution messages (${contribution.messages})`,
+        path: ["speedUsage"],
+        message: `speedUsage messages (${speedMessages}) exceed contribution messages (${contribution.messages})`,
       });
     }
   }
@@ -805,10 +805,10 @@ export function generateSubmissionHash(data: SubmissionData): string {
             // be back-filled without changing usage data, so it must not affect
             // idempotency. Hash ordering starts with client/providerId/modelId.
             //
-            // speedBreakdown participates only when nonempty, in canonical
+            // speedUsage participates only when nonempty, in canonical
             // (speed, source) order. When absent or empty the key is undefined
             // and JSON.stringify omits it, so legacy hashes are unchanged.
-            speedBreakdown: mergeSpeedBreakdowns(client.speedBreakdown),
+            speedUsage: mergeSpeedUsage(client.speedUsage),
           }))
           .sort((a, b) =>
             `${a.client}\u0000${a.providerId ?? ""}\u0000${a.modelId}`.localeCompare(
@@ -816,8 +816,8 @@ export function generateSubmissionHash(data: SubmissionData): string {
             ) ||
             // Tie-break only on speed metadata so legacy payloads (where it is
             // always absent) keep their previous stable-sort order.
-            JSON.stringify(a.speedBreakdown ?? []).localeCompare(
-              JSON.stringify(b.speedBreakdown ?? [])
+            JSON.stringify(a.speedUsage ?? []).localeCompare(
+              JSON.stringify(b.speedUsage ?? [])
             )
           ),
       }))

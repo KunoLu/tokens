@@ -3,7 +3,7 @@
 //! Uses rayon for parallel map-reduce operations.
 
 use crate::sessions::UnifiedMessage;
-use crate::speed::SpeedBreakdown;
+use crate::speed::SpeedUsage;
 use crate::{
     ClientContribution, DailyContribution, DailyTotals, DataSummary, GraphMeta, GraphResult,
     SessionContribution, TokenBreakdown, YearSummary,
@@ -314,17 +314,17 @@ impl DayAccumulator {
                 tokens: TokenBreakdown::default(),
                 cost: 0.0,
                 messages: 0,
-                speed_breakdown: Vec::new(),
+                speed_usage: Vec::new(),
             });
 
         if let Some(inference) = msg.inference_speed {
-            SpeedBreakdown {
+            SpeedUsage {
                 speed: inference.speed,
                 source: inference.source,
                 tokens: total_tokens,
                 messages: msg.message_count.max(0),
             }
-            .add_to(&mut client_entry.speed_breakdown);
+            .add_to(&mut client_entry.speed_usage);
         }
 
         // Merge provider_id if different provider contributes to same client+model
@@ -367,11 +367,11 @@ impl DayAccumulator {
                     tokens: TokenBreakdown::default(),
                     cost: 0.0,
                     messages: 0,
-                    speed_breakdown: Vec::new(),
+                    speed_usage: Vec::new(),
                 });
 
-            for speed in client_contrib.speed_breakdown {
-                speed.add_to(&mut entry.speed_breakdown);
+            for speed in client_contrib.speed_usage {
+                speed.add_to(&mut entry.speed_usage);
             }
 
             // Merge provider_ids from parallel reduction
@@ -414,7 +414,7 @@ impl DayAccumulator {
                 s.tokens.cache_write = s.tokens.cache_write.max(0);
                 s.tokens.reasoning = s.tokens.reasoning.max(0);
                 s.cost = s.cost.max(0.0);
-                s.speed_breakdown
+                s.speed_usage
                     .sort_by_key(|bucket| (bucket.speed, bucket.source));
                 s
             })
@@ -493,16 +493,16 @@ impl SessionAccumulator {
                 tokens: TokenBreakdown::default(),
                 cost: 0.0,
                 messages: 0,
-                speed_breakdown: Vec::new(),
+                speed_usage: Vec::new(),
             });
         if let Some(inference) = msg.inference_speed {
-            SpeedBreakdown {
+            SpeedUsage {
                 speed: inference.speed,
                 source: inference.source,
                 tokens: total_tokens,
                 messages: msg.message_count.max(0),
             }
-            .add_to(&mut client_entry.speed_breakdown);
+            .add_to(&mut client_entry.speed_usage);
         }
         client_entry.tokens += &msg.tokens;
         client_entry.cost += msg.cost;
@@ -550,10 +550,10 @@ impl SessionAccumulator {
                     tokens: TokenBreakdown::default(),
                     cost: 0.0,
                     messages: 0,
-                    speed_breakdown: Vec::new(),
+                    speed_usage: Vec::new(),
                 });
-            for speed in contrib.speed_breakdown {
-                speed.add_to(&mut entry.speed_breakdown);
+            for speed in contrib.speed_usage {
+                speed.add_to(&mut entry.speed_usage);
             }
             entry.tokens += &contrib.tokens;
             entry.cost += contrib.cost;
@@ -594,7 +594,7 @@ impl SessionAccumulator {
                 c.tokens.cache_write = c.tokens.cache_write.max(0);
                 c.tokens.reasoning = c.tokens.reasoning.max(0);
                 c.cost = c.cost.max(0.0);
-                c.speed_breakdown
+                c.speed_usage
                     .sort_by_key(|bucket| (bucket.speed, bucket.source));
                 c
             })
@@ -1605,7 +1605,7 @@ mod tests {
                 },
                 cost: 0.0123,
                 messages: 12,
-                speed_breakdown: Vec::new(),
+                speed_usage: Vec::new(),
             }],
             first_seen: 1_715_551_577,
             last_seen: 1_715_551_612,

@@ -25,7 +25,7 @@ mock.module("@/lib/db", () => ({
 
 const { getPublicProfileResponse } = await import("./publicProfileData");
 
-const model = (tokens: number, speedBreakdown?: unknown[]) => ({
+const model = (tokens: number, speedUsage?: unknown[]) => ({
   tokens,
   cost: tokens / 100,
   input: tokens,
@@ -34,7 +34,7 @@ const model = (tokens: number, speedBreakdown?: unknown[]) => ({
   cacheWrite: 0,
   reasoning: 0,
   messages: 1,
-  ...(speedBreakdown ? { speedBreakdown } : {}),
+  ...(speedUsage ? { speedUsage } : {}),
 });
 const claudeRow = (models: Record<string, ReturnType<typeof model>>) => {
   const tokens = Object.values(models).reduce((sum, m) => sum + m.tokens, 0);
@@ -51,7 +51,7 @@ const claudeRow = (models: Record<string, ReturnType<typeof model>>) => {
   };
 };
 
-test("public profile preserves and merges nested model speedBreakdown across devices", async () => {
+test("public profile preserves and merges nested model speedUsage across devices", async () => {
   selectResults.push(
     [{ id: "u1", username: "alice", displayName: null, avatarUrl: null, createdAt: new Date("2026-01-01"), bannedAt: null, banReason: null }],
     [{ totalTokens: 600, totalCost: 6 }],
@@ -85,22 +85,22 @@ test("public profile preserves and merges nested model speedBreakdown across dev
   const { models } = day.clients[0];
   expect(Object.keys(models).sort()).toEqual(["opus", "sonnet"]);
   expect(models.opus.tokens).toBe(500);
-  expect(models.opus.speedBreakdown).toEqual([
+  expect(models.opus.speedUsage).toEqual([
     { speed: "standard", source: "selected", tokens: 25, messages: 0 },
     { speed: "fast", source: "reported", tokens: 200, messages: 2 },
   ]);
-  expect(models.sonnet.speedBreakdown).toBeUndefined();
+  expect(models.sonnet.speedUsage).toBeUndefined();
 
   // Model identities and totals are unaffected by speed metadata.
   expect(body.modelUsage.map((m: { model: string; tokens: number }) => [m.model, m.tokens])).toEqual([
     ["opus", 500],
     ["sonnet", 100],
   ]);
-  expect(body.modelUsage[0].speedBreakdown).toEqual([
+  expect(body.modelUsage[0].speedUsage).toEqual([
     { speed: "standard", source: "selected", tokens: 25, messages: 0 },
     { speed: "fast", source: "reported", tokens: 200, messages: 2 },
   ]);
-  expect(body.modelUsage[1].speedBreakdown).toBeUndefined();
+  expect(body.modelUsage[1].speedUsage).toBeUndefined();
   expect(day.totals.tokens).toBe(600);
 });
 
@@ -148,7 +148,7 @@ test("model speed totals merge clients and follow the same period boundaries as 
       tokens,
       cost: tokens / 100,
       percentage: 100,
-      speedBreakdown: [
+      speedUsage: [
         { speed: "standard", source: "reported", tokens: 80, messages: 0 },
         { speed: "standard", source: "selected", tokens: 60, messages: 1 },
         { speed: "fast", source: "reported", tokens: reportedFast, messages: 1 },

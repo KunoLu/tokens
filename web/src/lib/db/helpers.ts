@@ -2,7 +2,7 @@
  * Client-level merge helpers for submission API
  */
 
-import { mergeSpeedBreakdowns, type SpeedBreakdownEntry } from "../speedBreakdown";
+import { mergeSpeedUsage, type SpeedUsage } from "../speedUsage";
 
 export interface ModelBreakdownData {
   tokens: number;
@@ -17,7 +17,7 @@ export interface ModelBreakdownData {
    * Known-speed usage for this model only (absent === all Unknown). Lives on
    * the nested model, never on the client-level totals.
    */
-  speedBreakdown?: SpeedBreakdownEntry[];
+  speedUsage?: SpeedUsage[];
 }
 
 interface ClientBreakdownProvenanceData {
@@ -163,7 +163,7 @@ function withDerivedProvenance(breakdown: ClientBreakdownData): ClientBreakdownD
 
 /**
  * Add `model` into `models[modelId]`, summing counters and speed metadata.
- * Never mutates `model` or any speedBreakdown array it references.
+ * Never mutates `model` or any speedUsage array it references.
  */
 export function addModelBreakdown(
   models: Record<string, ModelBreakdownData>,
@@ -171,7 +171,7 @@ export function addModelBreakdown(
   model: ModelBreakdownData
 ): void {
   const existing = models[modelId];
-  const speedBreakdown = mergeSpeedBreakdowns(existing?.speedBreakdown, model.speedBreakdown);
+  const speedUsage = mergeSpeedUsage(existing?.speedUsage, model.speedUsage);
   const next: ModelBreakdownData = {
     tokens: (existing?.tokens || 0) + (model.tokens || 0),
     cost: (existing?.cost || 0) + (model.cost || 0),
@@ -182,8 +182,8 @@ export function addModelBreakdown(
     reasoning: (existing?.reasoning || 0) + (model.reasoning || 0),
     messages: (existing?.messages || 0) + (model.messages || 0),
   };
-  if (existing?.speedBreakdown || model.speedBreakdown) {
-    next.speedBreakdown = speedBreakdown ?? [];
+  if (existing?.speedUsage || model.speedUsage) {
+    next.speedUsage = speedUsage ?? [];
   }
   models[modelId] = next;
 }
@@ -418,10 +418,10 @@ export function mergeClientBreakdownsWithRegressionGuard(
       for (const [modelId, model] of Object.entries(nextClient.models)) {
         const previous = existingWithProvenance.models?.[modelId];
         if (
-          model.speedBreakdown === undefined && previous?.speedBreakdown &&
+          model.speedUsage === undefined && previous?.speedUsage &&
           model.tokens >= previous.tokens && model.messages >= previous.messages
         ) {
-          nextClient.models[modelId] = { ...model, speedBreakdown: previous.speedBreakdown };
+          nextClient.models[modelId] = { ...model, speedUsage: previous.speedUsage };
         }
       }
     }
@@ -437,11 +437,11 @@ export function clientContributionToBreakdownData(
     cost: number;
     modelId: string;
     messages: number;
-    speedBreakdown?: readonly SpeedBreakdownEntry[];
+    speedUsage?: readonly SpeedUsage[];
   }
 ): ModelBreakdownData {
   const { input, output, cacheRead, cacheWrite, reasoning = 0 } = client_contrib.tokens;
-  const speedBreakdown = mergeSpeedBreakdowns(client_contrib.speedBreakdown);
+  const speedUsage = mergeSpeedUsage(client_contrib.speedUsage);
   return {
     tokens: input + output + cacheRead + cacheWrite + reasoning,
     cost: client_contrib.cost,
@@ -451,7 +451,7 @@ export function clientContributionToBreakdownData(
     cacheWrite,
     reasoning,
     messages: client_contrib.messages,
-    ...(client_contrib.speedBreakdown ? { speedBreakdown: speedBreakdown ?? [] } : {}),
+    ...(client_contrib.speedUsage ? { speedUsage: speedUsage ?? [] } : {}),
   };
 }
 

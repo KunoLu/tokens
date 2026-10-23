@@ -9,19 +9,19 @@
 
 export const INFERENCE_SPEEDS = ["standard", "fast", "ultrafast"] as const;
 export const SPEED_SOURCES = ["reported", "selected"] as const;
-export const MAX_SPEED_BREAKDOWN_ENTRIES = INFERENCE_SPEEDS.length * SPEED_SOURCES.length;
+export const MAX_SPEED_USAGE_ENTRIES = INFERENCE_SPEEDS.length * SPEED_SOURCES.length;
 
 export type InferenceSpeed = (typeof INFERENCE_SPEEDS)[number];
 export type SpeedSource = (typeof SPEED_SOURCES)[number];
 
-export interface SpeedBreakdownEntry {
+export interface SpeedUsage {
   speed: InferenceSpeed;
   source: SpeedSource;
   tokens: number;
   messages: number;
 }
 
-function pairRank(entry: Pick<SpeedBreakdownEntry, "speed" | "source">): number {
+function pairRank(entry: Pick<SpeedUsage, "speed" | "source">): number {
   return (
     INFERENCE_SPEEDS.indexOf(entry.speed) * SPEED_SOURCES.length +
     SPEED_SOURCES.indexOf(entry.source)
@@ -33,10 +33,10 @@ function pairRank(entry: Pick<SpeedBreakdownEntry, "speed" | "source">): number 
  * canonical (speed, source) order. Returns undefined when nothing is known so
  * callers can omit the field entirely (absent === all Unknown).
  */
-export function mergeSpeedBreakdowns(
-  ...breakdowns: Array<readonly SpeedBreakdownEntry[] | null | undefined>
-): SpeedBreakdownEntry[] | undefined {
-  const byPair = new Map<number, SpeedBreakdownEntry>();
+export function mergeSpeedUsage(
+  ...breakdowns: Array<readonly SpeedUsage[] | null | undefined>
+): SpeedUsage[] | undefined {
+  const byPair = new Map<number, SpeedUsage>();
 
   for (const breakdown of breakdowns) {
     for (const entry of breakdown ?? []) {

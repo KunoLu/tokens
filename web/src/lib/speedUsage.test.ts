@@ -8,7 +8,7 @@ import {
   normalizeClientBreakdownAliases,
   type ClientBreakdownData,
 } from "./db/helpers";
-import type { SpeedBreakdownEntry } from "./speedBreakdown";
+import type { SpeedUsage } from "./speedUsage";
 
 type Contribution = {
   client: string;
@@ -18,7 +18,7 @@ type Contribution = {
   cost: number;
   messages: number;
   provenance?: { schemaVersion: number; messageCount: number; modelCount: number };
-  speedBreakdown?: unknown[];
+  speedUsage?: unknown[];
 };
 
 // Each contribution totals input + output + 16 tokens.
@@ -102,7 +102,7 @@ const legacyClients = () => [
   contrib("claude", "claude-opus-4", 500, 100, 2),
 ];
 
-// Computed with the pre-speedBreakdown implementation of generateSubmissionHash.
+// Computed with the pre-speedUsage implementation of generateSubmissionHash.
 const LEGACY_HASH = "f8e6a787f523f85e2292adbacbb50234ca0c603859156834c515a59198e657a5";
 
 const fast = (source: "reported" | "selected", tokens: number, messages: number) => ({
@@ -112,17 +112,17 @@ const fast = (source: "reported" | "selected", tokens: number, messages: number)
   messages,
 });
 
-describe("speedBreakdown submission contract", () => {
+describe("speedUsage submission contract", () => {
   test("legacy payloads validate and keep their previous hash (absent or empty)", () => {
     expect(hashOf(legacyClients())).toBe(LEGACY_HASH);
-    const empty = legacyClients().map((c) => ({ ...c, speedBreakdown: [] }));
+    const empty = legacyClients().map((c) => ({ ...c, speedUsage: [] }));
     expect(hashOf(empty)).toBe(LEGACY_HASH);
   });
 
   test("accepts mixed reported/selected speeds and stores them on the nested model only", () => {
     const codex = withRevision(
       contrib("codex", "gpt-5", 1000, 200, 4, {
-        speedBreakdown: [
+        speedUsage: [
           { speed: "ultrafast", source: "selected", tokens: 100, messages: 1 },
           fast("reported", 600, 2),
           { speed: "standard", source: "reported", tokens: 300, messages: 1 },
@@ -143,10 +143,10 @@ describe("speedBreakdown submission contract", () => {
       }))
     );
     expect(aggregated.codex.tokens).toBe(1216);
-    expect("speedBreakdown" in aggregated.codex).toBe(false);
+    expect("speedUsage" in aggregated.codex).toBe(false);
     expect(aggregated.codex.models["gpt-5"].tokens).toBe(1216);
     // Canonical (speed, source) order; uncovered 216 tokens remain Unknown.
-    expect(aggregated.codex.models["gpt-5"].speedBreakdown).toEqual([
+    expect(aggregated.codex.models["gpt-5"].speedUsage).toEqual([
       { speed: "standard", source: "reported", tokens: 300, messages: 1 },
       { speed: "fast", source: "reported", tokens: 600, messages: 2 },
       { speed: "ultrafast", source: "selected", tokens: 100, messages: 1 },
@@ -155,7 +155,7 @@ describe("speedBreakdown submission contract", () => {
 
   test("speed metadata alone changes the hash; entry order does not", () => {
     const tagged = (entries: unknown[]) =>
-      legacyClients().map((c) => (c.client === "codex" ? { ...c, speedBreakdown: entries } : c));
+      legacyClients().map((c) => (c.client === "codex" ? { ...c, speedUsage: entries } : c));
     const a = hashOf(tagged([fast("reported", 600, 2), fast("selected", 100, 1)]));
     const b = hashOf(tagged([fast("selected", 100, 1), fast("reported", 600, 2)]));
     const c = hashOf(tagged([fast("reported", 601, 2), fast("selected", 100, 1)]));
@@ -177,9 +177,9 @@ describe("speedBreakdown submission contract", () => {
       [fast("reported", 10, 3), fast("selected", 10, 2)],
       Array.from({ length: 7 }, () => fast("reported", 0, 0)),
     ];
-    for (const speedBreakdown of invalid) {
+    for (const speedUsage of invalid) {
       const result = validateSubmission(
-        submission([contrib("codex", "gpt-5", 1000, 200, 4, { speedBreakdown })])
+        submission([contrib("codex", "gpt-5", 1000, 200, 4, { speedUsage })])
       );
       expect(result.valid).toBe(false);
     }
@@ -188,7 +188,7 @@ describe("speedBreakdown submission contract", () => {
     const exact = validateSubmission(
       submission([
         contrib("codex", "gpt-5", 1000, 200, 4, {
-          speedBreakdown: [fast("reported", 1000, 3), fast("selected", 216, 1)],
+          speedUsage: [fast("reported", 1000, 3), fast("selected", 216, 1)],
         }),
       ])
     );
@@ -196,8 +196,8 @@ describe("speedBreakdown submission contract", () => {
   });
 });
 
-describe("speedBreakdown storage merges", () => {
-  const model = (tokens: number, messages: number, speedBreakdown?: SpeedBreakdownEntry[]) => ({
+describe("speedUsage storage merges", () => {
+  const model = (tokens: number, messages: number, speedUsage?: SpeedUsage[]) => ({
     tokens,
     cost: 1,
     input: tokens,
@@ -206,11 +206,11 @@ describe("speedBreakdown storage merges", () => {
     cacheWrite: 0,
     reasoning: 0,
     messages,
-    ...(speedBreakdown ? { speedBreakdown } : {}),
+    ...(speedUsage ? { speedUsage } : {}),
   });
 
   test("incoming contributions for one model sum per pair without changing totals", () => {
-    const first: SpeedBreakdownEntry[] = [{ speed: "fast", source: "reported", tokens: 40, messages: 1 }];
+    const first: SpeedUsage[] = [{ speed: "fast", source: "reported", tokens: 40, messages: 1 }];
     const aggregated = aggregateIncomingClientBreakdowns([
       { client: "claude", modelId: "opus", breakdown: model(100, 2, first) },
       {
@@ -226,11 +226,11 @@ describe("speedBreakdown storage merges", () => {
     expect(Object.keys(aggregated.claude.models).sort()).toEqual(["opus", "sonnet"]);
     expect(aggregated.claude.tokens).toBe(180);
     expect(aggregated.claude.models.opus.tokens).toBe(150);
-    expect(aggregated.claude.models.opus.speedBreakdown).toEqual([
+    expect(aggregated.claude.models.opus.speedUsage).toEqual([
       { speed: "standard", source: "selected", tokens: 5, messages: 0 },
       { speed: "fast", source: "reported", tokens: 50, messages: 2 },
     ]);
-    expect("speedBreakdown" in aggregated.claude.models.sonnet).toBe(false);
+    expect("speedUsage" in aggregated.claude.models.sonnet).toBe(false);
     // Inputs are not mutated.
     expect(first).toEqual([{ speed: "fast", source: "reported", tokens: 40, messages: 1 }]);
   });
@@ -246,7 +246,7 @@ describe("speedBreakdown storage merges", () => {
     });
     expect(Object.keys(normalized)).toEqual(["kilo"]);
     expect(normalized.kilo.tokens).toBe(30);
-    expect(normalized.kilo.models.k2.speedBreakdown).toEqual([
+    expect(normalized.kilo.models.k2.speedUsage).toEqual([
       { speed: "fast", source: "selected", tokens: 10, messages: 2 },
     ]);
   });
@@ -271,19 +271,19 @@ describe("speedBreakdown storage merges", () => {
     const merged = mergeClientBreakdownsWithRegressionGuard(stored, incoming, new Set(["claude"]));
     expect(merged.warnings).toEqual([]);
     expect(merged.merged.claude.tokens).toBe(120);
-    expect(merged.merged.claude.models.opus.speedBreakdown).toEqual([
+    expect(merged.merged.claude.models.opus.speedUsage).toEqual([
       { speed: "fast", source: "reported", tokens: 100, messages: 2 },
     ]);
-    expect(incoming.claude.models.opus.speedBreakdown).toBeUndefined();
+    expect(incoming.claude.models.opus.speedUsage).toBeUndefined();
 
     const reclassified = aggregateIncomingClientBreakdowns([{
       client: "claude", modelId: "opus",
       breakdown: clientContributionToBreakdownData({
         modelId: "opus", tokens: { input: 120, output: 0, cacheRead: 0, cacheWrite: 0 },
-        cost: 1, messages: 3, speedBreakdown: [],
+        cost: 1, messages: 3, speedUsage: [],
       }),
     }]);
     const cleared = mergeClientBreakdownsWithRegressionGuard(stored, reclassified, new Set(["claude"]));
-    expect(cleared.merged.claude.models.opus.speedBreakdown).toEqual([]);
+    expect(cleared.merged.claude.models.opus.speedUsage).toEqual([]);
   });
 });
