@@ -1,4 +1,5 @@
 import { intlTag, type Locale } from "@/lib/i18n/locale";
+import { t } from "@/lib/i18n/t";
 
 
 export function escapeXml(value: string): string {
@@ -65,6 +66,18 @@ export function formatCurrency(
   }).format(Math.max(0, safeNumber(value)));
 }
 
+/**
+ * Format a 0–100 share with one decimal. Non-zero shares below 0.05% stay visible.
+ */
+export function formatPercent(percent: number, locale: Locale = "en"): string {
+  const small = percent > 0 && percent < 0.05;
+  const value = new Intl.NumberFormat(numberLocale(locale), {
+    style: "percent",
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1,
+  }).format((small ? 0.1 : percent) / 100);
+  return small ? t(locale, "profile.percent.lessThan", { value }) : value;
+}
 
 /**
  * Format milliseconds into a human-readable duration string.

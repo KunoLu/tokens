@@ -4,7 +4,7 @@ import { createContext, useContext, useMemo } from "react";
 import type { Locale } from "./locale";
 import { t as translate } from "./t";
 import type { TranslationKey } from "./t";
-import { formatCompact, formatCurrency, formatNumber } from "@/lib/format";
+import { formatCompact, formatCurrency, formatNumber, formatPercent } from "@/lib/format";
 
 export type TranslationVariables = Record<string, string | number>;
 
@@ -53,6 +53,7 @@ export function useFormat() {
         formatCurrency(value, compact, locale),
       formatCompact: (value: number, kind: "number" | "currency") =>
         formatCompact(value, kind, locale),
+      formatPercent: (percent: number) => formatPercent(percent, locale),
     }),
     [locale]
   );

@@ -4,7 +4,7 @@ import { useId, type CSSProperties } from "react";
 import { formatNumber } from "@/lib/utils";
 import type { ProfileStatsData } from "./types";
 import { tw } from "@/lib/tw";
-import { useI18n } from "@/lib/i18n";
+import { useFormat, useI18n } from "@/lib/i18n";
 
 export interface TokenBreakdownProps {
   stats: ProfileStatsData;
@@ -114,6 +114,7 @@ export function TokenBreakdown({ stats, className }: TokenBreakdownProps) {
   const headingId = useId();
   const descriptionId = useId();
   const { t, locale } = useI18n();
+  const { formatPercent } = useFormat();
   const tokenTypes = [
     {
       label: t("graph.tokenInput"),
@@ -204,7 +205,7 @@ export function TokenBreakdown({ stats, className }: TokenBreakdownProps) {
                 </LabelRow>
                 <ValueRow>
                   {formatNumber(type.value, locale)}
-                  <Percentage>{percentage.toFixed(1)}%</Percentage>
+                  <Percentage>{formatPercent(percentage)}</Percentage>
                 </ValueRow>
               </BreakdownItem>
             );

@@ -53,7 +53,7 @@ function Figure({ label, value }: { label: string; value: string }) {
  */
 export function ProfileToday({ day, isToday, className }: ProfileTodayProps) {
   const { t, locale } = useI18n();
-  const { formatNumber, formatCurrency } = useFormat();
+  const { formatNumber, formatCurrency, formatPercent } = useFormat();
   const clients = useMemo(
     () => (day ? createContributionClientDetails(day) : []),
     [day]
@@ -87,7 +87,14 @@ export function ProfileToday({ day, isToday, className }: ProfileTodayProps) {
       }
     }
     const sum = COMPOSITION.reduce((acc, part) => acc + totals[part.key], 0);
-    return { totals, sum, parts: COMPOSITION.filter((p) => totals[p.key] > 0) };
+    return {
+      totals,
+      sum,
+      parts: COMPOSITION.filter((p) => totals[p.key] > 0).map((p) => ({
+        ...p,
+        share: (totals[p.key] / sum) * 100,
+      })),
+    };
   }, [clients]);
 
   // Busiest client first: the one that did the work should read first.
@@ -128,9 +135,7 @@ export function ProfileToday({ day, isToday, className }: ProfileTodayProps) {
                   <div
                     key={part.key}
                     className={part.className}
-                    style={{
-                      width: `${(composition.totals[part.key] / composition.sum) * 100}%`,
-                    }}
+                    style={{ width: `${part.share}%` }}
                     title={t("profile.breakdown.segmentTitle", { label: t(part.labelKey), tokens: formatNumber(composition.totals[part.key], true) })}
                   />
                 ))}
@@ -143,8 +148,9 @@ export function ProfileToday({ day, isToday, className }: ProfileTodayProps) {
                       aria-hidden="true"
                     />
                     <dt className="text-xs text-muted-foreground">{t(part.labelKey)}</dt>
-                    <dd className="font-mono text-xs tabular-nums">
-                      {formatNumber(composition.totals[part.key], true)}
+                    <dd className="whitespace-nowrap font-mono text-xs tabular-nums">
+                      {formatNumber(composition.totals[part.key], true)}{" "}
+                      <span className="text-muted-foreground">{formatPercent(part.share)}</span>
                     </dd>
                   </div>
                 ))}

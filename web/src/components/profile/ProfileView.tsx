@@ -111,29 +111,28 @@ function Stat({
 /**
  * Composition of the token total.
  *
- * Rendered as one proportional bar rather than five separate figures: the
- * useful question here is "how much of this is cache reads", which is a shape,
- * not a number. Exact values stay underneath for anyone who wants them.
+ * Rendered as one proportional bar: the useful question here is "how much of
+ * this is cache reads", which the bar answers at a glance. Exact values and
+ * shares stay underneath for anyone who wants them.
  */
 function TokenComposition({ stats }: { stats: ProfileViewStats }) {
   const { t } = useI18n();
-  const { formatNumber } = useFormat();
-  const parts = useMemo(
-    () =>
-      ([
-        { labelKey: "tokens.input", value: stats.inputTokens, className: "bg-chart-1" },
-        { labelKey: "tokens.output", value: stats.outputTokens, className: "bg-chart-2" },
-        { labelKey: "tokens.cacheRead", value: stats.cacheReadTokens, className: "bg-chart-3" },
-        { labelKey: "tokens.cacheWrite", value: stats.cacheWriteTokens, className: "bg-chart-4" },
-        { labelKey: "tokens.reasoning", value: stats.reasoningTokens ?? 0, className: "bg-chart-5" },
-      ] satisfies ReadonlyArray<{ labelKey: TranslationKey; value: number; className: string }>).filter(
-        (p) => p.value > 0
-      ),
-    [stats]
-  );
+  const { formatNumber, formatPercent } = useFormat();
+  const parts = useMemo(() => {
+    const nonZero = ([
+      { labelKey: "tokens.input", value: stats.inputTokens, className: "bg-chart-1" },
+      { labelKey: "tokens.output", value: stats.outputTokens, className: "bg-chart-2" },
+      { labelKey: "tokens.cacheRead", value: stats.cacheReadTokens, className: "bg-chart-3" },
+      { labelKey: "tokens.cacheWrite", value: stats.cacheWriteTokens, className: "bg-chart-4" },
+      { labelKey: "tokens.reasoning", value: stats.reasoningTokens ?? 0, className: "bg-chart-5" },
+    ] satisfies ReadonlyArray<{ labelKey: TranslationKey; value: number; className: string }>).filter(
+      (p) => p.value > 0
+    );
+    const total = nonZero.reduce((sum, p) => sum + p.value, 0);
+    return nonZero.map((p) => ({ ...p, share: (p.value / total) * 100 }));
+  }, [stats]);
 
-  const total = parts.reduce((sum, p) => sum + p.value, 0);
-  if (total === 0) return null;
+  if (parts.length === 0) return null;
 
   return (
     <div className="flex flex-col gap-3">
@@ -142,7 +141,7 @@ function TokenComposition({ stats }: { stats: ProfileViewStats }) {
           <div
             key={p.labelKey}
             className={p.className}
-            style={{ width: `${(p.value / total) * 100}%` }}
+            style={{ width: `${p.share}%` }}
             title={t("profile.breakdown.segmentTitle", {
               label: t(p.labelKey),
               tokens: formatNumber(p.value, true),
@@ -155,8 +154,9 @@ function TokenComposition({ stats }: { stats: ProfileViewStats }) {
           <div key={p.labelKey} className="flex items-center gap-2">
             <span className={cn("size-2 rounded-full", p.className)} aria-hidden="true" />
             <dt className="text-xs text-muted-foreground">{t(p.labelKey)}</dt>
-            <dd className="font-mono text-xs tabular-nums">
-              {formatNumber(p.value, true)}
+            <dd className="whitespace-nowrap font-mono text-xs tabular-nums">
+              {formatNumber(p.value, true)}{" "}
+              <span className="text-muted-foreground">{formatPercent(p.share)}</span>
             </dd>
           </div>
         ))}
