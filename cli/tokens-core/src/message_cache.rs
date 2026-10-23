@@ -6580,6 +6580,7 @@ mod tests {
     #[test]
     #[serial_test::serial]
     fn test_current_shard_roundtrips_speed_and_codex_incremental_state() {
+        use crate::sessions::codex::ModelSpeed;
         use crate::speed::{InferenceSpeed, Speed, SpeedSource};
 
         let temp_home = TempDir::new().unwrap();
@@ -6609,14 +6610,14 @@ mod tests {
         }
         let state = CodexParseState {
             current_model: Some("gpt-5".to_string()),
-            selected_speed: Some((
-                "gpt-5".to_string(),
-                InferenceSpeed::codex(Some("ultrafast")).unwrap(),
-            )),
-            turn_speed: Some((
-                "gpt-5".to_string(),
-                InferenceSpeed::codex(Some("fast")).unwrap(),
-            )),
+            selected_speed: Some(ModelSpeed {
+                model: "gpt-5".to_string(),
+                speed: InferenceSpeed::codex(Some("ultrafast")).unwrap(),
+            }),
+            turn_speed: Some(ModelSpeed {
+                model: "gpt-5".to_string(),
+                speed: InferenceSpeed::codex(Some("fast")).unwrap(),
+            }),
             current_turn_start_ms: Some(1_733_047_200_000),
             headless_thread_id: Some("thread".to_string()),
             headless_turn_ordinal: 3,

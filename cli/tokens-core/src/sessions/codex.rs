@@ -240,15 +240,22 @@ impl CodexTotals {
     }
 }
 
+/// Inference speed scoped to the model named by a settings snapshot.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub(crate) struct ModelSpeed {
+    pub model: String,
+    pub speed: InferenceSpeed,
+}
+
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub(crate) struct CodexParseState {
     pub current_model: Option<String>,
     /// Explicit thread selection, scoped to its model. Not a served-tier report.
     #[serde(default)]
-    pub selected_speed: Option<(String, InferenceSpeed)>,
+    pub selected_speed: Option<ModelSpeed>,
     /// Capture at turn_context so a settings change does not relabel a running turn.
     #[serde(default)]
-    pub turn_speed: Option<(String, InferenceSpeed)>,
+    pub turn_speed: Option<ModelSpeed>,
     #[serde(default)]
     pub current_turn_start_ms: Option<i64>,
     #[serde(default)]
@@ -575,7 +582,10 @@ fn parse_codex_reader<R: BufRead>(
                                 let speed = InferenceSpeed::codex(
                                     settings.get("service_tier").and_then(Value::as_str),
                                 )?;
-                                Some((model.to_string(), speed))
+                                Some(ModelSpeed {
+                                    model: model.to_string(),
+                                    speed,
+                                })
                             });
                     }
                     handled = true;
@@ -736,7 +746,7 @@ fn parse_codex_reader<R: BufRead>(
                     state.turn_speed = state
                         .selected_speed
                         .clone()
-                        .filter(|(model, _)| state.current_model.as_ref() == Some(model));
+                        .filter(|selection| state.current_model.as_ref() == Some(&selection.model));
                     let turn_start_ms = parse_codex_entry_timestamp(entry.timestamp.as_deref());
                     state.current_turn_start_ms = turn_start_ms;
                     state.last_accepted_token_timestamp_ms = turn_start_ms;
@@ -927,8 +937,8 @@ fn parse_codex_reader<R: BufRead>(
                     message.inference_speed = state
                         .turn_speed
                         .as_ref()
-                        .filter(|(speed_model, _)| model.as_ref() == Some(speed_model))
-                        .map(|(_, speed)| *speed);
+                        .filter(|selection| model.as_ref() == Some(&selection.model))
+                        .map(|selection| selection.speed);
                     // Apply a deferred human-turn marker from a preceding
                     // user_message to this assistant reply — the first
                     // token-bearing message after the human input.
