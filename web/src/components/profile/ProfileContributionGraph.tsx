@@ -13,14 +13,18 @@ import {
   type PointerEvent,
 } from "react";
 import { SourceLogo } from "@/components/SourceLogo";
+import { SpeedTierLabel } from "./SpeedTier";
 import { SOURCE_COLORS, SOURCE_DISPLAY_NAMES, SOURCE_LOGOS } from "@/lib/constants";
 import { getContributionIntensity } from "@/lib/embed/embedShared";
 import type {
   ClientContribution,
   ClientType,
   DailyContribution,
+  SpeedUsage,
   TokenBreakdown,
 } from "@/lib/types";
+import { getSpeedTierRows, mergeSpeedUsage } from "@/lib/speedUsage";
+import { formatWholePercents } from "@/lib/format";
 import {
   DEFAULT_PALETTE,
   getDarkGradeColors,
@@ -114,6 +118,7 @@ export interface ContributionModelDetail {
   messages: number;
   modelId: string;
   providerId: string | null;
+  speedUsage?: SpeedUsage[];
   tokens: TokenBreakdown;
   totalTokens: number;
 }
@@ -322,6 +327,16 @@ function sanitizeTokenBreakdown(tokens: TokenBreakdown): TokenBreakdown {
   };
 }
 
+function sanitizeSpeedUsage(
+  speedUsage: readonly SpeedUsage[] | undefined,
+): SpeedUsage[] | undefined {
+  return speedUsage?.map((entry) => ({
+    ...entry,
+    messages: safeMessages(entry.messages),
+    tokens: safeTokens(entry.tokens),
+  }));
+}
+
 function addTokenBreakdowns(
   left: TokenBreakdown,
   right: TokenBreakdown,
@@ -433,6 +448,7 @@ function addModelDetail(
     ...existing,
     cost: existing.cost + detail.cost,
     messages: existing.messages + detail.messages,
+    speedUsage: mergeSpeedUsage(existing.speedUsage, detail.speedUsage),
     tokens,
     totalTokens: existing.totalTokens + detail.totalTokens,
   });
@@ -456,6 +472,7 @@ function modelsForClient(
         messages: safeMessages(model.messages),
         modelId,
         providerId: contribution.providerId?.trim() || null,
+        speedUsage: sanitizeSpeedUsage(model.speedUsage),
         tokens,
         totalTokens: Math.max(
           safeTokens(model.tokens),
@@ -475,6 +492,7 @@ function modelsForClient(
       messages: safeMessages(contribution.messages),
       modelId,
       providerId: contribution.providerId?.trim() || null,
+      speedUsage: sanitizeSpeedUsage(contribution.speedUsage),
       tokens,
       totalTokens: totalBreakdownTokens(tokens),
     },
@@ -1517,6 +1535,13 @@ const ModelMeta = tw(
   "col-span-full text-[0.6875rem] leading-snug text-muted-foreground"
 );
 
+const SpeedTierList = tw("div", "col-span-full mt-0.5 grid gap-0.5 pl-2.5");
+
+const SpeedTierLine = tw(
+  "div",
+  "flex min-w-0 items-start gap-1.5 text-[0.6875rem] leading-snug text-muted-foreground"
+);
+
 const NoDayActivity = tw("p", "m-0 text-xs text-muted-foreground");
 
 function formatFullDay(date: string, locale: Locale): string {
@@ -1560,6 +1585,38 @@ function modelMeta(
     );
   }
   return metrics.join(" · ");
+}
+
+function ModelSpeedTiers({ model }: { model: ContributionModelDetail }) {
+  const tiers = getSpeedTierRows(model.speedUsage, model.totalTokens, model.messages);
+  if (tiers.length === 0) return null;
+  const percents = formatWholePercents(
+    tiers.map((tier) => (model.totalTokens > 0 ? (tier.tokens / model.totalTokens) * 100 : 0)),
+  );
+
+  return (
+    <SpeedTierList>
+      {tiers.map((tier, index) => {
+        const metrics = [`${formatTokenCount(tier.tokens)} tokens`, percents[index]];
+        if (tier.messages > 0) {
+          metrics.push(
+            `${tier.messages.toLocaleString("en-US")} ${
+              tier.messages === 1 ? "message" : "messages"
+            }`,
+          );
+        }
+        return (
+          <SpeedTierLine key={tier.speed}>
+            <SpeedTierLabel
+              tier={tier}
+              className={cn("flex-none", tier.speed !== "unknown" && "text-foreground")}
+            />
+            <span className="min-w-0">{metrics.join(" · ")}</span>
+          </SpeedTierLine>
+        );
+      })}
+    </SpeedTierList>
+  );
 }
 
 function ContributionDayTooltip({ day }: { day: DailyContribution }) {
@@ -1771,6 +1828,7 @@ function ContributionDayBreakdown({
                             {t("tokens.count", { n: formatTokenCount(model.totalTokens, locale) })}
                             {meta && ` · ${meta}`}
                           </ModelMeta>
+                          <ModelSpeedTiers model={model} />
                         </ModelRow>
                         );
                       })}

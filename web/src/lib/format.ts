@@ -80,6 +80,36 @@ export function formatPercent(percent: number, locale: Locale = "en"): string {
 }
 
 /**
+ * Format 0–100 shares as whole percents that add up to their own rounded total
+ * (largest remainder), so the parts of a split never disagree with the whole.
+ * A non-zero share that rounds to 0 shows as "<1%".
+ */
+export function formatWholePercents(percents: readonly number[], locale: Locale = "en"): string[] {
+  const whole = percents.map((percent) => Math.floor(percent));
+  let left =
+    Math.round(percents.reduce((sum, percent) => sum + percent, 0)) -
+    whole.reduce((sum, value) => sum + value, 0);
+  const byRemainder = percents
+    .map((percent, index) => ({ index, remainder: percent - whole[index] }))
+    .sort((a, b) => b.remainder - a.remainder);
+  for (const { index } of byRemainder) {
+    if (left <= 0) break;
+    whole[index] += 1;
+    left -= 1;
+  }
+  const formatter = new Intl.NumberFormat(numberLocale(locale), {
+    style: "percent",
+    maximumFractionDigits: 0,
+  });
+  return whole.map((value, index) =>
+    value === 0 && percents[index] > 0
+      ? t(locale, "profile.percent.lessThan", { value: formatter.format(0.01) })
+      : formatter.format(value / 100)
+  );
+}
+
+
+/**
  * Format milliseconds into a human-readable duration string.
  * e.g. 3661000 → "1h 1m", 90000 → "1m 30s", 500 → "<1s"
  */
