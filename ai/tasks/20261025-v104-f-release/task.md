@@ -7,7 +7,7 @@ mode_note: 用户 2026-10-24 20:09 群内确认（最终方案），Lord 记录�
 status: "checking"
 branch: chore/v1.0.4-f-release
 created_at: '2026-10-25T00:59:44.530970+08:00'
-updated_at: "2026-10-25T01:14:20.106358+08:00"
+updated_at: "2026-10-25T01:24:58.779698+08:00"
 completed_at: null
 ---
 # PR F — v1.0.4 发布准备与积压回填
@@ -31,6 +31,7 @@ completed_at: null
 - 已完成前九个提交。检查对象为“提交 10 之前的 HEAD（提交 9）”：`ab15d118fe34fdd307ae41b556db5e5d1ec8d2ec`；检查时只有 F task/index 文档未提交，不冒充最终 HEAD 或 CI 证据。
 - 第 10 个提交仅 F task 与 index；ignored `.sbtd/active-task.json` 只保存 schema_version、task_id、task_path，strict 模式属于本 task。
 - 四个旧 task 的完成时间均为本次真实 +08:00 微秒时钟，completed_at = updated_at = done 事件 at；merge 的 %cI 与 mergedAt 另列于事件 evidence。E 合并前评审结论不可考，不补造 CLEAN。
+- s2 修正范围：仅三个新增提交 A→B→C，撤回 README Paseo、修正双语 CHANGELOG／cloud 安装说明、更新本 task；B、C+D 的 done 关闭保留。s2 不启动子代理、不用 advisor，仅在本会话执行；不 push、不开／改 PR、不打 tag、不改已有提交或 Git／omp 全局配置。
 
 ## 门禁
 
@@ -43,6 +44,8 @@ completed_at: null
 | book-legacy-change-safety | 既有设备名说明与短名行为不一致 | 首次文案修改前 | passed（characterized；normal） |
 | book-refactoring-pass | 修改既有 TS 字典值及版本 ref | 首次生产编辑前 | passed（proceed；normal；no refactor needed） |
 | book-release-readiness | 版本发布准备、cloud 安装指引 | 验证后 | blocked（基线 fmt、未发布 tag／资产、真实部署未验证） |
+
+s2 Book Gate Plan：仅文档／记录纠正，不改生产代码、运行行为、领域模型或数据契约；DDD、DDIA、legacy、refactoring 均为 not-required，不继承为本轮已执行的门禁。发布就绪沿用 blocked，独立评审由 Reviewy 在 PR 上进行；以下 s1 验证结果仅覆盖各自注明的历史快照。
 
 ### Legacy Change Safety Review
 
@@ -62,7 +65,7 @@ completed_at: null
 - Cross-repo context: contract-only（上游补丁与已合并 PR 原文）；API Contract: not-needed（本轮无 API 变更）；Mock Strategy: contract-backed（安装器 fixture 基于真实 fetch 参数与归档结构）；E2E Mode: smoke-only。
 - Chrome/Playwright: skipped，本轮未启动带数据库／认证的设置页，真实 UI 布局未验证；真实字典与函数 smoke 不冒充浏览器验收。Maestro: not-needed，无移动端。
 - Graft: skipped，无 callable managed connection；LSP: not-needed，没有符号或调用关系变更。rtk: skipped-for-report，使用原生命令保留完整 stdout/stderr/exit。
-- 独立复核：passed；ReviewReleaseDocs 对文档／翻译／安装链路判定 CLEAN，ReviewRecordsVersions 对提交 1–9 的记录／版本边界判定 correct；两路均无发现项。ReviewRecordsVersions 随后复核本 F task 草稿、index 与 active，结论 clean、无发现项；最终 checking 事件与提交由主会话完成。原生只读 reviewer 不运行测试，不启动持久协作 runtime；验证环境由主会话唯一控制。结果摘要：reports/independent-review.json 与同 stem 中文汇总。
+- omp 会话内子代理自检，非独立评审：s1 违规启动两个只读子代理（k3），结论仅供参考，不作为评审结论；独立评审由 Reviewy 在 PR 上进行。
 
 ### Release Readiness Review
 
@@ -72,8 +75,8 @@ completed_at: null
 - Capacity/limits：没有新增 runtime 路径、队列、重试或服务端容量变化；已存在 cloud 每轮 submit 与 teleport 重复计数限制保持，未做真实容量测试。
 - Observability/runbook：检查 `tokens --version`、API 目标及 cloud status；不要仅以 hook 的 exit 0 判断上传成功（原 hook 保留错误吞并策略）。
 - Rollout/rollback：编排方另行处理最终 HEAD 检查、PR、tag、资产和部署。Git 回退不保全 ignored 缓存／报告，也不撤销已提交的用量；旧 CLI 从日志重建缓存的限制已写入双语 CHANGELOG。
-- Required validation：Rust 2456 pass／0 fail／4 ignored；Bun 51 pass／0 fail；clippy -D warnings、check、build、typecheck 成功；真实二进制输出 tokens 1.0.4。fmt 18 文件／37 hunk 与提供的基线完全一致。
-- 额外风险：本站提供的 install.sh 仍硬编码上游 missuo/tokens 二进制来源；本轮文档已如实披露，未擅改安装器，也未声称 fork 二进制分发已完成。没有任何 owner 风险豁免或生产验收记录。
+- s1 Required validation：Rust 2456 pass／0 fail／4 ignored；Bun 51 pass／0 fail；clippy -D warnings、check、build、typecheck 成功；本地从本仓源码构建的二进制输出 tokens 1.0.4，不代表 install.sh 安装结果。fmt 18 文件／37 hunk 与提供的基线完全一致。
+- 额外风险：本站提供的 install.sh 仍硬编码上游 missuo/tokens 二进制来源，默认取上游 latest Release（当前 v27.1.5），不安装本仓 1.0.4；详见安装链路说明。没有任何 owner 风险豁免或生产验收记录。
 
 ## 条目与来源
 
@@ -87,7 +90,7 @@ completed_at: null
 | 4 A 关闭与 s1 | 编排方整理；CodeX/Reviewy/Lord 2026-10-24 10:09 规则，清单转述 | 提交 2 | #13 checking→done，50／127，去掉本会话标记 |
 | 5 B cloud import 措辞 | Reviewy 群内 2026-10-24 22:38，清单转述 | 提交 3 | 改为上游冲突上下文、本仓本来没有；全仓同类旧措辞仅一处 |
 | 6 B 关闭与 s1 | 编排方整理，沿同一关闭规则 | 提交 3 | #14 checking→done，45／94 |
-| 7 README Paseo | #15 原文与 C+D task；上游 `427b51421eb3057f785863162e9a2c5f3bb23b95` | 提交 7 | 英文原段落、中文翻译；不引入图标表；catalog 54 不变 |
+| 7 README Paseo | #15 原文与 C+D task；上游 `427b51421eb3057f785863162e9a2c5f3bb23b95` | 提交 7；s2 提交 A | 已撤回：提交 1d16e5b 由提交 A（revert）撤回；README 为受保护文件，按 C+D 先例取本仓版本；Lord 2026-10-25 01:19 群内裁定 |
 | 8 C+D 23:42 漏记注释 | Reviewy 群内 2026-10-25 00:09，清单转述 | 提交 4 | 新事件补记 23:16 的原提交 push 前改写注释；23:42 及全部旧事件原行不动 |
 | 9 C+D 关闭与 s3 | 编排方整理，沿同一关闭规则 | 提交 4 | #15 checking→done，24／55 |
 | 10 E 关闭与 s2 | 编排方整理；第一个提交仅回填上一个 PR 合并 | 提交 1 | #16 checking→done，10／20；评审结论不可考 |
@@ -115,6 +118,9 @@ completed_at: null
 | 8 | `8c1e5a687df6387a0aa11e2e2291edb0c94abf98` | chore(release): version 1.0.4 |
 | 9 | `ab15d118fe34fdd307ae41b556db5e5d1ec8d2ec` | docs(changelog): add 1.0.4 |
 | 10 | 提交后由编排方／交付记录核对，不在文档内自引用 | docs(ai): add v1.0.4 PR F strict task record |
+| s2 A | `e334943cdc4c8d9382e882338de748b936ce40c4` | Revert "docs(readme): document Paseo-managed usage" |
+| s2 B | `437b6f50e8c88f5c963fc678dd25c5b60600da9d` | docs: correct 1.0.4 install and Paseo wording |
+| s2 C | 本 docs 提交 | docs(ai): record PR F review fix round s2 |
 
 ## set-version 改动文件与输出
 
@@ -166,17 +172,20 @@ set-version: 1.0.4
 - A（#13）：上游 v27.1.4 Antigravity 隐式同步、共享 RPC 预算、部分失败结果与 Windows helper 修复。
 - B（#14）：速度后端与 v9 缓存；明确降级到旧 CLI 重建本地缓存，仅存缓存而源日志已删的历史不能恢复，建议同时备份两者。
 - C+D（#15）：profile 构成占比／速度档位、官方 OMP 图标、Paseo 原生 provider 目录发现。
-- E（#16）：cloud submit/status、Claude Code cloud、Codex cloud 不支持、cloud_ 服务端规则与 provider 分组。
-- 本轮：短名掩码、cloud 文档安装／站点说明、README Paseo、版本及脚本 ref；#11 main Vercel 自动部署条目移入 1.0.4。en/zh 内容一致，Unreleased 标题下没有条目，不声称发布已经发生。
+- E（#16）：本仓 CLI 源码的 cloud submit/status、Claude Code cloud、Codex cloud 不支持、cloud_ 服务端规则与 provider 分组；install.sh 下载的上游 Release 自 v27.1.4 起同样包含 tokens cloud。
+- 本轮：短名掩码、cloud 文档安装／站点说明、本仓清单版本及钉版脚本 ref；README Paseo 已由 s2 提交 A 撤回，CHANGELOG 同步删除 README 补充说明，#15 的 Paseo 发现功能保留。#11 main Vercel 自动部署条目移入 1.0.4；en/zh 内容一致，Unreleased 标题下没有条目，不声称发布已经发生。
 
 ## 安装链路与文案核对
 
-- `web/package.json` build 把根 install.sh 复制到 public/install.sh；根脚本 `REPO="missuo/tokens"`，从 GitHub API 查 latest，再下载平台 tar.gz 及校验文件。并不是从本站下载 fork 二进制。
+- `web/package.json` build 把根 install.sh 复制到 public/install.sh；根脚本 :19 写死 `REPO="missuo/tokens"`，:64 默认查上游 latest Release，:70 下载平台归档。当前上游最新 GitHub Release 为 v27.1.5；通过该默认安装链路得到的 `tokens --version` 是 27.1.5，而不是 1.0.4，并不是从本站下载 fork 二进制。
+- 本仓只打 tag、没有 GitHub Release；这里的 1.0.4 描述本仓清单版本（Cargo workspace、`packages/cli*`）与 tag／钉版脚本 ref，不改变 install.sh 安装的上游版本。`TOKENS_API_URL=https://tokens.camp` 才是将 CLI 指向本站的方式。
+- install.sh 下载上游二进制的问题不在 F 处理；Lord 2026-10-25 01:19 群内裁定由 Lord 向用户提出，本轮不改安装器。
+- s2 来源核对：公开 GitHub API 的 `missuo/tokens/releases/latest` 返回 v27.1.5，`KunoLu/tokens/releases` 返回空列表；`git tag --contains 848849e` 返回 v27.1.4、v27.1.5，`git merge-base --is-ancestor 848849e v27.1.4` exit 0。未访问生产或执行真实安装；版本说明依据安装器源码、上游 Release 元数据及编排方提供的安装结果。
 - README 的 Linux 安装思路是本站 `/install.sh`。cloud hook 使用 Bash 而非 README 的 sh，因为脚本有 `set -euo pipefail`；设置 `TOKENS_NO_SERVICE=1`，保留已有 hook 的条件与最终 true。不修改 README 原安装命令或安装器逻辑。
 - 放行说明改为 tokens.camp、api.github.com、github.com、release-assets.githubusercontent.com；pricing 的 models.dev/openrouter.ai 保留。未访问生产核实实际部署脚本，GitHub 下载重定向未实网验证。
 - 环境说明与 Stop hook 均固定 `TOKENS_API_URL=https://tokens.camp`；专用 token 仅说明变量名；Codex 不支持、服务端规则、Tested 记录等其余章节保持不动。Tested 是上游历史记录，不是本仓本轮验收。
 - README／docs／web 搜索同类掩码描述仅命中 t.ts 两条，无其他用户文档需改；实际短名与长名分支验证通过。
-- scanner catalog 54 个条目，clients.rs 的 COUNT 断言为 54；clients.rs 和 web constants 均无 Paseo 客户端 ID。Paseo 归属底层 Claude/Codex，因此不改 README 数字；英文 Paseo 段落与上游逐字相等。
+- scanner catalog 54 个条目，clients.rs 的 COUNT 断言为 54；clients.rs 和 web constants 均无 Paseo 客户端 ID。Paseo 归属底层 Claude/Codex，catalog 与 README 数字均未改动；双语 README 的 Paseo 段落已撤回，相对 main 基线只保留各自一行 v1.0.2→v1.0.4 钉版 ref 改动。
 
 ## 验证环境与结果
 
@@ -200,7 +209,7 @@ Evidence Source: developer-local；Source Revision: dirty（F 文档）；Enviro
 | SessionStart／Stop 隔离 shell smoke | 4 场景通过；实际 install.sh＋fixture transport/binary，无真实 HTTP 或 token | reports/cloud-hook-smoke.json |
 | git diff --check origin/main..HEAD | exit 0，输出为空 | reports/code-diff-check.json |
 | 受保护文件 stat／migration／新增禁用措辞与路径 | 输出为空／0 改动／0 命中 | reports/protected-files.json；reports/code-boundaries.json；reports/acceptance-audit.json |
-| 历史事件、版本与 README 段落 | 旧行 byte-identical；版本全对齐；英文 Paseo 与上游一致 | reports/acceptance-audit.json |
+| 历史事件、版本与 README 段落 | s1 检查旧行 byte-identical、版本对齐；README Paseo 在 s2 已撤回，旧报告不代表当前 README 验收 | reports/acceptance-audit.json（s1 历史证据） |
 | test:migrations／test:teams／test:private | skipped，无本地 DATABASE_URL，不建库、不连生产；无 migration 修改 | 未执行，不计通过 |
 | 真实 cloud 容器／浏览器设置页／部署 | skipped，本轮无真实环境验收 | 未执行，不计通过 |
 
@@ -214,7 +223,11 @@ Evidence Source: developer-local；Source Revision: dirty（F 文档）；Enviro
 | # | 会话 | 模型 | 请求／工具调用 | 产出 | 会话记录 |
 |---|---|---|---|---|---|
 | 1 | ping | openai-codex/gpt-6-astra（high） | 1／0 | 连通性检查（--no-tools） | `~/.omp/logs/tokens-v104-f/ping/sessions/2026-10-24T16-57-15-766Z_01a16ed8-5cf5-7492-95e2-aa944ff90910.jsonl` |
-| 2 | s1 main（本会话） | openai-codex/gpt-6-astra（high） | 未知（落盘时本轮尚未结束），实际计数见群内交付报告 | 版本号、CHANGELOG、回填、task.md、本地检查 | `~/.omp/logs/tokens-v104-f/s1/sessions/` |
+| 2 | s1 main | openai-codex/gpt-6-astra（high） | 50／109 | 版本号、CHANGELOG、回填、task.md、本地检查 | `~/.omp/logs/tokens-v104-f/s1/sessions/` |
+| 3 | s1 子代理 ReviewRecordsVersions（违规） | k3（子代理，违规） | 34／52 | 只读复核提交 1–9 记录／版本与 F task 草稿；未改文件 | `~/.omp/logs/tokens-v104-f/s1/sessions/2026-10-24T16-58-28-141Z_01a16ed9-77ad-7114-9bd3-b9410c6e9884/ReviewRecordsVersions.jsonl` |
+| 4 | s1 子代理 ReviewReleaseDocs（违规） | k3（子代理，违规） | 30／46 | 只读复核文档／翻译／安装链路；未改文件 | `~/.omp/logs/tokens-v104-f/s1/sessions/2026-10-24T16-58-28-141Z_01a16ed9-77ad-7114-9bd3-b9410c6e9884/ReviewReleaseDocs.jsonl` |
+| 5 | s2 ping | openai-codex/gpt-6-astra（high） | 1／0 | 连通性检查（--no-tools） | `~/.omp/logs/tokens-v104-f/s2-ping/sessions/2026-10-24T17-21-04-338Z_01a16eee-2952-73da-81c6-b3170caf309c.jsonl` |
+| 6 | s2 修正（本会话） | openai-codex/gpt-6-astra（high） | 未知（落盘时本轮尚未结束），实际计数见群内交付报告 | 撤回 README Paseo、修正 CHANGELOG／cloud 文档安装说明、记录子代理违规 | `~/.omp/logs/tokens-v104-f/s2/sessions/` |
 
 ## 下一步
 
@@ -226,3 +239,4 @@ F 保持 checking、completed_at null。由编排方在最终 HEAD 完整复跑�
 |---|---|---|---|---|
 | 2026-10-25T01:00:14.803432+08:00 | planned | in-progress | 编排方整理，范围与来源核对完成，开始十个顺序提交。 | origin/main fab72885b91a09742901d3c2e59652491e5cf0eb；f-items.md；PR #13–#16 原始 JSON；历史 task 与版本脚本。 |
 | 2026-10-25T01:14:20.106358+08:00 | in-progress | checking | 编排方整理，前九个独立提交、F 文档与本地计划检查完成，独立只读复核无发现项；保留基线 fmt、上游安装器来源及真实部署／发布边界，不标记 done。 | 提交 10 之前的 HEAD（提交 9）ab15d118fe34fdd307ae41b556db5e5d1ec8d2ec；Rust 2456 pass/0 fail/4 ignored；Bun 51 pass/0 fail；CLI tokens 1.0.4；fmt 18 文件/37 hunk 与提供的基线全文归一化相同；reports/final-*.json；reports/fmt-comparison.json；reports/independent-review.json。 |
+| 2026-10-25T01:24:58.779698+08:00 | checking | checking | 编排方整理，违规记录：s1 启动两个只读子代理（ReviewRecordsVersions、ReviewReleaseDocs，模型 k3），违反「不启动子代理」与「astra 失败才用 kimi 兜底」两条规则；原因是编排方的 F prompt 漏写不启动子代理一行；两个子代理只读，未改任何文件。同轮按 Lord 2026-10-25 01:19 群内裁定撤回 README Paseo 段落、修正 1.0.4 安装说明并更正 :65。 | `~/.omp/logs/tokens-v104-f/s1/sessions/2026-10-24T16-58-28-141Z_01a16ed9-77ad-7114-9bd3-b9410c6e9884/ReviewRecordsVersions.jsonl`；`~/.omp/logs/tokens-v104-f/s1/sessions/2026-10-24T16-58-28-141Z_01a16ed9-77ad-7114-9bd3-b9410c6e9884/ReviewReleaseDocs.jsonl`；提交 1d16e5b 被 s2 提交 A e334943cdc4c8d9382e882338de748b936ce40c4 撤回；s2 不启动子代理。 |
