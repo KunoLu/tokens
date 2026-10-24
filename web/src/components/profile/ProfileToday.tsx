@@ -250,7 +250,7 @@ export function ProfileToday({ day, isToday, className }: ProfileTodayProps) {
                                             "h-full min-w-px rounded-full",
                                             tier.speed === "standard"
                                               ? "bg-muted-foreground/45"
-                                              : "bg-primary/70"
+                                              : "bg-amber-500/70 dark:bg-amber-400/70"
                                           )}
                                           style={{ width: `${tierShares[index]}%` }}
                                         />
