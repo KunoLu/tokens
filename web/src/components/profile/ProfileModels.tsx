@@ -15,10 +15,9 @@ import {
 } from "./listStyles";
 import { tw } from "@/lib/tw";
 import { cn } from "@/lib/utils";
-import { formatWholePercents } from "@/lib/format";
 import { getSpeedTierRows } from "@/lib/speedUsage";
 import { ModelIcon } from "./ModelIcon";
-import { intlTag, useI18n } from "@/lib/i18n";
+import { intlTag, useFormat, useI18n } from "@/lib/i18n";
 import { SpeedTierLabel } from "./SpeedTier";
 import type { ModelUsage } from "./types";
 
@@ -54,6 +53,8 @@ const SpeedTierLine = tw(
  * no message total to measure the Unknown remainder against.
  */
 function ModelSpeedTiers({ usage }: { usage: ModelUsage }) {
+  const { t, locale } = useI18n();
+  const { formatWholePercents } = useFormat();
   const tiers = getSpeedTierRows(usage.speedUsage, usage.tokens, 0);
   if (tiers.length === 0) return null;
   const percents = formatWholePercents(
@@ -69,7 +70,7 @@ function ModelSpeedTiers({ usage }: { usage: ModelUsage }) {
             className={cn("flex-none", tier.speed !== "unknown" && "text-foreground")}
           />
           <span className="min-w-0">
-            {formatNumber(tier.tokens)} tokens · {percents[index]}
+            {t("tokens.count", { n: formatNumber(tier.tokens, locale) })} · {percents[index]}
           </span>
         </SpeedTierLine>
       ))}
