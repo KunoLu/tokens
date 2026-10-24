@@ -6110,7 +6110,8 @@ mod tests {
         });
         remember_rpc_transport(port, RpcTransport::PlainHttp);
 
-        let result = sync_antigravity_cache_with_connections(&[enrichment_test_connection(port)], true);
+        let result =
+            sync_antigravity_cache_with_connections(&[enrichment_test_connection(port)], true);
         assert!(result.partial, "a recoverable metadata failure is partial");
         assert_eq!(result.failed_sessions, 1);
         assert!(result.error.is_some());
