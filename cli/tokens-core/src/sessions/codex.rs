@@ -569,10 +569,12 @@ fn parse_codex_reader<R: BufRead>(
                         .as_deref()
                         .or(state.session_id_from_meta.as_deref())
                         .unwrap_or(session_id);
-                    let owns_snapshot = payload.thread_id.as_deref().map_or(
-                        !state.forked_child_waiting_for_turn_context,
-                        |id| id == owner,
-                    );
+                    let owns_snapshot = payload
+                        .thread_id
+                        .as_deref()
+                        .map_or(!state.forked_child_waiting_for_turn_context, |id| {
+                            id == owner
+                        });
                     if owns_snapshot {
                         // A snapshot replaces the preference, including unset/unsupported
                         // tiers. Never carry Fast through a switch back to auto/defaults.
