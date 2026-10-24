@@ -311,11 +311,7 @@ export default async function DocsPage() {
             </p>
 
             <p className="text-sm leading-relaxed text-muted-foreground">
-              Paseo usage is counted under the underlying supported provider,
-              such as Claude Code or Codex CLI. Tokens also discovers absolute
-              Claude and Codex data-directory overrides in Paseo&apos;s provider
-              configuration. Run Tokens on the Paseo daemon host to submit those
-              sessions.
+              {t(locale, "docs.paseoUsage")}
             </p>
 
             {/* A plain responsive grid rather than a table: these are names,
