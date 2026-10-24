@@ -7,7 +7,7 @@ mode_note: 用户 2026-10-24 20:09 群内确认（最终方案），Lord 记录�
 status: "checking"
 branch: feat/v1.0.4-cd-profile-ui-paseo
 created_at: '2026-10-24T22:44:59.996064+08:00'
-updated_at: "2026-10-24T23:17:45.437104+08:00"
+updated_at: "2026-10-24T23:42:13.527631+08:00"
 completed_at: null
 ---
 # PR C+D — profile UI 与 Paseo 上游同步
@@ -21,7 +21,7 @@ completed_at: null
 - 用户 2026-10-24 20:09 群内确认（最终方案），Lord 记录。
 - 编排方整理（来自 Lord 裁定，具体时间不可考）：双语本地化；保持已删除徽章；不引入 PR E；不改版本、README、双语 CHANGELOG、workflow、vercel、migration、packages 与 bun.lock。
 - strict；未完整调用 grill-with-docs：提交顺序、数据语义和验收边界明确，无领域歧义。
-- 本 omp 会话自身不执行 push 和开 PR；push 与开 PR 由编排方在 omp 之外执行。不启动子代理，不修改 Git config、remote 或全局工具配置。
+- 本 omp 会话自身不执行 push 和开 PR；push 与开 PR 已由编排方在 omp 之外完成，PR #15 已开（https://github.com/KunoLu/tokens/pull/15）。不启动子代理，不修改 Git config、remote 或全局工具配置。
 - 背景 REPORT、上游 clone、工具链与 src-base 均只读。未触碰其他业务 checkout。
 
 ## 进度
@@ -96,7 +96,7 @@ completed_at: null
 | 上游提交 | 本仓新提交 | 结果 | 冲突文件与解决方式 |
 |---|---|---|---|
 | `c0002deefaeb230891012572f29199699bfd4b93` | `d48b4d645bef7a2441163006cff04f310ced4413` | 冲突 | ProfileToday、ProfileView、TokenBreakdown、format.ts；保留字典标签与 useFormat，合入 share 计算和显示，百分比用 Intl + locale；不引入上游相对时间冲突上下文 |
-| `bfac6f66d419557e32649d7200513d24319f72f0` | `637dc617ca56be11d66d1b7a62c1f4077bf67adb` | 冲突 | ProfileToday、format.ts、Providers；保留 locale hooks／格式化，Tooltip.Provider 放入 I18nProvider；已删徽章文件保持删除 |
+| `bfac6f66d419557e32649d7200513d24319f72f0` | `637dc617ca56be11d66d1b7a62c1f4077bf67adb` | 冲突 | ProfileToday、format.ts、Providers；保留 locale hooks／格式化，Tooltip.Provider 放入 I18nProvider；已删徽章文件保持删除；ProfileToday fast 档条颜色在冲突解决中曾被写成 `bg-primary/70`，s3 以独立提交 A `600010ab766cf29844b6707cdb087e56dc539531`按裁定 (a) 还原为上游 `bg-amber-500/70 dark:bg-amber-400/70` |
 | `2d906e12b204148791e55fae7bd4add3f3fbc8fc` | `29977422991490713d59dfe19080d6b165d29569` | 冲突 | ProfileModels import 合并本仓 i18n 与 SpeedTierLabel；types.ts 自动合并 |
 | `c5dfbffa6c02ac4464fa248f39810f207fc5b3dc` | `46f11e225255e7647cc4e11cc8a3962823cc7cdb` | clean | 官方 PNG 与 constants 路径更新；旧 JPG 引用搜索为空 |
 | `427b51421eb3057f785863162e9a2c5f3bb23b95` | `e5015bb99b0ee6fbcd1c013616c830520cae39b0` | 冲突 | README 取本仓版本；CLI、图标／许可证及 docs 自动合并 |
@@ -105,9 +105,9 @@ completed_at: null
 - 第二次实际还有 format.ts 冲突，不只编排方草稿提到的文件；保留 locale 格式化，接入上游最大余数法。
 - 每次冲突解决后核查无冲突标记、禁止代码引用或受保护文件改动；证据 `reports/pick1-boundary.json`、`pick2-boundary.json`、`pick3-boundary.json`、`pick5-boundary.json`。
 - Git 默认 commit message cleanup 将第三个提交正文中 `#104 computes and ships ...` 当作注释去掉。已对本会话尚未推送的本地提交执行仅 reword 的交互式 rebase，命令级设置 `core.commentChar=;` 与 `commit.cleanup=verbatim`，恢复完整原文；作者与 trailer 保留，没有改 remote／main／全局配置。
-- s1 仅 reword 前后的代码 tree 均为 `5314e2dbae97634bba09fa7ef469a6c73bc887aa`，该历史证据不代表 s2 新代码树。旧检查在 `reports/pre-reword/` 与 `reports/pre-s2/` 原样保留；s2 全部功能命令已在新代码 tip 重跑。`reports/final-commit-provenance.json` 逐一记录 SHA 映射、补丁／消息一致性、作者保留与 committer 核对。
+- s1 仅 reword 前后的代码 tree 均为 `5314e2dbae97634bba09fa7ef469a6c73bc887aa`（push 前已改写，不在历史中，证据见 `reports/pre-s2/`），该历史证据不代表 s2 新代码树。旧检查在 `reports/pre-reword/` 与 `reports/pre-s2/` 原样保留；s2 全部功能命令已在新代码 tip 重跑。`reports/final-commit-provenance.json` 逐一记录 SHA 映射、补丁／消息一致性、作者保留与 committer 核对。
 - Paseo 新文件、SVG 与许可证与上游原样一致；lib.rs 仅注册模块，scanner 仅将额外路径集合初始化接到 Paseo；无 style 提交，因为新增代码没有格式失败。
-- s2 交互式 rebase 只改写 SpeedTier 本地化提交的三处样式与消息；其余五个 cherry-pick 和两个本地化提交的补丁与消息逐项一致，`#104` 正文完整保留。上游 SpeedTier diff 仅剩 i18n，见 `reports/final-speedtier-upstream-diff.json`；最终历史比对见 `reports/final-range-diff.json`。
+- s2 交互式 rebase 只改写 SpeedTier 本地化提交的三处样式与消息；s2 的 range-diff 证明其余五个 cherry-pick 和两个本地化提交的补丁与消息均与 s1 一致，不是与上游一致，`#104` 正文完整保留，见 `reports/final-range-diff.json`。与上游的样式比对覆盖 SpeedTier 与 ProfileToday（s3 已还原 ProfileToday fast 档条颜色），无剩余样式差异；除本仓基线已有的 isToday／标题日期显示逻辑外，剩余差异仅 i18n／locale 格式化（含 c0002de share 合并的 useFormat），见 `reports/final-speedtier-upstream-diff.json` 与 `reports/s3-upstream-style-diff.json`。
 
 ## 本地化提交
 
@@ -193,9 +193,11 @@ c0002de 的本地化在冲突提交内完成，无需另拆自动合并文案提
 | 1 | ping | openai-codex/gpt-6-astra（high） | 1／0 | 连通性检查（--no-tools） | `~/.omp/logs/tokens-v104-cd/ping/sessions/2026-10-24T14-42-23-101Z_01a16e5c-e0fd-7013-a8f3-8c0ce45f04ab.jsonl` |
 | 2 | s1 main | openai-codex/gpt-6-astra（high） | 82／151 | cherry-pick 5 个提交、i18n 改写、task.md、本地检查 | `~/.omp/logs/tokens-v104-cd/s1/sessions/` |
 | 3 | s2 ping | openai-codex/gpt-6-astra（high） | 1／0 | 连通性检查（--no-tools） | `~/.omp/logs/tokens-v104-cd/s2-ping/sessions/2026-10-24T15-11-32-899Z_01a16e77-9423-7443-b090-581c5b4c6834.jsonl` |
-| 4 | s2 修正（本会话） | openai-codex/gpt-6-astra（high） | 未知（落盘时本轮尚未结束），实际计数见群内交付报告 | 还原 SpeedTier 三处样式、更新 SHA、重跑检查 | `~/.omp/logs/tokens-v104-cd/s2/sessions/` |
+| 4 | s2 修正 | openai-codex/gpt-6-astra（high） | 28／69 | 还原 SpeedTier 三处样式、更新 SHA、重跑检查 | `~/.omp/logs/tokens-v104-cd/s2/sessions/` |
+| 5 | s3 ping | openai-codex/gpt-6-astra（high） | 1／0 | 连通性检查（--no-tools） | `~/.omp/logs/tokens-v104-cd/s3-ping/sessions/2026-10-24T15-37-30-913Z_01a16e8f-5a21-7476-ad09-906f40727362.jsonl` |
+| 6 | s3 修正（本会话） | openai-codex/gpt-6-astra（high） | 未知（落盘时本轮尚未结束），实际计数见群内交付报告 | 还原 ProfileToday fast 档条颜色、恢复 22:55 事件原文、标注不在历史中的 SHA | `~/.omp/logs/tokens-v104-cd/s3/sessions/` |
 
-所有编辑和提交由 omp 会话完成；push 与开 PR 由编排方在 omp 之外执行。
+所有编辑和提交由 omp 会话完成；push 与开 PR 已由编排方在 omp 之外完成，PR #15 已开（https://github.com/KunoLu/tokens/pull/15）。
 
 ## 行为变更说明
 
@@ -207,13 +209,14 @@ c0002de 的本地化在冲突提交内完成，无需另拆自动合并文案提
 
 ## 下一步
 
-由编排方在 omp 外执行 push 与开 PR，进入独立人工评审；保持 checking。真实 profile UI、键盘 tooltip 与中文布局需要有数据库的环境补验。基线 fmt 与 lint 警告继续披露。Paseo README 说明留作后续发布 PR F 可补充项；PR E、版本与发布不在本会话。ignored reports、node_modules、cli/target 和本地状态不会随 Git 保存，跨环境恢复须保留报告或重新验证。
+push 与开 PR 已由编排方在 omp 之外完成，PR #15 已开（https://github.com/KunoLu/tokens/pull/15）；下一步在 PR #15 上进行独立人工评审，保持 checking。真实 profile UI、键盘 tooltip 与中文布局需要有数据库的环境补验。基线 fmt 与 lint 警告继续披露。Paseo README 说明留作后续发布 PR F 可补充项；PR E、版本与发布不在本会话。ignored reports、node_modules、cli/target 和本地状态不会随 Git 保存，跨环境恢复须保留报告或重新验证。
 
 ## 状态事件
 
 | at | from | to | reason | evidence |
 |---|---|---|---|---|
 | 2026-10-24T22:45:48.957899+08:00 | planned | in-progress | 分支与范围核对完成，实现前源码安全核查与门禁已明确 | 基线 66a390f4e2657f005748a5a6f7e8d5329a2bbf45；profile locale hooks；scanner extra paths；上游 Paseo 五个回归测试 |
-| 2026-10-24T22:55:25.830875+08:00 | in-progress | checking | 五个上游提交与三个本地化提交完成，s1 代码 tip 本地验收完成；保留基线 fmt、真实 UI 与独立复核缺口 | s1 原始代码 SHA 与结果保存在 reports/pre-s2/final-*.json；Rust 2448 passed/0 failed/4 ignored；web 31 pass/0 fail；fmt 与基线 18 文件及规范化诊断一致 |
-| 2026-10-24T23:16:26.003151+08:00 | checking | in-progress | 编排方整理，Lord 2026-10-24 23:11 群内裁定 (a)；还原原本地化提交中 SpeedTier 三处非 i18n 样式，整理 s2 检查与记录 | 原提交 f23d29a7b6ba8ba22ebeb6c60e9d2980aeaca2a4 → 0bcf65d0c36fdda389624479c49ef99657cb82ba；reports/final-speedtier-upstream-diff.json；reports/final-commit-provenance.json |
+| 2026-10-24T22:55:25.830875+08:00 | in-progress | checking | 五个上游提交与三个本地化提交完成，最终代码 tip 本地验收完成；保留基线 fmt、真实 UI 与独立复核缺口 | 代码 tip 5988bb359812c30c587ac3df071985b4a901eb2a；Rust 2448 passed/0 failed/4 ignored；web 31 pass/0 fail；fmt 与基线 18 文件及规范化诊断一致；reports/final-*.json |
+| 2026-10-24T23:16:26.003151+08:00 | checking | in-progress | 编排方整理，Lord 2026-10-24 23:11 群内裁定 (a)；还原原本地化提交中 SpeedTier 三处非 i18n 样式，整理 s2 检查与记录 | 原提交 f23d29a7b6ba8ba22ebeb6c60e9d2980aeaca2a4（push 前已改写，不在历史中，证据见 `reports/pre-s2/`） → 0bcf65d0c36fdda389624479c49ef99657cb82ba；reports/final-speedtier-upstream-diff.json；reports/final-commit-provenance.json；22:55 事件引用的代码 tip 在 push 前因裁定 (a) 改写，已不在历史中，s2 前的证据见 `reports/pre-s2/` |
 | 2026-10-24T23:17:45.437104+08:00 | in-progress | checking | s2 三处样式还原与记录整理完成；新代码 tip 的功能检查和上游差异核对通过，fmt 仅有既有基线失败，独立复核与真实 UI 缺口保留 | 代码 tip 75babee30483b738e109ecee670dfa3f1b325f4b；Rust 2448 passed/0 failed/4 ignored；web 31 pass/0 fail；16 组组件渲染 smoke；fmt 18 文件及规范化诊断与基线一致；reports/final-*.json |
+| 2026-10-24T23:42:13.527631+08:00 | checking | checking | 编排方整理，Reviewy 对 d271cadcaf207236e6d56e3a3e91685f248577d8 判定 NOT CLEAN，本轮按裁定 (a) 还原 ProfileToday fast 档条颜色、恢复 22:55 事件原文（Lord 下令的例外）、标注不在历史中的 SHA；独立复核与真实 UI 缺口保留 | 提交 A 600010ab766cf29844b6707cdb087e56dc539531；s3 web typecheck exit 0；lint exit 0、0 error／1 既有 warning；test exit 0、31 pass／0 fail、4539 expect、5 文件；reports/s3-upstream-style-diff.json；reports/s3-web-*.json |
