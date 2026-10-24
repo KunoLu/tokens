@@ -4,11 +4,11 @@ id: 20261025-v104-e-cloud-sessions
 workflow_mode: strict
 mode_source: user
 mode_note: 用户 2026-10-24 20:09 群内确认（最终方案），Lord 记录；编排方整理 PR E 范围；本会话保持 strict。
-status: "checking"
+status: "done"
 branch: feat/v1.0.4-e-cloud-sessions
 created_at: '2026-10-25T00:15:29.801023+08:00'
-updated_at: "2026-10-25T00:46:41.281459+08:00"
-completed_at: null
+updated_at: "2026-10-25T01:00:17.259213+08:00"
+completed_at: "2026-10-25T01:00:17.259213+08:00"
 ---
 # PR E — Claude Code cloud sessions 上游同步
 
@@ -222,7 +222,7 @@ e9347a85167d21e391a2e7741cd47913ece03b94 640 <60886434+KunoLu@users.noreply.gith
 | 1 | ping | openai-codex/gpt-6-astra（high） | 1／0 | 连通性检查（--no-tools） | `~/.omp/logs/tokens-v104-e/ping/sessions/2026-10-24T16-12-52-480Z_01a16eaf-b980-7109-ab44-cdfea8087d26.jsonl` |
 | 2 | s1 main | openai-codex/gpt-6-astra（high） | 52／125 | cherry-pick 3 个提交、i18n 改写、测试、task.md、本地检查 | `~/.omp/logs/tokens-v104-e/s1/sessions/` |
 | 3 | s2 ping | openai-codex/gpt-6-astra（high） | 1／0 | 连通性检查（--no-tools） | `~/.omp/logs/tokens-v104-e/s2-ping/sessions/2026-10-24T16-45-06-101Z_01a16ecd-3ab5-725f-90bc-7543f634e3a4.jsonl` |
-| 4 | s2 修正（本会话） | openai-codex/gpt-6-astra（high） | 未知（落盘时本轮尚未结束），实际计数见群内交付报告 | task.md 评审修正：豁免原话、desc 裁定依据、push 措辞、模型记录 | `~/.omp/logs/tokens-v104-e/s2/sessions/` |
+| 4 | s2 修正 | openai-codex/gpt-6-astra（high） | 10／20 | task.md 评审修正：豁免原话、desc 裁定依据、push 措辞、模型记录 | `~/.omp/logs/tokens-v104-e/s2/sessions/` |
 
 所有编辑和提交由 omp 会话完成；分支已由编排方在 omp 之外 push，PR #16 已开（head 238b0dd）；本轮 s2 提交由编排方 push。
 
@@ -244,3 +244,4 @@ e9347a85167d21e391a2e7741cd47913ece03b94 640 <60886434+KunoLu@users.noreply.gith
 | 2026-10-25T00:17:09.508317+08:00 | planned | in-progress | 源码与上游补丁核对、BDD 规格及实现前门禁完成，开始顺序同步 | 基线 c868c777f697ece8be839ecb7c017140ceb344a3；reports/red-cloud-labels.json；web/features/cloud-sessions.feature；私密关口和设备标签源码 |
 | 2026-10-25T00:27:14.227674+08:00 | in-progress | checking | 三个上游同步、四项本仓回归、最小格式修正及最终代码 tip 本地检查完成；保留基线 fmt、真实 DB/UI 与独立评审缺口 | 代码 tip 6a61cd5b8f23611e820b79d3e6294c6f288c7150；Rust 2456 passed/0 failed/4 ignored；Bun 51 pass/0 fail；fmt 18 文件/37 hunk 与基线实际修改列表相等；reports/final-*.json；reports/fmt-comparison.json |
 | 2026-10-25T00:46:41.281459+08:00 | checking | checking | 编排方整理，Reviewy 对 238b0dd37bae36f59cf5cf7745ffacc9b6609f5f 判定 NOT CLEAN（blocker：:227 豁免归因缺日期、括号内须为用户原话逐字引用），按 Lord 2026-10-25 00:31 群内裁定补 settings.devices.desc 采用上游的依据，并更新过时 push 措辞与模型记录；不改代码。 | PR #16 head 238b0dd37bae36f59cf5cf7745ffacc9b6609f5f；本轮仅 task.md；编排方在新 tip 上跑 web typecheck 与 bun test（只改文档，未重跑 cargo 全套）。 |
+| 2026-10-25T01:00:17.259213+08:00 | checking | done | 编排方整理，PR #16 已 squash merge，E 的实现与评审修正已合入 main；补 s2 计数。 | PR https://github.com/KunoLu/tokens/pull/16；head 3e54a7b4c868ceeaf4f2180ccbda4c43c2814d8e；merge fab72885b91a09742901d3c2e59652491e5cf0eb；%cI 2026-10-25T00:53:10+08:00；mergedAt 2026-10-25T00:53:10+08:00；Reviewy CLEAN @ 3e54a7b（群内 2026-10-25 00:51）。 |

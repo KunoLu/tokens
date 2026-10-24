@@ -4,11 +4,11 @@ id: 20261024-v104-a-antigravity-cli
 workflow_mode: strict
 mode_source: user
 mode_note: 用户 2026-10-24 20:09 群内确认（最终方案），Lord 记录；本会话只做 PR A，保持 strict。
-status: "checking"
+status: "done"
 branch: feat/v1.0.4-a-antigravity-cli
 created_at: "2026-10-24T20:13:27+08:00"
-updated_at: "2026-10-24T20:27:31+08:00"
-completed_at: null
+updated_at: "2026-10-25T01:00:33.536851+08:00"
+completed_at: "2026-10-25T01:00:33.536851+08:00"
 ---
 # PR A — Antigravity CLI 上游同步
 
@@ -20,7 +20,7 @@ completed_at: null
 
 - 用户 2026-10-24 20:09 群内确认（最终方案），Lord 记录。
 - 按顺序以 `git cherry-pick -x` 拣入 `2dc82fe1785d9b651c17a6400b936a07f5a2aa47`、`797b4a45c4ffd813ab91b9afdbfd52db2e33f6a1`、`2a22dc670047af4ae1fcb9879c1fa2ec863466e2`、`119c98d308d14d52b9d1b4552356fc1d47b07875`。
-- 后续 B/C/D/E/F 不在本 PR；不拣版本、CI 或部署提交；不 push、不开 PR、不 merge、不发布。
+- 后续 B/C/D/E/F 不在本 PR；不拣版本、CI 或部署提交；不 push、不开 PR、不 merge、不发布。（注：其中“不 push、不开 PR、不 merge、不发布”描述的是当时本 omp 会话自身的限制；push 与开 PR 由编排方在 omp 之外完成，PR #13 已合并。编排方整理）
 - 不启动子代理、不访问生产、不读取或设置真实密钥；背景分析目录只读。
 - strict 为本次明确选择。需求明确，未完整调用 grill-with-docs；没有领域模型歧义。
 
@@ -146,7 +146,7 @@ completed_at: null
 | # | 会话 | 模型 | 请求／工具调用 | 产出 | 会话记录 |
 |---|---|---|---|---|---|
 | 1 | ping | openai-codex/gpt-6-astra（high） | 1／0 | 连通性检查（--no-tools） | `~/.omp/logs/tokens-v104-a/ping/sessions/2026-10-24T12-10-41-733Z_01a16dd2-00c5-7730-89a6-0c6643b1e16a.jsonl` |
-| 2 | s1 main（本会话） | openai-codex/gpt-6-astra（high） | 未知（落盘时本轮尚未结束），实际计数见群内交付报告 | cherry-pick 4 个提交、task.md、本地检查 | `~/.omp/logs/tokens-v104-a/s1/sessions/` |
+| 2 | s1 main | openai-codex/gpt-6-astra（high） | 50／127 | cherry-pick 4 个提交、task.md、本地检查 | `~/.omp/logs/tokens-v104-a/s1/sessions/` |
 
 所有编辑和提交由 omp 会话完成；push 与开 PR 由编排方在 omp 之外执行。
 
@@ -167,3 +167,4 @@ completed_at: null
 |---|---|---|---|---|
 | 2026-10-24T20:13:29.615254+08:00 | planned | in-progress | 范围、分支和四个单父补丁已核对，开始实现前安全核查与同步 | origin/main 121680e23236d0762e9099febd61eb1685c72e26；源码、补丁和本地基线检查 |
 | 2026-10-24T20:27:31+08:00 | in-progress | checking | PR A 功能回归与 CLI smoke 通过；全仓 fmt 仅剩 origin/main 已复现的基线问题，等待外部 PR 流程而非完成发布 | 代码 tip b60786c87cef682d1b17aa26b915c75fa4c4df61；cargo test 2436 passed/0 failed/4 ignored；clippy/check/build 通过；web 19 passed；CLI smoke 通过；reports/final-cargo-fmt.json 为基线失败 |
+| 2026-10-25T01:00:33.536851+08:00 | checking | done | 编排方整理，PR #13 已 squash merge，A 的实现已合入 main；在原范围 :23 就地加注会话限制，并补 s1 计数。 | PR https://github.com/KunoLu/tokens/pull/13；head b6d26e0de560affde6f195ec83999874550f9843；merge df417b26c468f07491f486f230f01936c6b88742；%cI 2026-10-24T22:01:59+08:00；mergedAt 2026-10-24T22:01:59+08:00；Reviewy CLEAN @ b6d26e0（群内 2026-10-24 20:40，f-items.md 转述 bot 记忆）。 |
