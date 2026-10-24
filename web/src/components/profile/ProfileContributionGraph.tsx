@@ -24,7 +24,6 @@ import type {
   TokenBreakdown,
 } from "@/lib/types";
 import { getSpeedTierRows, mergeSpeedUsage } from "@/lib/speedUsage";
-import { formatWholePercents } from "@/lib/format";
 import {
   DEFAULT_PALETTE,
   getDarkGradeColors,
@@ -36,7 +35,7 @@ import {
 import { formatCurrency, formatTokenCount } from "@/lib/utils";
 import { tw } from "@/lib/tw";
 import { cn } from "@/lib/utils";
-import { intlTag, PALETTE_LABEL_KEYS, t as translate, useI18n, type Locale, type Translate, type TranslationKey } from "@/lib/i18n";
+import { intlTag, PALETTE_LABEL_KEYS, t as translate, useFormat, useI18n, type Locale, type Translate, type TranslationKey } from "@/lib/i18n";
 
 export interface ProfileContributionGraphProps {
   breakdownId?: string;
@@ -1588,6 +1587,8 @@ function modelMeta(
 }
 
 function ModelSpeedTiers({ model }: { model: ContributionModelDetail }) {
+  const { t, locale } = useI18n();
+  const { formatWholePercents } = useFormat();
   const tiers = getSpeedTierRows(model.speedUsage, model.totalTokens, model.messages);
   if (tiers.length === 0) return null;
   const percents = formatWholePercents(
@@ -1597,12 +1598,12 @@ function ModelSpeedTiers({ model }: { model: ContributionModelDetail }) {
   return (
     <SpeedTierList>
       {tiers.map((tier, index) => {
-        const metrics = [`${formatTokenCount(tier.tokens)} tokens`, percents[index]];
+        const metrics = [t("tokens.count", { n: formatTokenCount(tier.tokens, locale) }), percents[index]];
         if (tier.messages > 0) {
           metrics.push(
-            `${tier.messages.toLocaleString("en-US")} ${
-              tier.messages === 1 ? "message" : "messages"
-            }`,
+            t(tier.messages === 1 ? "graph.messagesCountOne" : "graph.messagesCountMany", {
+              n: tier.messages.toLocaleString(intlTag(locale)),
+            }),
           );
         }
         return (
