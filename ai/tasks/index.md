@@ -8,6 +8,7 @@
 - [20261024-v104-a-antigravity-cli](20261024-v104-a-antigravity-cli/task.md)
 - [20261024-v104-b-speed-backend](20261024-v104-b-speed-backend/task.md)
 - [20261024-v104-cd-profile-ui-paseo](20261024-v104-cd-profile-ui-paseo/task.md)
+- [20261025-v104-e-cloud-sessions](20261025-v104-e-cloud-sessions/task.md)
 - [brand-sweep](archive/2026-Q3/brand-sweep/task.md)
 - [prod-docker-assets](archive/2026-Q3/prod-docker-assets/task.md)
 - [scripts-ref-and-automation](archive/2026-Q3/scripts-ref-and-automation/task.md)
