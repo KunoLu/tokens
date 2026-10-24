@@ -6,13 +6,21 @@
 // and update-time normalization. Keeping them here prevents a class of bugs
 // where one endpoint accepts an empty string and another doesn't.
 
+import { parseCloudDeviceKey } from "./cloud";
+
 export const LEGACY_DEVICE_KEY = "legacy-default";
 
-/** Fallback label used when `submitted_devices.display_name` is null/empty. */
+/**
+ * Label for a device: its stored name, or a fallback when
+ * `submitted_devices.display_name` is null/empty. A cloud session device
+ * always shows its provider's fixed label, whatever name is stored for it.
+ */
 export function deviceDisplayLabel(
   deviceKey: string,
   displayName: string | null | undefined
 ): string {
+  const cloud = parseCloudDeviceKey(deviceKey);
+  if (cloud) return cloud.label;
   const trimmed = displayName?.trim();
   if (trimmed) return trimmed;
   if (deviceKey === LEGACY_DEVICE_KEY) return "Legacy submissions";
@@ -31,6 +39,9 @@ export function publicDeviceDisplayLabel(
   deviceKey: string,
   displayName: string | null | undefined,
 ): string {
+  // A cloud session's fixed label is ours: never masked, never overridden.
+  const cloud = parseCloudDeviceKey(deviceKey);
+  if (cloud) return cloud.label;
   const trimmed = displayName?.trim();
   return trimmed ? maskDeviceName(trimmed) : deviceDisplayLabel(deviceKey, displayName);
 }
