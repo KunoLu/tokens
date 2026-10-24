@@ -7,7 +7,7 @@ mode_note: 用户 2026-10-24 20:09 群内确认（最终方案），Lord 记录�
 status: "checking"
 branch: feat/v1.0.4-e-cloud-sessions
 created_at: '2026-10-25T00:15:29.801023+08:00'
-updated_at: "2026-10-25T00:27:14.227674+08:00"
+updated_at: "2026-10-25T00:46:41.281459+08:00"
 completed_at: null
 ---
 # PR E — Claude Code cloud sessions 上游同步
@@ -21,7 +21,7 @@ completed_at: null
 - 用户 2026-10-24 20:09 群内确认（最终方案），Lord 记录。
 - 编排方整理（来自 Lord/Reviewy 裁定，具体时间不可考）：只做 PR E；三次 cherry-pick 保留原作者与来源 trailer；文案分别本地化；测试与文档独立提交。
 - strict；未完整调用 grill-with-docs：提交、行为规则、范围与验收明确，无领域歧义。
-- 本 omp 会话自身不执行 push 和开 PR；push 与开 PR 由编排方在 omp 之外执行。不启动子代理/advisor，不改 Git config、remote、main 或全局配置。
+- 本 omp 会话自身不执行 push 和开 PR；分支已由编排方在 omp 之外 push，PR https://github.com/KunoLu/tokens/pull/16 已开，开 PR 时 head 为 `238b0dd37bae36f59cf5cf7745ffacc9b6609f5f`；本轮修正提交同样由编排方 push。不启动子代理/advisor，不改 Git config、remote、main 或全局配置。
 - README、双语 CHANGELOG、版本、packages、workflow、vercel、bun.lock、钉版脚本引用不改。若上游包含 schema/migration 或新增依赖则停止。
 
 ## 进度
@@ -130,6 +130,8 @@ completed_at: null
 | devices.cloud.sessions（新增） | {n} sessions | {n} 个会话 |
 | settings.devices.desc（修改） | 上游完整设备掩码与按 provider 折叠说明 | 对应中文翻译 |
 
+`settings.devices.desc`（en/zh）采用上游文案；依据：该文案属于上游 31d7688 本身，且与本仓既有的公开设备名掩码行为一致；Lord 2026-10-25 00:31 群内裁定。
+
 新增 2 key 在 en/zh 各存在一次，全部字典 key 对齐、中文含中文。ProfileDevices 和 SettingsClient 共用计数 key，数字使用 intlTag(locale)。服务端固定产品标签 Claude Code cloud／Codex cloud 按上游保留英文，不显示自定义名、不打掩码。API 错误沿用英文：现有改名路由的 Not authenticated、Invalid device id、Device not found 以及 submission 校验均不走 i18n；未另造服务端翻译约定。证据：`reports/i18n-boundary-audit.json`。
 
 ## 丢弃内容
@@ -151,7 +153,7 @@ completed_at: null
 | b39ac7d SettingsClient | 保留 avatar import、Rename 翻译 | 本仓头像／i18n 约定 |
 | b39ac7d shared.ts | cloud 分支之后仍用本仓 trimmed 变量及 mask 调用；toIsoString 保留原位置 | 普通设备掩码不变；cloud 固定标签与上游一致 |
 | b39ac7d publicProfileDevices | 保留单行 shared import、提前的 visibilityHeaders 及最终响应参数；保留 isPrivate 与 getViewerAccess 关口 | 私密保护顺序不可改变；cloud 查询与映射按上游完整引入 |
-| 31d7688 SettingsClient／t.ts | 保留 avatar、locale、tokens key；上游描述转到既有字典 key，计数复用新 key | 本仓 i18n，不改变分组／布局 |
+| 31d7688 SettingsClient／t.ts | 保留 avatar、locale、tokens key；上游描述转到既有字典 key，计数复用新 key | 本仓 i18n，不改变分组／布局；`settings.devices.desc`（en/zh）采用上游文案；依据：该文案属于上游 31d7688 本身，且与本仓既有的公开设备名掩码行为一致；Lord 2026-10-25 00:31 群内裁定。 |
 | 三次 cherry-pick 消息 | 增加来源 trailer | git cherry-pick -x 溯源要求 |
 | 两个新增 test 文件 | 四项本仓回归 | 验收私密顺序、固定标签与普通设备掩码；无生产 seam |
 | 6a61cd5 cloud.rs | 3 个新代码格式 hunk：remote session env 链、control-char 错误、hash 断言 | 消除本 PR 新增 fmt 问题 |
@@ -218,20 +220,22 @@ e9347a85167d21e391a2e7741cd47913ece03b94 640 <60886434+KunoLu@users.noreply.gith
 | # | 会话 | 模型 | 请求／工具调用 | 产出 | 会话记录 |
 |---|---|---|---|---|---|
 | 1 | ping | openai-codex/gpt-6-astra（high） | 1／0 | 连通性检查（--no-tools） | `~/.omp/logs/tokens-v104-e/ping/sessions/2026-10-24T16-12-52-480Z_01a16eaf-b980-7109-ab44-cdfea8087d26.jsonl` |
-| 2 | s1 main（本会话） | openai-codex/gpt-6-astra（high） | 未知（落盘时本轮尚未结束），实际计数见群内交付报告 | cherry-pick 3 个提交、i18n 改写、测试、task.md、本地检查 | `~/.omp/logs/tokens-v104-e/s1/sessions/` |
+| 2 | s1 main | openai-codex/gpt-6-astra（high） | 52／125 | cherry-pick 3 个提交、i18n 改写、测试、task.md、本地检查 | `~/.omp/logs/tokens-v104-e/s1/sessions/` |
+| 3 | s2 ping | openai-codex/gpt-6-astra（high） | 1／0 | 连通性检查（--no-tools） | `~/.omp/logs/tokens-v104-e/s2-ping/sessions/2026-10-24T16-45-06-101Z_01a16ecd-3ab5-725f-90bc-7543f634e3a4.jsonl` |
+| 4 | s2 修正（本会话） | openai-codex/gpt-6-astra（high） | 未知（落盘时本轮尚未结束），实际计数见群内交付报告 | task.md 评审修正：豁免原话、desc 裁定依据、push 措辞、模型记录 | `~/.omp/logs/tokens-v104-e/s2/sessions/` |
 
-所有编辑和提交由 omp 会话完成；push 与开 PR 由编排方在 omp 之外执行。
+所有编辑和提交由 omp 会话完成；分支已由编排方在 omp 之外 push，PR #16 已开（head 238b0dd）；本轮 s2 提交由编排方 push。
 
 ## 安全说明
 
-- 生产只读 `cloud_` 查询豁免：用户 20:02 群内确认（生产只有本人一个用户，从没把设备命名成 `cloud_…`），Lord 记录。本 PR 未查询任何生产数据库。
+- 生产只读 `cloud_` 查询豁免：用户 2026-10-24 20:02 群内确认（「目前生产（tokens.camp) 肯定没有人把设备命名成 cloud_…，因为目前生产只有我本人一个用户，我从没有这样做过，所以可以不需要对生产做只读查询就能确认了。」），Lord 记录。本 PR 未查询任何生产数据库。
 - 以后启用时必须单独创建一个 cloud 专用 token，绝不复用本机 token。
 - 不读取或记录真实 token，不启用 cloud、不建库、不连接生产。背景分析、基线导出及工具目录只读。
 - reports 与 .sbtd 已通过 git check-ignore，未跟踪；持久化使用 TaskStore，时间来自本机带时区时钟。
 
 ## 下一步
 
-本地实现、回归及边界检查完成，最终状态保持 checking、completed_at null；由编排方在 omp 之外执行 push／开 PR，并在 docs 后最终 HEAD 完整重跑检查、安排独立评审。真实数据库、cloud 部署／启用及 UI 另行验收；README 段落和上游域名／安装措辞留给 F 或之后。ignored reports、node_modules、cli/target 与 .sbtd 不随 Git 保存，跨环境恢复需保留报告或重跑；本会话不承诺自动恢复。
+本地实现、回归及边界检查完成，最终状态保持 checking、completed_at null；编排方已在 omp 之外 push 并开 PR #16（head 238b0dd），已在该 HEAD 完整重跑检查；Reviewy 判定 NOT CLEAN（仅 task.md），本轮 s2 修正后待独立复核。真实数据库、cloud 部署／启用及 UI 另行验收；README 段落和上游域名／安装措辞留给 F 或之后。ignored reports、node_modules、cli/target 与 .sbtd 不随 Git 保存，跨环境恢复需保留报告或重跑；本会话不承诺自动恢复。
 
 ## 状态事件
 
@@ -239,3 +243,4 @@ e9347a85167d21e391a2e7741cd47913ece03b94 640 <60886434+KunoLu@users.noreply.gith
 |---|---|---|---|---|
 | 2026-10-25T00:17:09.508317+08:00 | planned | in-progress | 源码与上游补丁核对、BDD 规格及实现前门禁完成，开始顺序同步 | 基线 c868c777f697ece8be839ecb7c017140ceb344a3；reports/red-cloud-labels.json；web/features/cloud-sessions.feature；私密关口和设备标签源码 |
 | 2026-10-25T00:27:14.227674+08:00 | in-progress | checking | 三个上游同步、四项本仓回归、最小格式修正及最终代码 tip 本地检查完成；保留基线 fmt、真实 DB/UI 与独立评审缺口 | 代码 tip 6a61cd5b8f23611e820b79d3e6294c6f288c7150；Rust 2456 passed/0 failed/4 ignored；Bun 51 pass/0 fail；fmt 18 文件/37 hunk 与基线实际修改列表相等；reports/final-*.json；reports/fmt-comparison.json |
+| 2026-10-25T00:46:41.281459+08:00 | checking | checking | 编排方整理，Reviewy 对 238b0dd37bae36f59cf5cf7745ffacc9b6609f5f 判定 NOT CLEAN（blocker：:227 豁免归因缺日期、括号内须为用户原话逐字引用），按 Lord 2026-10-25 00:31 群内裁定补 settings.devices.desc 采用上游的依据，并更新过时 push 措辞与模型记录；不改代码。 | PR #16 head 238b0dd37bae36f59cf5cf7745ffacc9b6609f5f；本轮仅 task.md；编排方在新 tip 上跑 web typecheck 与 bun test（只改文档，未重跑 cargo 全套）。 |
