@@ -4,11 +4,11 @@ id: 20261024-v104-cd-profile-ui-paseo
 workflow_mode: strict
 mode_source: user
 mode_note: 用户 2026-10-24 20:09 群内确认（最终方案），Lord 记录；编排方整理 PR C+D 范围，本会话保持 strict。
-status: "checking"
+status: "done"
 branch: feat/v1.0.4-cd-profile-ui-paseo
 created_at: '2026-10-24T22:44:59.996064+08:00'
-updated_at: "2026-10-24T23:42:13.527631+08:00"
-completed_at: null
+updated_at: "2026-10-25T01:01:14.543152+08:00"
+completed_at: "2026-10-25T01:01:14.543152+08:00"
 ---
 # PR C+D — profile UI 与 Paseo 上游同步
 
@@ -195,7 +195,7 @@ c0002de 的本地化在冲突提交内完成，无需另拆自动合并文案提
 | 3 | s2 ping | openai-codex/gpt-6-astra（high） | 1／0 | 连通性检查（--no-tools） | `~/.omp/logs/tokens-v104-cd/s2-ping/sessions/2026-10-24T15-11-32-899Z_01a16e77-9423-7443-b090-581c5b4c6834.jsonl` |
 | 4 | s2 修正 | openai-codex/gpt-6-astra（high） | 28／69 | 还原 SpeedTier 三处样式、更新 SHA、重跑检查 | `~/.omp/logs/tokens-v104-cd/s2/sessions/` |
 | 5 | s3 ping | openai-codex/gpt-6-astra（high） | 1／0 | 连通性检查（--no-tools） | `~/.omp/logs/tokens-v104-cd/s3-ping/sessions/2026-10-24T15-37-30-913Z_01a16e8f-5a21-7476-ad09-906f40727362.jsonl` |
-| 6 | s3 修正（本会话） | openai-codex/gpt-6-astra（high） | 未知（落盘时本轮尚未结束），实际计数见群内交付报告 | 还原 ProfileToday fast 档条颜色、恢复 22:55 事件原文、标注不在历史中的 SHA | `~/.omp/logs/tokens-v104-cd/s3/sessions/` |
+| 6 | s3 修正 | openai-codex/gpt-6-astra（high） | 24／55 | 还原 ProfileToday fast 档条颜色、恢复 22:55 事件原文、标注不在历史中的 SHA | `~/.omp/logs/tokens-v104-cd/s3/sessions/` |
 
 所有编辑和提交由 omp 会话完成；push 与开 PR 已由编排方在 omp 之外完成，PR #15 已开（https://github.com/KunoLu/tokens/pull/15）。
 
@@ -220,3 +220,4 @@ push 与开 PR 已由编排方在 omp 之外完成，PR #15 已开（https://git
 | 2026-10-24T23:16:26.003151+08:00 | checking | in-progress | 编排方整理，Lord 2026-10-24 23:11 群内裁定 (a)；还原原本地化提交中 SpeedTier 三处非 i18n 样式，整理 s2 检查与记录 | 原提交 f23d29a7b6ba8ba22ebeb6c60e9d2980aeaca2a4（push 前已改写，不在历史中，证据见 `reports/pre-s2/`） → 0bcf65d0c36fdda389624479c49ef99657cb82ba；reports/final-speedtier-upstream-diff.json；reports/final-commit-provenance.json；22:55 事件引用的代码 tip 在 push 前因裁定 (a) 改写，已不在历史中，s2 前的证据见 `reports/pre-s2/` |
 | 2026-10-24T23:17:45.437104+08:00 | in-progress | checking | s2 三处样式还原与记录整理完成；新代码 tip 的功能检查和上游差异核对通过，fmt 仅有既有基线失败，独立复核与真实 UI 缺口保留 | 代码 tip 75babee30483b738e109ecee670dfa3f1b325f4b；Rust 2448 passed/0 failed/4 ignored；web 31 pass/0 fail；16 组组件渲染 smoke；fmt 18 文件及规范化诊断与基线一致；reports/final-*.json |
 | 2026-10-24T23:42:13.527631+08:00 | checking | checking | 编排方整理，Reviewy 对 d271cadcaf207236e6d56e3a3e91685f248577d8 判定 NOT CLEAN，本轮按裁定 (a) 还原 ProfileToday fast 档条颜色、恢复 22:55 事件原文（Lord 下令的例外）、标注不在历史中的 SHA；独立复核与真实 UI 缺口保留 | 提交 A 600010ab766cf29844b6707cdb087e56dc539531；s3 web typecheck exit 0；lint exit 0、0 error／1 既有 warning；test exit 0、31 pass／0 fail、4539 expect、5 文件；reports/s3-upstream-style-diff.json；reports/s3-web-*.json |
+| 2026-10-25T01:01:14.543152+08:00 | checking | done | 编排方整理，PR #15 已 squash merge，C+D 的实现与评审修正已合入 main；补 s3 计数。补记：23:42 事件那一轮同时在 23:16 事件行加了就地注释，标注原提交在 push 前已改写、不在历史中，证据见 reports/pre-s2/；23:42 事件 reason 未写到，此处补记，原事件行保持不动。 | PR https://github.com/KunoLu/tokens/pull/15；head 5fd062b0778850a3d059dd77b7ead2b0a4607c5d；merge c868c777f697ece8be839ecb7c017140ceb344a3；%cI 2026-10-25T00:09:53+08:00；mergedAt 2026-10-25T00:09:54+08:00；Reviewy CLEAN @ 5fd062b（群内 2026-10-25 00:09，f-items.md 转述 bot 记忆）；23:16 与 23:42 原事件行。 |
