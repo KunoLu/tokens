@@ -173,25 +173,6 @@ this fork does not republish them as `27.x`.
 
 </details>
 
-### Paseo
-
-[Paseo](https://github.com/getpaseo/paseo) runs agents through their native
-providers. Usage is reported under the underlying supported client (for example,
-Claude Code or Codex CLI), including sessions launched from Paseo.
-
-For Claude and Codex profiles with separate data directories, Tokens also reads
-`agents.providers` in `~/.paseo/config.json` (or `$PASEO_HOME/config.json`). It
-finds absolute `env.CLAUDE_CONFIG_DIR` and `env.CODEX_HOME` paths on built-in
-providers and profiles that `extends` them, including inherited base settings.
-Claude projects, subagents and transcripts, plus active and archived Codex
-sessions, use the existing parsers and file deduplication. Paseo's agent records
-and timelines are not counted again.
-
-Run Tokens on the daemon host, where the session files live. Relative provider
-paths and paths set only in the daemon's launch environment cannot be discovered
-from this config; use absolute provider paths or Tokens' existing
-`scanner.extraScanPaths` setting for those installations.
-
 Clients that expose usage only through an account API need a sync step first —
 `tokens cursor sync`, `tokens antigravity sync`, `tokens trae sync`,
 `tokens warp sync` — after which they submit like everything else.
