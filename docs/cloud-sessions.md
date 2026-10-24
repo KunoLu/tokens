@@ -53,14 +53,23 @@ On public profiles all of a provider's sessions are shown as one row
 
 ## Claude Code on the web
 
-1. Create a token in [Settings](https://tokens.ci/settings) and add it to the
-   cloud environment's **environment variables** as `TOKENS_API_TOKEN`. Add
+1. Create a dedicated cloud token in [Settings](https://tokens.camp/settings)
+   and add it to the cloud environment's **environment variables** as
+   `TOKENS_API_TOKEN`. Do not reuse your local machine's token. Also set
+   `TOKENS_API_URL=https://tokens.camp`: the CLI defaults to the upstream site,
+   so this variable must be present for every CLI command. Add
    `TZ=<your IANA zone>` (e.g. `TZ=Asia/Shanghai`) so days are bucketed in your
    timezone rather than the container's UTC.
-2. Allow `tokens.ci` (and the npm registry, to install the CLI) in the
-   environment's network access settings. Also allow `models.dev` and
-   `openrouter.ai`: without them the pricing fetch fails and costs are
-   computed from the remaining pricing sources only.
+2. Allow `tokens.camp` for the site-served Linux installer and submissions,
+   `api.github.com` to resolve the latest release, and `github.com` plus
+   `release-assets.githubusercontent.com` for release downloads and redirects.
+   The site's `/install.sh` is copied from this repository at build time, but
+   currently downloads binaries from `missuo/tokens` GitHub releases, not this
+   fork's releases; serving it from this site does not change that source.
+   The hook uses Bash because the installer requires `pipefail`, and sets
+   `TOKENS_NO_SERVICE=1` to skip the unrelated systemd user service.
+   Also allow `models.dev` and `openrouter.ai`: without them the pricing fetch
+   fails and costs are computed from the remaining pricing sources only.
 3. Commit these hooks to the repository's `.claude/settings.json`:
 
 ```json
@@ -71,7 +80,7 @@ On public profiles all of a provider's sessions are shown as one row
         "hooks": [
           {
             "type": "command",
-            "command": "[ \"$CLAUDE_CODE_REMOTE\" = true ] && ! command -v tokens >/dev/null && npm i -g tokens-cli@latest >/dev/null 2>&1; true"
+            "command": "[ \"$CLAUDE_CODE_REMOTE\" = true ] && ! command -v tokens >/dev/null && { curl -fsSL https://tokens.camp/install.sh | TOKENS_NO_SERVICE=1 bash; } >/dev/null 2>&1; true"
           }
         ]
       }
@@ -81,7 +90,7 @@ On public profiles all of a provider's sessions are shown as one row
         "hooks": [
           {
             "type": "command",
-            "command": "command -v tokens >/dev/null && tokens cloud submit >/dev/null 2>&1; true"
+            "command": "command -v tokens >/dev/null && TOKENS_API_URL=https://tokens.camp tokens cloud submit >/dev/null 2>&1; true"
           }
         ]
       }
