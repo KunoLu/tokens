@@ -64,8 +64,11 @@ On public profiles all of a provider's sessions are shown as one row
    `api.github.com` to resolve the latest release, and `github.com` plus
    `release-assets.githubusercontent.com` for release downloads and redirects.
    The site's `/install.sh` is copied from this repository at build time, but
-   currently downloads binaries from `missuo/tokens` GitHub releases, not this
-   fork's releases; serving it from this site does not change that source.
+   by default installs the latest GitHub Release binary from upstream
+   `missuo/tokens` (currently v27.1.5; `tokens --version` reports 27.1.5, not 1.0.4).
+   This repository publishes tags only, with no GitHub Releases; serving the
+   script from this site does not change its binary source.
+   `TOKENS_API_URL=https://tokens.camp` directs the CLI to this site.
    The hook uses Bash because the installer requires `pipefail`, and sets
    `TOKENS_NO_SERVICE=1` to skip the unrelated systemd user service.
    Also allow `models.dev` and `openrouter.ai`: without them the pricing fetch

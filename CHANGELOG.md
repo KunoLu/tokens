@@ -13,21 +13,21 @@ Tags such as `v27.x` belong to upstream `missuo/tokens` and are not releases of 
 
 - Model-level inference speed usage from Claude's reported speed and Codex's selected speed, carried through the CLI cache, submissions, and profile data without changing token totals or pricing (#14; upstream v27.1.5).
 - Profile token-composition shares and inference speed tiers in today's usage, day details, and period model tables; missing speed remains unknown (#15).
-- Discovery of Paseo-managed Claude Code and Codex CLI sessions through native provider data directories, with existing parsers and file deduplication (#15). Both READMEs now document configuration and running Tokens on the daemon host.
-- `tokens cloud submit` and `tokens cloud status` for Claude Code on the web sessions, with hashed session devices and provider-grouped profile/settings rows (#16). Codex cloud is not supported. Server rules validate `cloud_` keys and provider/client correspondence, reject backfill and replacement, force device names to null, disallow renaming, and prevent adoption of legacy history or replacement of the account's MCP list.
+- Discovery of Paseo-managed Claude Code and Codex CLI sessions through native provider data directories, with existing parsers and file deduplication (#15).
+- This repository's CLI source adds `tokens cloud submit` and `tokens cloud status` for Claude Code on the web sessions, with hashed session devices and provider-grouped profile/settings rows (#16). The binary installed by `/install.sh` comes from upstream releases, which also include `tokens cloud` starting with v27.1.4. Codex cloud is not supported. Server rules validate `cloud_` keys and provider/client correspondence, reject backfill and replacement, force device names to null, disallow renaming, and prevent adoption of legacy history or replacement of the account's MCP list.
 
 ### Fixed
 
 - Antigravity CLI synchronization fixes from upstream v27.1.4: sync before submit/autosubmit/serve when a language server is active, a shared 60-second implicit-sync RPC budget, and partial-refresh reporting that retains cached sessions (#13). Explicit sync exits successfully on partial session refresh failures but still fails on discovery or lock errors; a Windows test-helper clippy fix is included.
 - Profile uses the official OMP icon (#15).
 - Device-name masking descriptions now explain that names of four characters or fewer expose only the first character; longer names retain the first and last two characters.
-- Cloud setup documentation now uses the site-served Linux installer instead of the upstream npm package, points token setup and submissions at `tokens.camp`, requires `TOKENS_API_URL`, and lists the actual GitHub download domains. The installer still downloads upstream `missuo/tokens` binaries; it is not a fork-binary installer.
+- Cloud setup documentation now uses the site-served `/install.sh`, which by default installs the latest GitHub Release binary from upstream `missuo/tokens` (currently v27.1.5; `tokens --version` reports 27.1.5). Token setup now points to `tokens.camp`, submissions require `TOKENS_API_URL=https://tokens.camp`, and the documentation lists the actual GitHub download domains.
 
 ### Changed
 
 - Vercel Git auto-deploy for `main` is disabled via `git.deploymentEnabled` in `web/vercel.json` (#11). Production deploys are triggered manually.
 - Local cache format advanced from 8 to 9 (#14). **Downgrading to an older CLI rebuilds the local cache from session logs.** History that exists only in the newer cache cannot be recovered from deleted source logs; back up both cache and source logs before downgrading.
-- Script download URLs and package versions advanced to `v1.0.4`.
+- This repository's manifest versions (Cargo workspace and `packages/cli*`) and pinned script refs advanced to `1.0.4` and `v1.0.4`, respectively, for this repository's `v1.0.4` tag. This repository publishes tags only, with no GitHub Releases; these version and ref changes do not change the upstream binary version installed by `/install.sh`.
 
 ## [1.0.3] - 2026-10-17
 
