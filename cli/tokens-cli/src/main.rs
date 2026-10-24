@@ -1077,6 +1077,8 @@ struct TsSourceContribution {
     tokens: TsTokenBreakdown,
     cost: f64,
     messages: i32,
+    // Empty explicitly means unknown; an omitted field identifies a legacy CLI.
+    speed_usage: Vec<tokens_core::speed::SpeedUsage>,
     #[serde(skip_serializing_if = "Option::is_none")]
     provenance: Option<TsClientContributionProvenance>,
 }
@@ -1405,6 +1407,7 @@ fn to_ts_token_contribution_data(
                         },
                         cost: s.cost,
                         messages: s.messages,
+                        speed_usage: s.speed_usage.clone(),
                         provenance: include_submit_provenance.then(|| {
                             TsClientContributionProvenance {
                                 schema_version: submit_parser_revision(&s.client),
@@ -3326,4 +3329,3 @@ fn prepare_headless_args(
     }
     Ok(args)
 }
-
