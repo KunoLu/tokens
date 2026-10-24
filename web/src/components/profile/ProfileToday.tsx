@@ -5,6 +5,8 @@ import { SourceLogo } from "@/components/SourceLogo";
 import { ModelIcon } from "./ModelIcon";
 import { cn, formatDate } from "@/lib/utils";
 import { useFormat, useI18n, type TranslationKey } from "@/lib/i18n";
+import { SpeedTierLabel } from "./SpeedTier";
+import { getSpeedTierRows } from "@/lib/speedUsage";
 import {
   createContributionClientDetails,
   getContributionDayMessageCount,
@@ -53,7 +55,7 @@ function Figure({ label, value }: { label: string; value: string }) {
  */
 export function ProfileToday({ day, isToday, className }: ProfileTodayProps) {
   const { t, locale } = useI18n();
-  const { formatNumber, formatCurrency } = useFormat();
+  const { formatNumber, formatCurrency, formatPercent, formatWholePercents } = useFormat();
   const clients = useMemo(
     () => (day ? createContributionClientDetails(day) : []),
     [day]
@@ -87,7 +89,14 @@ export function ProfileToday({ day, isToday, className }: ProfileTodayProps) {
       }
     }
     const sum = COMPOSITION.reduce((acc, part) => acc + totals[part.key], 0);
-    return { totals, sum, parts: COMPOSITION.filter((p) => totals[p.key] > 0) };
+    return {
+      totals,
+      sum,
+      parts: COMPOSITION.filter((p) => totals[p.key] > 0).map((p) => ({
+        ...p,
+        share: (totals[p.key] / sum) * 100,
+      })),
+    };
   }, [clients]);
 
   // Busiest client first: the one that did the work should read first.
@@ -128,9 +137,7 @@ export function ProfileToday({ day, isToday, className }: ProfileTodayProps) {
                   <div
                     key={part.key}
                     className={part.className}
-                    style={{
-                      width: `${(composition.totals[part.key] / composition.sum) * 100}%`,
-                    }}
+                    style={{ width: `${part.share}%` }}
                     title={t("profile.breakdown.segmentTitle", { label: t(part.labelKey), tokens: formatNumber(composition.totals[part.key], true) })}
                   />
                 ))}
@@ -143,8 +150,9 @@ export function ProfileToday({ day, isToday, className }: ProfileTodayProps) {
                       aria-hidden="true"
                     />
                     <dt className="text-xs text-muted-foreground">{t(part.labelKey)}</dt>
-                    <dd className="font-mono text-xs tabular-nums">
-                      {formatNumber(composition.totals[part.key], true)}
+                    <dd className="whitespace-nowrap font-mono text-xs tabular-nums">
+                      {formatNumber(composition.totals[part.key], true)}{" "}
+                      <span className="text-muted-foreground">{formatPercent(part.share)}</span>
                     </dd>
                   </div>
                 ))}
@@ -184,27 +192,80 @@ export function ProfileToday({ day, isToday, className }: ProfileTodayProps) {
                           client.totalTokens > 0
                             ? model.totalTokens / client.totalTokens
                             : 0;
+                        const tiers = getSpeedTierRows(
+                          model.speedUsage,
+                          model.totalTokens,
+                          model.messages
+                        );
+                        // Same scale as the model rows, so a model's tiers add
+                        // up to its own bar and percentage.
+                        const tierShares = tiers.map((tier) =>
+                          client.totalTokens > 0
+                            ? (tier.tokens / client.totalTokens) * 100
+                            : 0
+                        );
+                        const tierPercents = formatWholePercents(tierShares);
                         return (
-                          <li
-                            key={`${client.client}:${model.modelId}`}
-                            className="flex items-center gap-3"
-                          >
-                            <ModelIcon model={model.modelId} size={13} />
-                            <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">
-                              {model.modelId}
-                            </span>
-                            <div className="hidden h-0.5 w-24 overflow-hidden rounded-full bg-border sm:block">
-                              <div
-                                className="h-full rounded-full bg-primary/50"
-                                style={{ width: `${Math.max(share * 100, 2)}%` }}
-                              />
+                          <li key={`${client.client}:${model.modelId}`}>
+                            <div className="flex items-center gap-3">
+                              <ModelIcon model={model.modelId} size={13} />
+                              <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">
+                                {model.modelId}
+                              </span>
+                              <div className="hidden h-0.5 w-24 overflow-hidden rounded-full bg-border sm:block">
+                                <div
+                                  className="h-full rounded-full bg-primary/50"
+                                  style={{ width: `${Math.max(share * 100, 2)}%` }}
+                                />
+                              </div>
+                              <span className="w-11 shrink-0 text-right font-mono text-xs tabular-nums text-muted-foreground">
+                                {formatWholePercents([share * 100])[0]}
+                              </span>
+                              <span className="w-16 shrink-0 text-right font-mono text-xs tabular-nums">
+                                {formatNumber(model.totalTokens, true)}
+                              </span>
                             </div>
-                            <span className="w-11 shrink-0 text-right font-mono text-xs tabular-nums text-muted-foreground">
-                              {Math.round(share * 100)}%
-                            </span>
-                            <span className="w-16 shrink-0 text-right font-mono text-xs tabular-nums">
-                              {formatNumber(model.totalTokens, true)}
-                            </span>
+
+                            {tiers.length > 0 && (
+                              // Indented to where the model name starts: the
+                              // 13px model icon plus the row's 12px gap.
+                              <ul className="mt-1 flex flex-col gap-1 pl-[25px]">
+                                {tiers.map((tier, index) => (
+                                  <li key={tier.speed} className="flex items-center gap-3">
+                                    <div className="flex min-w-0 flex-1">
+                                      <SpeedTierLabel
+                                        tier={tier}
+                                        className={cn(
+                                          "text-[0.6875rem]",
+                                          tier.speed === "unknown"
+                                            ? "text-muted-foreground/70"
+                                            : "text-muted-foreground"
+                                        )}
+                                      />
+                                    </div>
+                                    <div className="hidden h-0.5 w-24 overflow-hidden rounded-full bg-border sm:block">
+                                      {tier.speed !== "unknown" && tier.tokens > 0 && (
+                                        <div
+                                          className={cn(
+                                            "h-full min-w-px rounded-full",
+                                            tier.speed === "standard"
+                                              ? "bg-muted-foreground/45"
+                                              : "bg-amber-500/70 dark:bg-amber-400/70"
+                                          )}
+                                          style={{ width: `${tierShares[index]}%` }}
+                                        />
+                                      )}
+                                    </div>
+                                    <span className="w-11 shrink-0 text-right font-mono text-[0.6875rem] tabular-nums text-muted-foreground">
+                                      {tierPercents[index]}
+                                    </span>
+                                    <span className="w-16 shrink-0 text-right font-mono text-[0.6875rem] tabular-nums text-muted-foreground">
+                                      {formatNumber(tier.tokens, true)}
+                                    </span>
+                                  </li>
+                                ))}
+                              </ul>
+                            )}
                           </li>
                         );
                       })}

@@ -1,4 +1,5 @@
 import { intlTag, type Locale } from "@/lib/i18n/locale";
+import { t } from "@/lib/i18n/t";
 
 
 export function escapeXml(value: string): string {
@@ -63,6 +64,48 @@ export function formatCurrency(
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(Math.max(0, safeNumber(value)));
+}
+
+/**
+ * Format a 0–100 share with one decimal. Non-zero shares below 0.05% stay visible.
+ */
+export function formatPercent(percent: number, locale: Locale = "en"): string {
+  const small = percent > 0 && percent < 0.05;
+  const value = new Intl.NumberFormat(numberLocale(locale), {
+    style: "percent",
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1,
+  }).format((small ? 0.1 : percent) / 100);
+  return small ? t(locale, "profile.percent.lessThan", { value }) : value;
+}
+
+/**
+ * Format 0–100 shares as whole percents that add up to their own rounded total
+ * (largest remainder), so the parts of a split never disagree with the whole.
+ * A non-zero share that rounds to 0 shows as "<1%".
+ */
+export function formatWholePercents(percents: readonly number[], locale: Locale = "en"): string[] {
+  const whole = percents.map((percent) => Math.floor(percent));
+  let left =
+    Math.round(percents.reduce((sum, percent) => sum + percent, 0)) -
+    whole.reduce((sum, value) => sum + value, 0);
+  const byRemainder = percents
+    .map((percent, index) => ({ index, remainder: percent - whole[index] }))
+    .sort((a, b) => b.remainder - a.remainder);
+  for (const { index } of byRemainder) {
+    if (left <= 0) break;
+    whole[index] += 1;
+    left -= 1;
+  }
+  const formatter = new Intl.NumberFormat(numberLocale(locale), {
+    style: "percent",
+    maximumFractionDigits: 0,
+  });
+  return whole.map((value, index) =>
+    value === 0 && percents[index] > 0
+      ? t(locale, "profile.percent.lessThan", { value: formatter.format(0.01) })
+      : formatter.format(value / 100)
+  );
 }
 
 
