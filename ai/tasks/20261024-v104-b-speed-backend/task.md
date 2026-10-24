@@ -4,11 +4,11 @@ id: 20261024-v104-b-speed-backend
 workflow_mode: strict
 mode_source: user
 mode_note: 用户 2026-10-24 20:09 群内确认（最终方案），Lord 记录；本会话只做 PR B，保持 strict。
-status: "checking"
+status: "done"
 branch: feat/v1.0.4-b-speed-backend
 created_at: '2026-10-24T22:08:44.876292+08:00'
-updated_at: "2026-10-24T22:18:13.146148+08:00"
-completed_at: null
+updated_at: "2026-10-25T01:00:58.345779+08:00"
+completed_at: "2026-10-25T01:00:58.345779+08:00"
 ---
 # PR B — speed backend 上游同步
 
@@ -95,7 +95,7 @@ completed_at: null
 
 | 上游提交 | 本仓新提交 | 结果 | 冲突文件与解决方式 |
 |---|---|---|---|
-| `42d7185079a244079507e8abd6b8c16c36e1fdeb` | `656b7aac46a7eec7e995b5784e2c60df3f296e9a` | 冲突 | `.github/workflows/ci.yml`、`README.md` 取本仓；`validation/submission.ts` 仅保留 speed import，丢弃 PR E 的 devices/cloud import |
+| `42d7185079a244079507e8abd6b8c16c36e1fdeb` | `656b7aac46a7eec7e995b5784e2c60df3f296e9a` | 冲突 | `.github/workflows/ci.yml`、`README.md` 取本仓；`validation/submission.ts` 仅保留 speed import，PR E 的 devices/cloud import 属上游冲突上下文，本仓本来没有 |
 | `1216cdd9d38a77254e89f5a7678df795f7fe2f09` | `88e754b197f590b81351db1d074398623034bec6` | 冲突 | `README.md` 继续取本仓；其余 naming 变更自动合并 |
 | `00579f78bc61f542f7dcb7db3ca6fbf56b891e33` | `ff060e4ab0c4416f636a25454ad02fc576cab9ae` | clean | 无冲突 |
 
@@ -176,7 +176,7 @@ cp cli/target/debug/tokens /workspace/tokens-v104-b-cachetest/bin/tokens-new-105
 | # | 会话 | 模型 | 请求／工具调用 | 产出 | 会话记录 |
 |---|---|---|---|---|---|
 | 1 | ping | openai-codex/gpt-6-astra（high） | 1／0 | 连通性检查（--no-tools） | `~/.omp/logs/tokens-v104-b/ping/sessions/2026-10-24T14-04-31-822Z_01a16e3a-38ce-72ad-b13d-aca7bd2edf55.jsonl` |
-| 2 | s1 main（本会话） | openai-codex/gpt-6-astra（high） | 未知（落盘时本轮尚未结束），实际计数见群内交付报告 | cherry-pick 3 个提交、task.md、本地检查、缓存降级测试 | `~/.omp/logs/tokens-v104-b/s1/sessions/` |
+| 2 | s1 main | openai-codex/gpt-6-astra（high） | 45／94 | cherry-pick 3 个提交、task.md、本地检查、缓存降级测试 | `~/.omp/logs/tokens-v104-b/s1/sessions/` |
 
 所有编辑和提交由 omp 会话完成；push 与开 PR 由编排方在 omp 之外执行。
 
@@ -196,3 +196,4 @@ cp cli/target/debug/tokens /workspace/tokens-v104-b-cachetest/bin/tokens-new-105
 |---|---|---|---|---|
 | 2026-10-24T22:08:45.932139+08:00 | planned | in-progress | 分支与范围核对完成，开始实现前安全核查 | origin/main df417b26c468f07491f486f230f01936c6b88742；三个单父上游补丁；三个 web 基线 blob 与 v27.1.3 一致 |
 | 2026-10-24T22:18:13.146148+08:00 | in-progress | checking | 三个上游提交与最小格式修复完成；本地回归和双二进制 smoke 已验证，保留基线 fmt 与外部独立复核缺口 | 代码 tip 105d527433d5211b8acdc0793cc1a3b223a5884f；Rust 2443 passed/0 failed/4 ignored；web 28 passed；cache run-20261024-221447 四步 13600 tokens、exit 0、stderr 0、9/8/9/8；reports/final-cargo-fmt.json 18 个基线文件 |
+| 2026-10-25T01:00:58.345779+08:00 | checking | done | 编排方整理，PR #14 已 squash merge，B 的实现已合入 main；修正 cloud import 的冲突上下文措辞，补 s1 计数。 | PR https://github.com/KunoLu/tokens/pull/14；head f5b64a4fb22c78082d4b47b19227d490851ef468；merge 66a390f4e2657f005748a5a6f7e8d5329a2bbf45；%cI 2026-10-24T22:39:45+08:00；mergedAt 2026-10-24T22:39:45+08:00；Reviewy CLEAN @ f5b64a4（群内 2026-10-24 22:38，f-items.md 转述 bot 记忆）。 |
