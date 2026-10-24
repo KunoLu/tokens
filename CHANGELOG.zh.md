@@ -6,9 +6,27 @@
 
 ## [Unreleased]
 
+## [1.0.4] - 2026-10-25
+
+### 新增
+
+- 模型级推理速度用量：区分 Claude 服务端报告速度与 Codex 选择速度，贯穿 CLI 缓存、提交和 profile 数据，不改变 token 总量或计价（#14；上游 v27.1.5）。
+- Profile 的 token 构成占比，以及当天用量、日详情和周期模型表中的推理速度档位；缺失速度仍保持未知（#15）。
+- 通过原生提供商数据目录发现 Paseo 管理的 Claude Code 与 Codex CLI 会话，复用既有解析器和文件去重（#15）。双语 README 补充配置及在 daemon 主机运行 Tokens 的说明。
+- 面向 Claude Code on the web 会话的 `tokens cloud submit` 和 `tokens cloud status`，采用哈希会话设备，并在 profile／设置页按提供商合并展示（#16）。不支持 Codex cloud。服务端校验 `cloud_` key 与提供商／客户端对应关系，拒绝 backfill 和 replacement，强制设备名为 null、禁止改名、不接管 legacy 历史，也不覆盖账号的 MCP 列表。
+
+### 修复
+
+- 同步上游 v27.1.4 的 Antigravity CLI 修复：存在活跃 language server 时在 submit／autosubmit／serve 提交前同步，隐式同步 RPC 共用 60 秒预算，部分刷新失败时报告结果并保留缓存会话（#13）。显式同步在部分会话刷新失败时成功退出，发现失败或锁错误仍失败；同时包含 Windows 测试 helper 的 clippy 修复。
+- Profile 使用官方 OMP 图标（#15）。
+- 设备名掩码描述明确：名称不超过四个字符时只显示首字符，更长的名称保留首尾各两个字符。
+- Cloud 配置文档改用本站提供的 Linux 安装器而非上游 npm 包，token 设置与提交指向 `tokens.camp`，要求设置 `TOKENS_API_URL`，并列出实际 GitHub 下载域名。安装器仍下载上游 `missuo/tokens` 二进制，并非本 fork 二进制安装器。
+
 ### 变更
 
 - 通过 `web/vercel.json` 的 `git.deploymentEnabled` 关闭 `main` 的 Vercel Git 自动部署（#11）。Production 改为手动触发部署。
+- 本地缓存格式从 8 升至 9（#14）。**降级到旧 CLI 会从会话日志重建本地缓存。** 若历史仅存在于新版缓存、源日志已删除，则无法从日志恢复；降级前请同时备份缓存与源日志。
+- 脚本下载地址和包版本推进到 `v1.0.4`。
 
 ## [1.0.3] - 2026-10-17
 
