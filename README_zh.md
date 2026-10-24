@@ -141,6 +141,23 @@ curl -fsSL https://raw.githubusercontent.com/KunoLu/tokens/v1.0.2/pre-install-to
 
 </details>
 
+### Paseo
+
+[Paseo](https://github.com/getpaseo/paseo) 通过各智能体的原生提供商运行它们。
+用量归入底层受支持的客户端（例如 Claude Code 或 Codex CLI），
+从 Paseo 启动的会话也包含在内。
+
+对于使用独立数据目录的 Claude 和 Codex profile，Tokens 还会读取
+`~/.paseo/config.json`（或 `$PASEO_HOME/config.json`）中的 `agents.providers`。
+它会发现内置提供商及通过 `extends` 继承它们的 profile 中的
+`env.CLAUDE_CONFIG_DIR` 和 `env.CODEX_HOME` 绝对路径，包括继承的基础设置。
+Claude 项目、子智能体和 transcript，以及活跃和已归档的 Codex 会话，
+均复用现有解析器与文件去重机制。Paseo 的智能体记录和时间线不会再次计入。
+
+请在存放会话文件的 daemon 主机上运行 Tokens。此配置无法发现提供商的相对路径，
+也无法发现仅在 daemon 启动环境中设置的路径；这类安装请使用提供商的绝对路径，
+或 Tokens 既有的 `scanner.extraScanPaths` 设置。
+
 只通过账号 API 暴露用量的客户端需要先做一次同步——`tokens cursor sync`、`tokens antigravity sync`、`tokens trae sync`、`tokens warp sync`——之后就和其它客户端一样提交。
 
 定价数据来自 [LiteLLM](https://github.com/BerriAI/litellm)、[OpenRouter](https://openrouter.ai) 和 [models.dev](https://github.com/anomalyco/models.dev)，按模型取最优匹配费率。
