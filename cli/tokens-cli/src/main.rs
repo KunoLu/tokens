@@ -490,9 +490,7 @@ fn main() -> Result<()> {
         Some(Commands::DeleteSubmittedData) => {
             run_delete_data_command()
         }
-        Some(Commands::Cloud { subcommand }) => {
-            run_cloud_command(subcommand)
-        }
+        Some(Commands::Cloud { subcommand }) => run_cloud_command(subcommand),
         None => {
             // The dashboard and the report commands are gone, so a bare
             // `tokens` prints usage rather than rendering anything.
@@ -2414,7 +2412,11 @@ fn run_cloud_command(subcommand: CloudSubcommand) -> Result<()> {
                     println!("  Device name: {}", device.name.unwrap_or_default());
                     println!(
                         "  Logged in: {}",
-                        if auth::resolve_api_token().is_some() { "yes" } else { "no (set TOKENS_API_TOKEN)" }
+                        if auth::resolve_api_token().is_some() {
+                            "yes"
+                        } else {
+                            "no (set TOKENS_API_TOKEN)"
+                        }
                     );
                 }
                 Err(err) => println!("Not a cloud session: {err}"),
@@ -2430,7 +2432,8 @@ fn run_cloud_command(subcommand: CloudSubcommand) -> Result<()> {
             dry_run,
             payload,
         } => {
-            let result = run_cloud_submit(provider, session_id, min_interval, force, dry_run, payload);
+            let result =
+                run_cloud_submit(provider, session_id, min_interval, force, dry_run, payload);
             match result {
                 Ok(()) => Ok(()),
                 // A hook that exits non-zero can block or clutter the agent's

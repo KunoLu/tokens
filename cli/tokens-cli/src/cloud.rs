@@ -223,7 +223,10 @@ pub fn detect(inputs: &DetectInputs) -> Result<CloudSession> {
         // Preferred over the hook's local session id: it names the cloud
         // session itself, which outlives any one container and any `/clear`.
         (
-            inputs.env("CLAUDE_CODE_REMOTE_SESSION_ID").unwrap().to_string(),
+            inputs
+                .env("CLAUDE_CODE_REMOTE_SESSION_ID")
+                .unwrap()
+                .to_string(),
             SessionIdSource::ClaudeCodeRemoteEnv,
         )
     } else if let Some(id) = hook_session {
@@ -263,7 +266,9 @@ fn validate_session_id(id: &str) -> Result<String> {
         ));
     }
     if trimmed.chars().any(char::is_control) {
-        return Err(anyhow!("cloud session id must not contain control characters"));
+        return Err(anyhow!(
+            "cloud session id must not contain control characters"
+        ));
     }
     Ok(trimmed.to_string())
 }
@@ -462,7 +467,9 @@ mod tests {
         assert!(d.starts_with("cloud_codex_"));
         let hash = a.trim_start_matches("cloud_claude_");
         assert_eq!(hash.len(), DEVICE_HASH_HEX_LEN);
-        assert!(hash.chars().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()));
+        assert!(hash
+            .chars()
+            .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()));
     }
 
     #[test]
