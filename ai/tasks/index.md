@@ -8,6 +8,7 @@
 - [20261024-v104-a-antigravity-cli](20261024-v104-a-antigravity-cli/task.md)
 - [20261024-v104-b-speed-backend](20261024-v104-b-speed-backend/task.md)
 - [20261024-v104-cd-profile-ui-paseo](20261024-v104-cd-profile-ui-paseo/task.md)
+- [20261025-pr17-description-record](20261025-pr17-description-record/task.md)
 - [20261025-v104-e-cloud-sessions](20261025-v104-e-cloud-sessions/task.md)
 - [20261025-v104-f-release](20261025-v104-f-release/task.md)
 - [brand-sweep](archive/2026-Q3/brand-sweep/task.md)
