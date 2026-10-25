@@ -4,11 +4,11 @@ id: 20261025-pr17-description-record
 workflow_mode: strict
 mode_source: user
 mode_note: 编排方整理：本轮 strict；只记录 #17 描述保留这一事实；单文件；不启动子代理；提交、push、开 PR 由编排方在 omp 之外执行。
-status: "checking"
+status: "done"
 branch: docs/tokens-17-description-record
 created_at: "2026-10-25T09:30:31+08:00"
-updated_at: "2026-10-25T09:31:18+08:00"
-completed_at: null
+updated_at: "2026-10-25T10:46:45+08:00"
+completed_at: "2026-10-25T10:46:45+08:00"
 ---
 # PR #17 — 描述保留事实记录
 
@@ -90,6 +90,8 @@ grep(pattern="待用[户]确认|待用[户]决定|本次任[务]提供的|用户
 |---|---|---|---|---|---|
 | 1 | ping | openai-codex/gpt-6-astra（high） | 1／0 | 连通性检查（--no-tools） | `2026-10-25T01-29-30-455Z_01a170ad-5657-7480-9553-4571afb4ec16.jsonl` |
 | 2 | main（本会话） | openai-codex/gpt-6-astra（high） | 未知（落盘时本轮尚未结束），实际计数见群内交付报告 | 本 task.md | `2026-10-25T01-30-06-203Z_01a170ad-e1fb-774f-98be-b3b72129b55f.jsonl` |
+| 3 | ping（收尾） | openai-codex/gpt-6-astra（high） | 1／0 | 连通性检查（--no-tools） | `2026-10-25T02-45-06-001Z_01a170f2-8b51-71c4-b5be-699fbe3d3400.jsonl` |
+| 4 | main（收尾，本会话） | openai-codex/gpt-6-astra（high） | 未知（落盘时本轮尚未结束），实际计数见群内交付报告 | done 事件与 index 登记 | `2026-10-25T02-46-18-553Z_01a170f3-a6b9-74b6-a586-faac66521f19.jsonl` |
 
 编排方整理：ping 开始于 `2026-10-25T09:29:30+08:00`（UTC `2026-10-25T01:29:30Z`）。每个 omp 会话一行；本会话未使用子代理。
 
@@ -99,3 +101,4 @@ grep(pattern="待用[户]确认|待用[户]决定|本次任[务]提供的|用户
 |---|---|---|---|---|
 | 2026-10-25T09:30:31+08:00 | planned | in-progress | 编排方整理，核对 strict 格式、分支与来源，建立单文件描述保留记录。 | 基线 3b3393e（完整 SHA 见验证）；编排方整理的 gh 只读核实：PR #17、lastEditedAt、userContentEdits、updatedAt 与 body 摘要；本地分支、HEAD／origin/main、干净工作区与 merge %cI 检查一致。 |
 | 2026-10-25T09:31:18+08:00 | in-progress | checking | 编排方整理，本地记录与验证完成，送审；不标 done。 | 基线 3b3393e；编排方整理的 gh 只读核实来源见记录的事实；本地 status 仅新 task、已跟踪 diff 为空、新文件 diff 无空白错误、grep 0 命中；SBTD 首次解析 in-progress 1 False。 |
+| 2026-10-25T10:46:45+08:00 | checking | done | 用户 2026-10-25 10:42 群内确认（#18 记录收尾与 index 登记），Lord 记录；#18 已合入且远端分支已删除，checking → done。 | 编排方整理（Lord 记录，gh／git 只读核实一致）：#18 head `75d8b8a4b1ba0c70ce2134e2aef2b0e19d615d53`，squash 合入 commit `15bacbd9755cf4973fe7f40b3dacbcaf1df688a5`，mergedAt `2026-10-25T09:38:45+08:00`；远端分支 `docs/tokens-17-description-record` 已不存在（404）；Lord 记录：v1.0.4 已部署 Production，Vercel 部署 `dpl_FXBLjLo4jVJE5KArXs1eu58Rka26`，固定 commit `3b3393eb2bf27f47543c782f2930fd38a2804386`，创建 `2026-10-25T09:50:36+08:00`，READY `2026-10-25T09:51:20+08:00`；tokens.camp 别名已核实指向该部署（此前为 `dpl_GVqjhMyPMvrQhikyF4kghDDYMjtH`，commit `a752960`）；Lord 记录的冒烟：`/` 307 重定向至 `/leaderboard`；`/leaderboard`、`/login`、`/u/640` 均 200；无 5xx；未测试登录与提交；15bacbd 未部署；用户 2026-10-25 09:48 群内确认（Production 部署与 install.sh 项），Lord 记录：确认开始 Production 部署（第 1 项）；install.sh 项未完成；本会话本地检查：640-skills `1b609bc` 的 sbtd_task_document.TaskDocument.parse 输出 `done 3 False 2026-10-25T10:46:45+08:00`；`git diff --check` 无输出；禁词与路径 grep 0 命中；`git diff origin/main --stat` 仅两个文件。 |
