@@ -8,7 +8,7 @@ mode_note: 用户 2026-11-13 10:32 群内选定多语言方案甲、10:33 确认
 status: "done"
 branch: sync/upstream-v27.2.1-pr-a-i18n
 created_at: '2026-11-14T01:46:00.696645+08:00'
-updated_at: "2026-11-14T04:31:42.388367+08:00"
+updated_at: "2026-11-14T05:32:12.270572+08:00"
 completed_at: "2026-11-14T04:31:42.388367+08:00"
 ---
 # 同步上游 v27.2.1 拆分 PR A — 多语言（方案甲）
@@ -39,7 +39,9 @@ web 与 CLI 切换到上游 v27.2.1 的多语言框架：en／zh-CN／ja 词条�
 
 | 角色 | 模型 | 密钥来源 | 调用次数 |
 |---|---|---|---|
-| 主 agent | k3:max | 环境变量 KIMI_API_KEY | 408（截至 2026-11-14 04:30 +08:00，按本会话转录的 assistant 轮次逐轮计数，含本次写入；计数证据为会话转录 `## assistant` 块数） |
+| 主 agent | k3:max | 环境变量 KIMI_API_KEY | 第一轮：回复 446、工具调用 471、工具报错 2（会话最终计数） |
+| 主 agent | k3:max | 环境变量 KIMI_API_KEY | 第二轮：回复 22、工具调用 33、工具报错 4（截至 2026-11-14 05:21 +08:00，含本次写入；本轮只改本文件） |
+| 主 agent | k3:max | 环境变量 KIMI_API_KEY | 第三轮：回复 9、工具调用 19、工具报错 0（截至 2026-11-14 05:32 +08:00，含本次写入） |
 
 未启动子代理；密钥不写入本文件与任何产物。
 
@@ -58,16 +60,18 @@ TDD：middleware 的 `tt_locale=zh` 映射与无前缀 URL 重定向先写失败
 ## 进度
 
 - 2026-11-14 01:43 +08:00 主 agent：开始基线与行为刻画。
-- 2026-11-14 01:52 +08:00 主 agent：完成基线与行为刻画。验证：`cd web && bun test` 51 pass／0 fail；`bun run lint` 0 errors（1 个既有 img warning）；`bunx tsc --noEmit` 通过。CLI 基线：本机缺 `make` 且 rustc 1.85.1 低于代码所需的 1.87（`is_multiple_of`），基线编译报 E0658×3；在 `/tmp` 架设隔离 make 4.4.1 与 Rust 1.100.0（rustup minimal profile，不动 HOME 与仓内配置）后 `cargo test --manifest-path cli/Cargo.toml` 2456 pass／0 fail／4 ignored（tokens-cli 204＋tokens-core 2198＋其余 54）。现状刻画：`layout.tsx` 读 `tt_locale` cookie，`parseLocale` 仅认 `zh`；`Navigation.tsx` 经 `localeCookieValue` 写 cookie 切语言；`teams/api.ts` 经 `serverError.ts` 本地化错误；`/settings` 未登录重定向 `/login?returnTo=...`。发现：本仓 2fc41cd 已移除 Cloudflare worker 层，上游 `web/worker.ts` 改动不适用本仓；上游 middleware 的共享缓存清单依赖本仓没有的 perf 提交（36d17e1 等），移植时按本仓实际改写。
+- 2026-11-14 01:52 +08:00 主 agent：完成基线与行为刻画。验证：`cd web && bun test` 51 pass／0 fail；`bun run lint` 0 errors（1 个既有 img warning）；`bunx tsc --noEmit` 通过。CLI 基线：本机缺 `make` 且 rustc 1.85.1 低于代码所需的 1.87（`is_multiple_of`），基线编译报 E0658×3；在会话临时目录架设隔离的 make 4.4.1 与 Rust 1.100.0 工具链（rustup minimal profile，不改 HOME、不动仓内配置）后 `cargo test --manifest-path cli/Cargo.toml` 2456 pass／0 fail／4 ignored（tokens-cli 204＋tokens-core 2198＋其余 54）。现状刻画：`layout.tsx` 读 `tt_locale` cookie，`parseLocale` 仅认 `zh`；`Navigation.tsx` 经 `localeCookieValue` 写 cookie 切语言；`teams/api.ts` 经 `serverError.ts` 本地化错误；`/settings` 未登录重定向 `/login?returnTo=...`。发现：本仓 2fc41cd 已移除 Cloudflare worker 层，上游 `web/worker.ts` 改动不适用本仓；上游 middleware 的共享缓存清单依赖本仓没有的 perf 提交（36d17e1 等），移植时按本仓实际改写。
 - 2026-11-14 01:52 +08:00 主 agent：开始框架文件导入（上游新增文件落地）。
 - 主 agent：完成框架文件导入与 web 移植（本条于 2026-11-14 04:30 +08:00 补记时间戳；内容与验证先于 CLI 移植完成，写作当时未读时钟，不写估计值）。上游 i18n 框架文件（config／format／translate／server／rich、messages 全目录、LocaleProvider、LanguageSwitcher、not-found、CLI locales 与 i18n/mod.rs）取自 cbf1ecd 落地；58 个旧 i18n 引用点全部改写；旧模块 t.ts／locale.ts／I18nProvider.tsx／index.ts 已删除，serverError.ts 换成新 Translator 接口。middleware 移植为 `web/src/middleware.ts`（旧 `web/middleware.ts` 删除），按本仓实际调整：/settings 未登录重定向到 `/login`（邮箱登录，上游是 /api/auth/github）；`tt_locale=zh` 归一为 zh-CN；共享缓存清单只留本仓真正与读者无关的路由（/docs、/terms、/privacy、/u/[username]），/leaderboard 在本仓仍读会话故不缓存；matcher 去掉 /shame（本仓无此页）。发现上游 bug：v27.2.1 `u/[username]/page.tsx` 把四条 profile 元数据键写成了 `meta.*`（实际在 `profile.meta.*` 下），会渲染原始键名；本仓移植时用正确键，已记录。验证：新增 `web/src/middleware.test.ts`（19 条）先红后绿；新增 `web/src/lib/i18n/coverage.test.ts` 守护键存在性与三语齐备；`bunx tsc --noEmit` 通过；`bun run lint` 0 errors（2 warnings：既有 img 一条＋已清的一条已修）；`bun test` 99 pass／0 fail；`bun run build` 成功（42 页）；`next start` 后 curl 实测：`tt_locale=zh` 访问 `/` → 307 `/zh-CN/leaderboard`，`tt_locale=ja` → `/ja/leaderboard`，旧无前缀 `/leaderboard` 200 英文（不 404），`/zh-CN/leaderboard` 渲染排行榜且 `lang="zh-CN"`，`/ja/terms` 渲染日文条款，`/en/leaderboard` → 307 `/leaderboard`，`/zh-CN` → 307 `/zh-CN/leaderboard`，`/settings` 未登录 → 307 `/login?returnTo=/settings`，`/zh-CN/settings` 保留前缀。
 - 主 agent：开始 CLI 移植（18 个既有 Rust 源文件的三方合并；同上，补记于 2026-11-14 04:30 +08:00）。
 - 2026-11-14 04:30 +08:00 主 agent：完成 CLI 移植与全部验证（本条在 04:30 读取时钟后写入）。13 个文件零冲突直接合并；cursor.rs 两处冲突取本仓侧（sync_start 增量同步及其测试属后续 PR）；auth.rs 取本仓结构手工落键（本仓 enable_private_mode 用 serde_json::Value 与上游结构不同）；`cli.login.private.help` 目录值用回本仓既有帮助文本（三语）。发现并修复一处既有 `needless_bool`（新 clippy 才报，等价改写）。验证：cargo test 2467 pass／0 fail／4 ignored；clippy -D warnings exit 0；release build exit 0；`tokens --lang zh-CN/ja --help`、`TOKENS_LANG=zh-CN`、`--lang xx` 错误提示全部实测正常。
 - 2026-11-14 04:30 +08:00 主 agent：完成词条统计、BDD 改写（`web/features/i18n.feature` 与 `tests/e2e/i18n-locale.spec.ts` 改为前缀方案，e2e 未运行已注明）、ponytail-review（Lean already）、占位符审计、污染扫描与收尾文档。开始最终核对。
+- 2026-11-14 05:20 +08:00 主 agent：完成 Reviewy 复审意见处置（第二轮，只改本文件，未提交未推送）：模型与调用表改记第一轮最终计数（回复 446、工具调用 471、工具报错 2）并补记第二轮计数；删去三处本机路径，统一为会话临时目录表述；词条统计修正为 14 个新增键位并写清 398＋15＝413 的构成（2 个通用短词键位不占旧键名额）；「上游未引入 292 条」注明相对 cbf1ecd 口径，补记相对 v27.2.1 为 300 条及多出 8 条的键名（附 CLI 侧 23 条说明）。本轮核对均以 git show 与 bun 展平词条真实重算；禁用词与本机路径扫描通过。另发现已提交的 teamboard/en.ts 的 noSearchDesc 英文值在 {q} 两侧各多一个字面反斜杠（zh-CN／ja 正常），超出第二轮授权范围当时未改代码，已在第三轮修复（见下条）。
+- 2026-11-14 05:32 +08:00 主 agent：完成 noSearchDesc 反斜杠修复与同类排查（第三轮，未提交未推送）。改动：`web/src/lib/i18n/messages/teamboard/en.ts` 第 17 行值由三层转义 \\\"{q}\\\" 改为单层 \"{q}\"，bun 实测 resolveMessages("en") 取值将 {q} 替换为 xxx 后输出 No developer matches "xxx" for this period.，无字面反斜杠；`web/src/lib/i18n/coverage.test.ts` 新增 1 条回归测试：三语 noSearchDesc 均不含反斜杠，且 en 值逐字等于 No developer matches "{q}" for this period.。同类排查：对 `web/src/lib/i18n/messages/` 全目录扫描任意字面反斜杠，修复前仅命中 en.ts 第 17 行一处，修复后全目录零命中；zh-CN／ja 同键本就用全角引号，无此问题。验证（cd web）：`bunx tsc --noEmit` exit 0；`bun run lint` 0 errors（1 条既有 img warning 不变）；`bun test` 100 pass／0 fail（13 个文件，较第二轮 99 条多出的一条即新回归测试）。
 
 ## 证据
 
-全部命令在分支 sync/upstream-v27.2.1-pr-a-i18n 工作区真实执行（HEAD 3277189e9e784c870b1b2c37ec1027518b32675b + 本任务未提交改动）。本机缺 `make` 且预装 rustc 1.85.1 低于代码所需的 1.87，CLI 验证使用 /tmp 下的隔离工具链（make 4.4.1 来自 Debian trixie 官方 deb 手工解包；Rust 1.100.0 经 rustup minimal profile 装入 /tmp/rustup，RUSTUP_HOME/CARGO_HOME 均指向 /tmp，不改 HOME、不动仓内配置）。
+全部命令在分支 sync/upstream-v27.2.1-pr-a-i18n 工作区真实执行（HEAD 3277189e9e784c870b1b2c37ec1027518b32675b + 本任务未提交改动）。本机缺 `make` 且预装 rustc 1.85.1 低于代码所需的 1.87，CLI 验证使用在会话临时目录架设的隔离工具链（make 4.4.1 来自 Debian trixie 官方 deb 手工解包；Rust 1.100.0 经 rustup minimal profile 安装，RUSTUP_HOME/CARGO_HOME 均指向该临时目录，不改 HOME、不动仓内配置）。
 
 ### 基线（改动前）
 
@@ -106,12 +110,12 @@ TDD：middleware 的 `tt_locale=zh` 映射与无前缀 URL 重定向先写失败
 
 ## 词条统计
 
-口径：以旧目录 `t.ts` 的 en 词条全集（921 条，zh 同数一一对应）为基数，按「旧键的去向」分类，每条旧键恰好归入一类；分类由脚本对全文文本匹配＋逐文件改写映射表生成，尾差人工逐条裁定。三方脚本与中间产物在 /tmp（会话临时区），分类全表未入库。
+口径：以旧目录 `t.ts` 的 en 词条全集（921 条，zh 同数一一对应）为基数，按「旧键的去向」分类，每条旧键恰好归入一类；分类由脚本对全文文本匹配＋逐文件改写映射表生成，尾差人工逐条裁定。三方脚本与分类中间产物放在会话临时区，未入库。
 
-- 迁移 413 条：旧词条文字进入新目录。其中 398 条落入本仓命名空间（teams 118、auth 69、legal 139、docs 41、teamboard 31，均含三语）；15 条落在既有上游命名空间（nav.teamboard／nav.teams、settings.profile.lockedNote、settings.privacy.stateOn／stateOff／turnOn／turnOff、profile.today.dayFallback、profile.membership／team／group／leaveGroup、leaderboard.table.team／group），另有 3 条本仓文案覆盖了上游同键值（settings.privacy.description、settings.readTokens.description、settings.devices.description；迁移数按旧键计，这 3 条含在 398 之外的键位替换里、与上述 15 条并列）。ja 译文全部由本任务按上游 ja 惯例新写（旧库无 ja）。
+- 迁移 413 条：旧词条文字进入新目录。其中 398 条落入本仓命名空间（teams 118、auth 69、legal 139、docs 41、teamboard 31，均含三语）；15 条落在既有上游命名空间，占 17 个键位：14 个新增键位（nav.teamboard／nav.teams、settings.profile.lockedNote、settings.privacy.stateOn／stateOff／turnOn／turnOff、profile.today.dayFallback、profile.membership／team／group／leaveGroup、leaderboard.table.team／group），3 个同键值覆盖（settings.privacy.description、settings.readTokens.description、settings.devices.description，分别承自旧 settings.privacy.desc、settings.privacy.tokensDesc、settings.devices.desc）。17 个键位按 15 条旧键计：leaderboard.table.team／group 的取值 Team／Group 为通用短词，旧库同文键的名额已各有归属（profile.team、teamboard.colGroup、profile.group 迁至同名键位；旧 leaderboard.colTeam 随旧榜单表格键退役，计入复用），逐键裁定时这 2 个键位按新写文案计、不占迁移名额，即 14＋3－2＝15；398＋15＝413。ja 译文全部由本任务按上游 ja 惯例新写（旧库无 ja）。
 - 复用上游 467 条：旧键退役，由上游目录同义键承接。含整件采用上游组件后的键位替换（graph.* 104、chart.* 80、profile.* 大部、embed.* 48→profile.embed.*、device.* 16→settings.pairing.*、local.*→settings.local.*、dataInput.*→settings.local.input.* 等），以及 SettingsClient／BannedProfileView／not-found 等逐键映射；上游目录原样保留 491 条（值逐字相同）。
 - 丢弃 41 条：weekdays.* 14 条与 profile.habits.weekdays* 2 条（改由 Intl.DateTimeFormat 生成）、relative.*Ago 6 条（改由 Intl.RelativeTimeFormat 生成）、graph.palette.* 9 条（上游改读 themes.ts 英文名）、graph 日期/星期简写 4 条（Intl）、nav.english／nav.chinese 2 条（切换器改用 LOCALE_LABELS 本地化名）、footer.copyright 1 条（上游目录内联字面量）、settings.tokens.defaultName 1 条（上游字面量 "CI token"）、profile.speed.sourceSeparator 1 条（上游字面量逗号）、teams.invite 1 条（与 teams.invite.title 同文，合并）。
-- 校验：413＋467＋41＝921，无未归类键。最终 en 目录 903 条＝上游原样保留 491＋上游键位本仓文案 5＋本仓新增键 407（docs.meta.* 3 条为全新键，无旧键对应）。上游目录未引入 292 条：legal 129 与 docs 80（上游法律/文档原文在本仓不渲染，整段替换为本仓文案）、shame 18 与 og 14（对应页面/渲染器不在本仓）、profile 18／settings 18／leaderboard 9／common 3／nav 2／footer 1（昨日功能、上游私有模式设置页、赞助位等本仓没有的功能词条）。
+- 校验：413＋467＋41＝921，无未归类键。最终 en 目录 903 条＝上游原样保留 491＋上游键位本仓文案 5＋本仓新增键 407（docs.meta.* 3 条为全新键，无旧键对应）。上游目录未引入 292 条（口径：相对上游 cbf1ecd，即本 PR 词条取时点）：legal 129 与 docs 80（上游法律/文档原文在本仓不渲染，整段替换为本仓文案）、shame 18 与 og 14（对应页面/渲染器不在本仓）、profile 18／settings 18／leaderboard 9／common 3／nav 2／footer 1（昨日功能、上游私有模式设置页、赞助位等本仓没有的功能词条）。相对上游 tag v27.2.1 未引入 300 条：多出的 8 条为 cbf1ecd 之后上游 MCP opt-in（42e63c2）新增的 docs.privateMode.mcpNames.title／body 与 legal.privacy.sections 下 6 条（neverCollect.item5、whatIsPublic.p5、whatWeCollect.p5／p5Strong、yourChoices.item5／item5Strong），已列入后续 PR；CLI 词条同样取 cbf1ecd 时点，v27.2.1 多出 23 条 CLI 键（commands.mcpNames.* 11 条、cli.mcp-names.* 5 条、cli.submit 与 cli.cursor 相关 7 条），亦归后续 PR。
 
 ## 引入的上游文件（均取自 cbf1ecd，即上游 PR #117 合并结果）
 

@@ -14,7 +14,7 @@ const messages = {
   noGroups: "This team has no groups yet",
   noMatchDesc: "No members match the current group filter.",
   noMatchTitle: "No matching members",
-  noSearchDesc: "No developer matches \\\"{q}\\\" for this period.",
+  noSearchDesc: "No developer matches \"{q}\" for this period.",
   noSearchTitle: "No developers found",
   nothingDesc: "No usage was submitted for this period.",
   nothingTitle: "Nothing recorded",

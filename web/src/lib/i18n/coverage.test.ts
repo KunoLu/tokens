@@ -71,4 +71,18 @@ describe("catalogue coverage", () => {
       expect(typeof readPath(ja, key), `ja missing ${key}`).toBe("string");
     }
   });
+
+  test("catalogue values carry no stray escape backslashes", () => {
+    // Regression: teamboard.en noSearchDesc shipped as \\\"{q}\\\" and rendered
+    // a literal backslash before each quote. No catalogue value should ever
+    // contain a backslash; the English string keeps plain double quotes.
+    for (const locale of ["en", "zh-CN", "ja"] as const) {
+      const value = readPath(resolveMessages(locale), "teamboard.noSearchDesc");
+      expect(typeof value).toBe("string");
+      expect(value as string).not.toContain("\\");
+    }
+    expect(readPath(resolveMessages("en"), "teamboard.noSearchDesc")).toBe(
+      'No developer matches "{q}" for this period.',
+    );
+  });
 });
