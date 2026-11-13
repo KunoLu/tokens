@@ -34,7 +34,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { avatarUrlFor } from "@/lib/avatar";
-import { intlTag, useI18n, type TranslationKey } from "@/lib/i18n";
+import { useLocale, useT } from "@/components/layout/LocaleProvider";
 import type { TeamMemberRole, TeamStatus, TeamVisibility } from "@/lib/teams/types";
 import type {
   TeamsPageData,
@@ -48,20 +48,20 @@ import { InviteDialog } from "./InviteDialog";
 
 const ROLE_RANK: Record<string, number> = { admin: 0, subadmin: 1, member: 2 };
 
-const TEAM_ROLE_KEYS: Record<TeamMemberRole, TranslationKey> = {
+const TEAM_ROLE_KEYS: Record<TeamMemberRole, string> = {
   admin: "teams.role.admin",
   subadmin: "teams.role.subadmin",
   member: "teams.role.member",
 };
-const TEAM_STATUS_KEYS: Record<TeamStatus, TranslationKey> = {
+const TEAM_STATUS_KEYS: Record<TeamStatus, string> = {
   active: "teams.status.active",
   disbanded: "teams.status.disbanded",
 };
-const TEAM_VISIBILITY_KEYS: Record<TeamVisibility, TranslationKey> = {
+const TEAM_VISIBILITY_KEYS: Record<TeamVisibility, string> = {
   public: "teams.public",
   private: "teams.private",
 };
-const TEAM_VIS_HINT_KEYS: Record<TeamVisibility, TranslationKey> = {
+const TEAM_VIS_HINT_KEYS: Record<TeamVisibility, string> = {
   public: "teams.visHint.public",
   private: "teams.visHint.private",
 };
@@ -73,7 +73,7 @@ export function TeamsClient({
   initialData: TeamsPageData | null;
   selfId: string;
 }) {
-  const { t } = useI18n();
+  const t = useT();
   return (
     <>
       <PageHeader title={t("teams.title")} description={t("teams.desc")} />
@@ -90,7 +90,7 @@ export function TeamsClient({
  *  team left to delete). Visibility is a deliberate choice — the form cannot
  *  be submitted without one even though the DB defaults to private. */
 function CreateTeamCard() {
-  const { t } = useI18n();
+  const t = useT();
   const router = useRouter();
   const [name, setName] = useState("");
   const [visibility, setVisibility] = useState<"public" | "private" | null>(null);
@@ -98,7 +98,7 @@ function CreateTeamCard() {
 
   const submit = async () => {
     setBusy(true);
-    const error = await teamApi("/api/teams", {
+    const error = await teamApi(t, "/api/teams", {
       body: { name: name.trim(), visibility },
     });
     setBusy(false);
@@ -177,7 +177,8 @@ function TeamDashboard({
   data: TeamsPageData;
   selfId: string;
 }) {
-  const { t, locale } = useI18n();
+  const t = useT();
+  const locale = useLocale();
   const router = useRouter();
   const { team, myRole, isCreator, members, groups } = data;
 
@@ -225,7 +226,7 @@ function TeamDashboard({
 
   const activeGroupCount = groups.filter((g) => g.status === "active").length;
   const createdDate = new Date(team.createdAt).toLocaleDateString(
-    intlTag(locale)
+    locale
   );
 
   return (
@@ -273,7 +274,7 @@ function TeamDashboard({
                   variant="outline"
                   onClick={() =>
                     void run(() =>
-                      teamApi(`/api/teams/${team.id}`, {
+                      teamApi(t, `/api/teams/${team.id}`, {
                         method: "PATCH",
                         body: {
                           visibility:
@@ -291,7 +292,7 @@ function TeamDashboard({
                   {t("teams.rename")}
                 </Button>
                 <Button onClick={() => setInviteOpen(true)}>
-                  {t("teams.invite")}
+                  {t("teams.invite.title")}
                 </Button>
               </>
             )}
@@ -449,11 +450,11 @@ function TeamDashboard({
         open={renameOpen}
         onOpenChange={setRenameOpen}
         currentName={team.name}
-        title={t("dlgRename.title")}
-        description={t("dlgRename.desc")}
-        label={t("dlgRename.label")}
+        title={t("teams.dlgRename.title")}
+        description={t("teams.dlgRename.desc")}
+        label={t("teams.dlgRename.label")}
         onSave={(name) =>
-          teamApi(`/api/teams/${team.id}`, { method: "PATCH", body: { name } })
+          teamApi(t, `/api/teams/${team.id}`, { method: "PATCH", body: { name } })
         }
         onSaved={() => router.refresh()}
       />
@@ -469,33 +470,32 @@ function TeamDashboard({
       <ConfirmDialog
         open={leaveOpen}
         onOpenChange={setLeaveOpen}
-        title={t("dlgLeave.title")}
-        description={t("dlgLeave.desc")}
-        confirmLabel={t("dlgLeave.confirm")}
+        title={t("teams.dlgLeave.title")}
+        description={t("teams.dlgLeave.desc")}
+        confirmLabel={t("teams.dlgLeave.confirm")}
         onConfirm={() =>
           run(() =>
-            teamApi(`/api/teams/${team.id}/members/me`, { method: "DELETE" })
+            teamApi(t, `/api/teams/${team.id}/members/me`, { method: "DELETE" })
           )
         }
       />
       <ConfirmDialog
         open={transferTarget !== null}
         onOpenChange={(open) => !open && setTransferTarget(null)}
-        title={t("dlgTransfer.title")}
+        title={t("teams.dlgTransfer.title")}
         description={
           transferTarget
-            ? t("dlgTransfer.desc", {
+            ? t("teams.dlgTransfer.desc", {
                 name: transferTarget.displayName ?? transferTarget.username,
               })
             : undefined
         }
-        confirmLabel={t("dlgTransfer.confirm")}
+        confirmLabel={t("teams.dlgTransfer.confirm")}
         destructive={false}
         onConfirm={() =>
           transferTarget
             ? run(() =>
-                teamApi(
-                  `/api/teams/${team.id}/members/${transferTarget.userId}`,
+                teamApi(t, `/api/teams/${team.id}/members/${transferTarget.userId}`,
                   { method: "PATCH", body: { role: "admin" } }
                 )
               )
@@ -505,15 +505,14 @@ function TeamDashboard({
       <ConfirmDialog
         open={removeTarget !== null}
         onOpenChange={(open) => !open && setRemoveTarget(null)}
-        title={t("dlgRemove.title")}
-        description={t("dlgRemove.desc")}
+        title={t("teams.dlgRemove.title")}
+        description={t("teams.dlgRemove.desc")}
         confirmName={removeTarget?.username ?? ""}
-        confirmLabel={t("dlgRemove.confirm")}
+        confirmLabel={t("teams.dlgRemove.confirm")}
         onConfirm={() =>
           removeTarget
             ? run(() =>
-                teamApi(
-                  `/api/teams/${team.id}/members/${removeTarget.userId}`,
+                teamApi(t, `/api/teams/${team.id}/members/${removeTarget.userId}`,
                   { method: "DELETE" }
                 )
               )
@@ -523,36 +522,36 @@ function TeamDashboard({
       <ConfirmDialog
         open={disbandOpen}
         onOpenChange={setDisbandOpen}
-        title={t("dlgDisband.title")}
-        description={t("dlgDisband.desc")}
+        title={t("teams.dlgDisband.title")}
+        description={t("teams.dlgDisband.desc")}
         confirmName={team.name}
-        confirmLabel={t("dlgDisband.confirm")}
+        confirmLabel={t("teams.dlgDisband.confirm")}
         onConfirm={() =>
-          run(() => teamApi(`/api/teams/${team.id}/disband`, { method: "POST" }))
+          run(() => teamApi(t, `/api/teams/${team.id}/disband`, { method: "POST" }))
         }
       />
       <ConfirmDialog
         open={deleteOpen}
         onOpenChange={setDeleteOpen}
-        title={t("dlgDelete.title")}
-        description={t("dlgDelete.desc")}
+        title={t("teams.dlgDelete.title")}
+        description={t("teams.dlgDelete.desc")}
         confirmName={team.name}
-        confirmLabel={t("dlgDelete.confirm")}
+        confirmLabel={t("teams.dlgDelete.confirm")}
         onConfirm={() =>
-          run(() => teamApi(`/api/teams/${team.id}`, { method: "DELETE" }))
+          run(() => teamApi(t, `/api/teams/${team.id}`, { method: "DELETE" }))
         }
       />
       <RenameDialog
         open={groupCreateOpen}
         onOpenChange={setGroupCreateOpen}
         currentName=""
-        title={t("dlgGroup.title")}
-        description={t("dlgGroup.desc")}
-        label={t("dlgGroup.label")}
-        placeholder={t("dlgGroup.ph")}
-        saveLabel={t("dlg.create")}
+        title={t("teams.dlgGroup.title")}
+        description={t("teams.dlgGroup.desc")}
+        label={t("teams.dlgGroup.label")}
+        placeholder={t("teams.dlgGroup.ph")}
+        saveLabel={t("teams.dlg.create")}
         onSave={(name) =>
-          teamApi(`/api/teams/${team.id}/groups`, { body: { name } })
+          teamApi(t, `/api/teams/${team.id}/groups`, { body: { name } })
         }
         onSaved={() => router.refresh()}
       />
@@ -560,11 +559,11 @@ function TeamDashboard({
         open={groupRename !== null}
         onOpenChange={(open) => !open && setGroupRename(null)}
         currentName={groupRename?.name ?? ""}
-        title={t("dlgGroupRename.title")}
-        label={t("dlgGroup.label")}
+        title={t("teams.dlgGroupRename.title")}
+        label={t("teams.dlgGroup.label")}
         onSave={(name) =>
           groupRename
-            ? teamApi(`/api/teams/${team.id}/groups/${groupRename.id}`, {
+            ? teamApi(t, `/api/teams/${team.id}/groups/${groupRename.id}`, {
                 method: "PATCH",
                 body: { name },
               })
@@ -575,15 +574,14 @@ function TeamDashboard({
       <ConfirmDialog
         open={groupDisband !== null}
         onOpenChange={(open) => !open && setGroupDisband(null)}
-        title={t("dlgGroupDisband.title")}
-        description={t("dlgGroupDisband.desc")}
+        title={t("teams.dlgGroupDisband.title")}
+        description={t("teams.dlgGroupDisband.desc")}
         confirmName={groupDisband?.name ?? ""}
-        confirmLabel={t("dlgGroupDisband.confirm")}
+        confirmLabel={t("teams.dlgGroupDisband.confirm")}
         onConfirm={() =>
           groupDisband
             ? run(() =>
-                teamApi(
-                  `/api/teams/${team.id}/groups/${groupDisband.id}/disband`,
+                teamApi(t, `/api/teams/${team.id}/groups/${groupDisband.id}/disband`,
                   { method: "POST" }
                 )
               )
@@ -593,14 +591,14 @@ function TeamDashboard({
       <ConfirmDialog
         open={groupDelete !== null}
         onOpenChange={(open) => !open && setGroupDelete(null)}
-        title={t("dlgGroupDelete.title")}
-        description={t("dlgGroupDelete.desc")}
+        title={t("teams.dlgGroupDelete.title")}
+        description={t("teams.dlgGroupDelete.desc")}
         confirmName={groupDelete?.name ?? ""}
-        confirmLabel={t("dlgGroupDelete.confirm")}
+        confirmLabel={t("teams.dlgGroupDelete.confirm")}
         onConfirm={() =>
           groupDelete
             ? run(() =>
-                teamApi(`/api/teams/${team.id}/groups/${groupDelete.id}`, {
+                teamApi(t, `/api/teams/${team.id}/groups/${groupDelete.id}`, {
                   method: "DELETE",
                 })
               )
@@ -668,7 +666,7 @@ function MemberRow({
   onTransfer: () => void;
   onRemove: () => void;
 }) {
-  const { t } = useI18n();
+  const t = useT();
   const activeGroups = groups.filter((g) => g.status === "active");
   // The demo locks the admin row: role changes and removal of the team's
   // single admin all go through transfer/disband, not member actions.
@@ -681,14 +679,12 @@ function MemberRow({
   const assignGroup = (groupId: string | null) =>
     void run(() => {
       if (groupId) {
-        return teamApi(
-          `/api/teams/${teamId}/groups/${groupId}/members/${member.userId}`,
+        return teamApi(t, `/api/teams/${teamId}/groups/${groupId}/members/${member.userId}`,
           { method: "PUT" }
         );
       }
       return member.groupId
-        ? teamApi(
-            `/api/teams/${teamId}/groups/${member.groupId}/members/${member.userId}`,
+        ? teamApi(t, `/api/teams/${teamId}/groups/${member.groupId}/members/${member.userId}`,
             { method: "DELETE" }
           )
         : Promise.resolve(null);
@@ -771,7 +767,7 @@ function MemberRow({
                   size="sm"
                   onClick={() =>
                     void run(() =>
-                      teamApi(`/api/teams/${teamId}/members/${member.userId}`, {
+                      teamApi(t, `/api/teams/${teamId}/members/${member.userId}`, {
                         method: "PATCH",
                         body: {
                           role:
@@ -826,7 +822,7 @@ function RenameDialog({
   onSave: (name: string) => Promise<string | null>;
   onSaved: () => void;
 }) {
-  const { t } = useI18n();
+  const t = useT();
   const [value, setValue] = useState(currentName);
   const [busy, setBusy] = useState(false);
   const [lastOpen, setLastOpen] = useState(false);
@@ -867,13 +863,13 @@ function RenameDialog({
         </div>
         <DialogFooter>
           <DialogClose render={<Button variant="outline" disabled={busy} />}>
-            {t("dlg.cancel")}
+            {t("teams.dlg.cancel")}
           </DialogClose>
           <Button
             disabled={busy || !value.trim() || value.trim() === currentName}
             onClick={() => void submit()}
           >
-            {saveLabel ?? t("dlg.save")}
+            {saveLabel ?? t("teams.dlg.save")}
           </Button>
         </DialogFooter>
       </DialogContent>

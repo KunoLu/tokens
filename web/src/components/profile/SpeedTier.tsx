@@ -3,8 +3,8 @@
 import * as Tooltip from "@radix-ui/react-tooltip";
 import { ZapIcon } from "lucide-react";
 import type { SpeedTierRow } from "@/lib/speedUsage";
+import { useT } from "@/components/layout/LocaleProvider";
 import { cn } from "@/lib/utils";
-import { useI18n } from "@/lib/i18n";
 
 const SPEED_LABELS = {
   standard: "profile.speed.standard",
@@ -37,7 +37,7 @@ function SpeedTierIcon({ speed }: { speed: SpeedTierRow["speed"] }) {
 }
 
 export function SpeedTierLabel({ tier, className }: { tier: SpeedTierRow; className?: string }) {
-  const { t } = useI18n();
+  const t = useT();
   const label = (
     <span className={cn("inline-flex min-w-0 cursor-default items-center gap-1.5", className)}>
       <SpeedTierIcon speed={tier.speed} />
@@ -57,8 +57,10 @@ export function SpeedTierLabel({ tier, className }: { tier: SpeedTierRow; classN
           className="z-[1000] select-none rounded-lg bg-[#17181B] px-3 py-2 text-xs font-medium text-[#e5e5e5] shadow-[0_8px_30px_rgba(0,0,0,0.4),0_0_0_1px_rgba(255,255,255,0.06)]"
         >
           {t("profile.speed.tooltip", {
-            speed: t(SPEED_LABELS[tier.speed]),
-            sources: tier.sources.map((source) => t(SOURCE_LABELS[source])).join(t("profile.speed.sourceSeparator")),
+            label: t(SPEED_LABELS[tier.speed]),
+            sources: tier.sources
+              .map((source) => t(SOURCE_LABELS[source]))
+              .join(", "),
           })}
         </Tooltip.Content>
       </Tooltip.Portal>

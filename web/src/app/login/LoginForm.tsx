@@ -7,14 +7,17 @@ import { Input } from "@/components/ui/input";
 import { CONTAINER } from "@/components/layout/Container";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { cn } from "@/lib/utils";
-import { localizeServerError, useI18n } from "@/lib/i18n";
+import { useLocale, useT } from "@/components/layout/LocaleProvider";
+import { localizeHref } from "@/lib/i18n/config";
+import { localizeServerError } from "@/lib/i18n/serverError";
 
 export default function LoginForm({ returnTo }: { returnTo: string }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const { t } = useI18n();
+  const t = useT();
+  const locale = useLocale();
 
   const onSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -66,10 +69,10 @@ export default function LoginForm({ returnTo }: { returnTo: string }) {
         <div className="flex flex-col gap-1.5">
           <div className="flex items-baseline justify-between">
             <label htmlFor="password" className="text-[13px] font-semibold">
-              {t("auth.password")}
+              {t("auth.passwordLabel")}
             </label>
             <Link
-              href={`/forgot-password?returnTo=${encodeURIComponent(returnTo)}`}
+              href={localizeHref(`/forgot-password?returnTo=${encodeURIComponent(returnTo)}`, locale)}
               className="text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
             >
               {t("auth.login.forgot")}
@@ -102,14 +105,14 @@ export default function LoginForm({ returnTo }: { returnTo: string }) {
       <p className="mt-6 text-sm text-muted-foreground">
         {t("auth.login.noAccount")}{" "}
         <Link
-          href={`/register?returnTo=${encodeURIComponent(returnTo)}`}
+          href={localizeHref(`/register?returnTo=${encodeURIComponent(returnTo)}`, locale)}
           className="text-primary underline-offset-4 hover:underline"
         >
           {t("auth.login.createOne")}
         </Link>
         {" · "}
         {t("auth.login.noVerify")}{" "}
-        <Link href="/verify-email" className="text-primary underline-offset-4 hover:underline">
+        <Link href={localizeHref("/verify-email", locale)} className="text-primary underline-offset-4 hover:underline">
           {t("auth.login.resend")}
         </Link>
       </p>

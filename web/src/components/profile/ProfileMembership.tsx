@@ -5,7 +5,7 @@ import { useRouter } from "nextjs-toploader/app";
 import { toast } from "react-toastify";
 import { Button } from "@/components/ui/button";
 import { teamApi } from "@/components/teams/api";
-import { useI18n } from "@/lib/i18n";
+import { useT } from "@/components/layout/LocaleProvider";
 import type { ProfileMembership } from "@/lib/teams/profileMembership";
 
 /**
@@ -21,7 +21,7 @@ export function ProfileMembership({
   username: string;
   membership: ProfileMembership;
 }) {
-  const { t } = useI18n();
+  const t = useT();
   const router = useRouter();
   const [sessionUsername, setSessionUsername] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -48,7 +48,7 @@ export function ProfileMembership({
 
   const leave = async (path: string) => {
     setBusy(true);
-    const error = await teamApi(path, { method: "DELETE" });
+    const error = await teamApi(t, path, { method: "DELETE" });
     setBusy(false);
     if (error) {
       // TeamError messages are user-facing; the 409 admin guard copy

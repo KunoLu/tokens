@@ -3,7 +3,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Panel } from "@/components/ui/primitives";
-import { useI18n } from "@/lib/i18n";
+import { useLocale, useT } from "@/components/layout/LocaleProvider";
+import { localizeHref } from "@/lib/i18n/config";
+import { richText } from "@/lib/i18n/rich";
 
 interface User {
   id: string;
@@ -19,7 +21,8 @@ function requestSession(): Promise<{ user?: User | null }> {
 }
 
 export default function DeviceClient() {
-  const { t } = useI18n();
+  const t = useT();
+  const locale = useLocale();
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   // "Could not load the session" is not the same answer as "signed out":
@@ -46,22 +49,8 @@ export default function DeviceClient() {
   }, []);
 
   useEffect(() => {
-    let cancelled = false;
-    requestSession()
-      .then((data) => {
-        if (cancelled) return;
-        setUser(data.user ?? null);
-        setIsLoading(false);
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setSessionFailed(true);
-        setIsLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    loadSession();
+  }, [loadSession]);
 
   // The form the user was operating is replaced wholesale on success, so focus
   // would otherwise be left on a button that no longer exists.
@@ -86,21 +75,20 @@ export default function DeviceClient() {
         body: JSON.stringify({ userCode: code }),
       });
       if (!response.ok) {
-        setStatus("error");
-        setError(t("device.invalidCode"));
-        return;
+        const data = await response.json();
+        throw new Error(data.error || t("settings.pairing.invalidCode"));
       }
       setStatus("success");
-    } catch {
+    } catch (err) {
       setStatus("error");
-      setError(t("auth.network"));
+      setError(err instanceof Error ? err.message : t("settings.pairing.genericError"));
     }
   };
 
   if (isLoading) {
     return (
       <main id="main-content" className="flex flex-1 items-center justify-center bg-background px-4">
-        <div className="text-sm text-muted-foreground">{t("device.loading")}</div>
+        <div className="text-sm text-muted-foreground">{t("common.loading")}</div>
       </main>
     );
   }
@@ -125,31 +113,31 @@ export default function DeviceClient() {
               />
             </svg>
           </div>
-          <h1 className="text-2xl font-bold tracking-tight text-foreground">{t("device.title")}</h1>
-          <p className="mt-1 text-sm text-muted-foreground">{t("device.desc")}</p>
+          <h1 className="text-2xl font-bold tracking-tight text-foreground">{t("settings.pairing.title")}</h1>
+          <p className="mt-1 text-sm text-muted-foreground">{t("settings.pairing.subtitle")}</p>
         </div>
 
         {sessionFailed ? (
           <div className="text-center" role="alert">
             <p className="mb-5 text-sm text-muted-foreground">
-              {t("device.sessionFailed")}
+              {t("settings.pairing.sessionFailed")}
             </p>
             <button
               type="button"
               onClick={loadSession}
               className="inline-flex h-11 w-full items-center justify-center rounded-lg bg-primary px-4 text-sm font-semibold text-primary-foreground transition hover:opacity-90"
             >
-              {t("error.retry")}
+              {t("common.retry")}
             </button>
           </div>
         ) : !user ? (
           <div className="text-center">
-            <p className="mb-5 text-sm text-muted-foreground">{t("device.signInToAuth")}</p>
+            <p className="mb-5 text-sm text-muted-foreground">{t("settings.pairing.signInPrompt")}</p>
             <a
-              href="/login?returnTo=/device"
+              href={`/login?returnTo=${encodeURIComponent(localizeHref("/device", locale))}`}
               className="inline-flex h-11 w-full items-center justify-center rounded-lg bg-primary px-4 text-sm font-semibold text-primary-foreground transition hover:opacity-90"
             >
-              {t("nav.signIn")}
+              {t("settings.pairing.signInButton")}
             </a>
           </div>
         ) : status === "success" ? (
@@ -170,15 +158,15 @@ export default function DeviceClient() {
               tabIndex={-1}
               className="mb-1 text-lg font-semibold tracking-tight text-foreground outline-none"
             >
-              {t("device.authorized")}
+              {t("settings.pairing.successTitle")}
             </h2>
-            <p className="text-sm text-muted-foreground">{t("device.closeWindow")}</p>
+            <p className="text-sm text-muted-foreground">{t("settings.pairing.successBody")}</p>
           </div>
         ) : (
           <form onSubmit={handleSubmit}>
             <div className="mb-4">
               <label htmlFor="device-code" className="mb-2 block text-center text-sm text-muted-foreground">
-                {t("device.enterCode")}
+                {t("settings.pairing.codeLabel")}
               </label>
               <input
                 id="device-code"
@@ -188,7 +176,7 @@ export default function DeviceClient() {
                 placeholder="XXXX-XXXX"
                 maxLength={9}
                 autoFocus
-                aria-label={t("device.codeAria")}
+                aria-label={t("settings.pairing.codeAria")}
                 className="w-full rounded-lg border border-border bg-muted px-4 py-4 text-center font-mono text-3xl font-bold tracking-[0.3em] text-foreground tabular-nums outline-none transition placeholder:opacity-40 focus:border-primary focus:ring-2 focus:ring-primary/25"
               />
             </div>
@@ -207,11 +195,17 @@ export default function DeviceClient() {
               disabled={code.length < 9 || status === "loading"}
               className="inline-flex h-11 w-full items-center justify-center rounded-lg bg-primary px-4 text-sm font-semibold text-primary-foreground transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {status === "loading" ? t("device.authorizing") : t("device.authorize")}
+              {status === "loading" ? t("settings.pairing.submitting") : t("settings.pairing.submit")}
             </button>
 
             <p className="mt-4 text-center text-sm text-muted-foreground">
-              {t("device.signedInAs")} <span className="font-mono font-medium text-foreground tabular-nums">{user.username}</span>
+              {richText(t("settings.pairing.signedInAs"), {
+                username: (
+                  <span className="font-mono font-medium text-foreground tabular-nums">
+                    {user.username}
+                  </span>
+                ),
+              })}
             </p>
           </form>
         )}

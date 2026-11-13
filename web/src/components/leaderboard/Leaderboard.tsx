@@ -22,7 +22,8 @@ import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/u
 import { cn } from "@/lib/utils";
 import { CONTAINER } from "@/components/layout/Container";
 import { PageHeader } from "@/components/layout/PageHeader";
-import { useFormat, useI18n, type TranslationKey } from "@/lib/i18n";
+import { useLocale, useT } from "@/components/layout/LocaleProvider";
+import { formatCurrency, formatNumber } from "@/lib/format";
 import type {
   LeaderboardSortBy,
   LeaderboardTokenFormat,
@@ -64,13 +65,13 @@ export const PERIODS: ReadonlyArray<{ value: Period }> = [
 // Shared with the Teamboard, which renders the same period chrome. `custom`
 // is parsed on the URL but is not a ToggleGroup option, so it reuses the
 // All-time label.
-export const PERIOD_LABEL_KEYS: Record<Period, TranslationKey> = {
-  all: "teamboard.periodAll",
-  today: "teamboard.periodToday",
-  week: "teamboard.periodWeek",
-  month: "teamboard.periodMonth",
-  "last-month": "teamboard.periodLastMonth",
-  custom: "teamboard.periodAll",
+export const PERIOD_LABEL_KEYS: Record<Period, string> = {
+  all: "leaderboard.period.allTime",
+  today: "leaderboard.period.today",
+  week: "leaderboard.period.week",
+  month: "leaderboard.period.month",
+  "last-month": "leaderboard.period.lastMonth",
+  custom: "leaderboard.period.allTime",
 };
 
 
@@ -119,7 +120,7 @@ export function DeveloperRow({
   hideTeam?: boolean;
 }) {
   const compact = tokenFormat === "compact";
-  const { formatNumber, formatCurrency } = useFormat();
+  const locale = useLocale();
   const primary = sortBy === "cost" ? user.totalCost : user.totalTokens;
   const share = max > 0 ? Math.max(primary / max, 0.006) : 0;
   return (
@@ -192,7 +193,7 @@ export function DeveloperRow({
               : "text-muted-foreground"
           )}
         >
-          {formatNumber(user.totalTokens, true)}
+          {formatNumber(user.totalTokens, true, locale)}
         </span>
         <span
           className={cn(
@@ -202,7 +203,7 @@ export function DeveloperRow({
               : "text-muted-foreground"
           )}
         >
-          {formatCurrency(user.totalCost, true)}
+          {formatCurrency(user.totalCost, true, locale)}
         </span>
       </TableCell>
 
@@ -216,7 +217,7 @@ export function DeveloperRow({
                 : "text-muted-foreground"
             )}
           >
-            {formatNumber(user.totalTokens, compact)}
+            {formatNumber(user.totalTokens, compact, locale)}
           </span>
           {/* Share of the top row on this page — a shape you can scan without
               reading every number. */}
@@ -238,7 +239,7 @@ export function DeveloperRow({
               : "text-muted-foreground"
           )}
         >
-          {formatCurrency(user.totalCost, compact)}
+          {formatCurrency(user.totalCost, compact, locale)}
         </span>
       </TableCell>
     </TableRow>
@@ -295,11 +296,11 @@ export default function Leaderboard({
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const { t } = useI18n();
-  const { formatNumber, formatCurrency } = useFormat();
+  const t = useT();
+  const locale = useLocale();
   const formatTitles = {
-    showExact: t("teamboard.showExact"),
-    abbreviate: t("teamboard.abbreviate"),
+    showExact: t("leaderboard.formatToggle.exact"),
+    abbreviate: t("leaderboard.formatToggle.abbreviate"),
   };
   const [sortBy, setSortBy] = useState<LeaderboardSortBy>(initialSortBy);
   const [search, setSearch] = useState(searchParams.get("search") ?? "");
@@ -385,7 +386,7 @@ export default function Leaderboard({
     <div className={cn(CONTAINER, "pb-24 pt-10 sm:pt-14")}>
       <PageHeader
         title={t("nav.leaderboard")}
-        description={t("leaderboard.desc")}
+        description={t("leaderboard.description")}
       />
 
       {/* The rank card exists only when there is a rank to put in it. A signed
@@ -399,19 +400,19 @@ export default function Leaderboard({
           "grid grid-cols-2 gap-6",
           initialUserRank ? "sm:grid-cols-4" : "sm:grid-cols-3"
         )}
-        aria-label={t("leaderboard.totalsAria")}
+        aria-label={t("leaderboard.totals")}
       >
-        <Stat label={t("teamboard.sortTokens")} value={formatNumber(stats.totalTokens, true)} />
-        <Stat label={t("teamboard.sortCost")} value={formatCurrency(stats.totalCost, true)} />
+        <Stat label={t("leaderboard.sort.tokens")} value={formatNumber(stats.totalTokens, true, locale)} />
+        <Stat label={t("leaderboard.sort.cost")} value={formatCurrency(stats.totalCost, true, locale)} />
         <Stat
-          label={t("leaderboard.developers")}
-          value={formatNumber(stats.uniqueUsers, false)}
+          label={t("leaderboard.stats.developers")}
+          value={formatNumber(stats.uniqueUsers, false, locale)}
           className={initialUserRank ? undefined : "col-span-2 sm:col-span-1"}
         />
         {/* The only figure here that is about the viewer, so it takes the
             accent — same signal as the highlighted self row below. */}
         {initialUserRank && (
-          <Stat label={t("leaderboard.yourRank")} value={`#${initialUserRank.rank}`} accent />
+          <Stat label={t("leaderboard.stats.yourRank")} value={`#${initialUserRank.rank}`} accent />
         )}
       </section>
 
@@ -441,7 +442,7 @@ export default function Leaderboard({
               });
             }}
             variant="outline"
-            aria-label={t("teamboard.periodFilter")}
+            aria-label={t("leaderboard.period.label")}
             className="[&>*]:h-10 [&>*]:px-3.5 sm:[&>*]:h-8 sm:[&>*]:px-3"
           >
             {PERIODS.map((p) => (
@@ -462,11 +463,11 @@ export default function Leaderboard({
               pushQuery({ sortBy: next, page: null });
             }}
             variant="outline"
-            aria-label={t("teamboard.sortFilter")}
+            aria-label={t("leaderboard.sortBy")}
             className="[&>*]:h-10 [&>*]:px-3.5 sm:[&>*]:h-8 sm:[&>*]:px-3"
           >
-            <ToggleGroupItem value="tokens">{t("teamboard.sortTokens")}</ToggleGroupItem>
-            <ToggleGroupItem value="cost">{t("teamboard.sortCost")}</ToggleGroupItem>
+            <ToggleGroupItem value="tokens">{t("leaderboard.sort.tokens")}</ToggleGroupItem>
+            <ToggleGroupItem value="cost">{t("leaderboard.sort.cost")}</ToggleGroupItem>
           </ToggleGroup>
 
           <form
@@ -481,8 +482,8 @@ export default function Leaderboard({
               ref={searchRef}
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              placeholder={t("teamboard.searchPlaceholder")}
-              aria-label={t("teamboard.searchAria")}
+              placeholder={t("leaderboard.search.placeholder")}
+              aria-label={t("leaderboard.search.label")}
               className="h-10 w-full pl-8 text-sm sm:h-8 sm:w-56"
             />
           </form>
@@ -533,12 +534,12 @@ export default function Leaderboard({
           <TableHeader>
             <TableRow className="hover:bg-transparent">
               <TableHead className="w-12 pl-4 sm:pl-6">#</TableHead>
-              <TableHead>{t("teamboard.colDeveloper")}</TableHead>
+              <TableHead>{t("leaderboard.table.developer")}</TableHead>
               <MembershipColumnHeaders
-                teamLabel={t("leaderboard.colTeam")}
-                groupLabel={t("teamboard.colGroup")}
+                teamLabel={t("leaderboard.table.team")}
+                groupLabel={t("leaderboard.table.group")}
               />
-              <TableHead className="pr-4 text-right sm:hidden">{t("teamboard.colUsage")}</TableHead>
+              <TableHead className="pr-4 text-right sm:hidden">{t("leaderboard.table.usage")}</TableHead>
               {/* Both numeric headers toggle abbreviated figures (1.2B) for
                   exact ones — a toggle contributed upstream by Fai Chou that
                   people rely on when comparing close totals. It was invisible:
@@ -548,7 +549,7 @@ export default function Leaderboard({
                   preference so the two columns cannot disagree. */}
               <TableHead className="hidden w-44 p-0 text-right sm:table-cell">
                 <FormatToggle
-                  label={t("teamboard.sortTokens")}
+                  label={t("leaderboard.sort.tokens")}
                   titles={formatTitles}
                   compact={tokenFormat === "compact"}
                   onToggle={() =>
@@ -560,7 +561,7 @@ export default function Leaderboard({
               </TableHead>
               <TableHead className="hidden w-32 p-0 pr-4 text-right sm:table-cell">
                 <FormatToggle
-                  label={t("teamboard.sortCost")}
+                  label={t("leaderboard.sort.cost")}
                   titles={formatTitles}
                   compact={tokenFormat === "compact"}
                   onToggle={() =>
@@ -595,12 +596,12 @@ export default function Leaderboard({
                   the applied query rather than the input, which can have been
                   typed past what these results answer. */}
               <EmptyTitle>
-                {appliedSearch ? t("teamboard.noSearchTitle") : t("teamboard.nothingTitle")}
+                {appliedSearch ? t("leaderboard.empty.noResults") : t("leaderboard.empty.nothing")}
               </EmptyTitle>
               <EmptyDescription>
                 {appliedSearch
-                  ? t("teamboard.noSearchDesc", { q: appliedSearch })
-                  : t("teamboard.nothingDesc")}
+                  ? t("leaderboard.empty.noMatch", { query: appliedSearch })
+                  : t("leaderboard.empty.none")}
               </EmptyDescription>
             </EmptyHeader>
           </Empty>
@@ -608,17 +609,17 @@ export default function Leaderboard({
       </div>
 
       {pagination.totalPages > 1 && (
-        <nav className="mt-6 flex items-center justify-between" aria-label={t("teamboard.paginationAria")}>
+        <nav className="mt-6 flex items-center justify-between" aria-label={t("leaderboard.pagination.label")}>
           <Button
             variant="outline"
             disabled={!pagination.hasPrev}
             className="h-10 sm:h-8"
             onClick={() => pushQuery({ page: String(pagination.page - 1) })}
           >
-            {t("teamboard.prevPage")}
+            {t("leaderboard.pagination.previous")}
           </Button>
           <span className="tabular text-xs text-muted-foreground">
-            {t("teamboard.pageOf", { page: pagination.page, total: pagination.totalPages })}
+            {t("leaderboard.pagination.page", { current: pagination.page, total: pagination.totalPages })}
           </span>
           <Button
             variant="outline"
@@ -626,7 +627,7 @@ export default function Leaderboard({
             className="h-10 sm:h-8"
             onClick={() => pushQuery({ page: String(pagination.page + 1) })}
           >
-            {t("teamboard.nextPage")}
+            {t("leaderboard.pagination.next")}
           </Button>
         </nav>
       )}

@@ -6,8 +6,8 @@ import type { DailyContribution, GraphColorPalette, TooltipPosition } from "@/li
 import { getThemeGradeColor } from "@/lib/themes";
 import { groupByWeek } from "@/lib/utils";
 import { BOX_WIDTH, CELL_SIZE, CANVAS_MARGIN, HEADER_HEIGHT, TEXT_HEIGHT, FONT_SIZE, FONT_FAMILY } from "@/lib/constants";
-import { intlTag, useI18n, type Locale, type Translate } from "@/lib/i18n";
-import { formatContributionDate } from "@/lib/date-utils";
+import { formatCurrency, formatNumber } from "@/lib/format";
+import { useLocale, useT } from "@/components/layout/LocaleProvider";
 import { parseISO, getMonth } from "date-fns";
 
 interface TokenGraph2DProps {
@@ -19,15 +19,32 @@ interface TokenGraph2DProps {
 }
 
 export function TokenGraph2D({ contributions, palette, year, onDayHover, onDayClick }: TokenGraph2DProps) {
+  const t = useT();
+  const locale = useLocale();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const weeksData = useMemo(() => groupByWeek(contributions, year), [contributions, year]);
   const { resolvedTheme } = useTheme();
-  const { t, locale } = useI18n();
-  // Split once per locale: the canvas effect depends on these arrays, and a
-  // fresh array every render would repaint the whole graph every render.
-  const monthLabels = useMemo(() => t("graph.monthsShort").split(","), [t]);
-  const dayLabels = useMemo(() => t("graph.daysShort").split(","), [t]);
   const isDark = resolvedTheme === "dark";
+
+  // Canvas text comes from `Intl` rather than the dictionary: these are dates,
+  // and a locale already knows its own month and weekday abbreviations. The
+  // gutter is wide enough for two characters ("周一"), which is what Japanese
+  // and Chinese need, so the layout constants hold.
+  const monthLabels = useMemo(
+    () =>
+      Array.from({ length: 12 }, (_, month) =>
+        new Intl.DateTimeFormat(locale, { month: "short" }).format(new Date(2021, month, 1)),
+      ),
+    [locale],
+  );
+  const dayLabels = useMemo(
+    () =>
+      // 2021-02-07 is a Sunday, so index 0..6 walks Sunday..Saturday.
+      Array.from({ length: 7 }, (_, day) =>
+        new Intl.DateTimeFormat(locale, { weekday: "short" }).format(new Date(2021, 1, 7 + day)),
+      ),
+    [locale],
+  );
 
   // Theme colors are derived from `isDark` (next-themes' resolvedTheme — the
   // React source of truth) rather than read via getComputedStyle. Child effects
@@ -152,7 +169,7 @@ export function TokenGraph2D({ contributions, palette, year, onDayHover, onDayCl
       <canvas
         ref={canvasRef}
         role="img"
-        aria-label={t("graph.canvasAria", { year })}
+        aria-label={t("common.tokenGraph2d.graphAria", { year })}
         className="cursor-pointer"
         onMouseMove={handleMouseMove}
         onMouseLeave={() => onDayHover(null, null)}
@@ -168,21 +185,17 @@ export function TokenGraph2D({ contributions, palette, year, onDayHover, onDayCl
         {contributions.map((day) => (
           <li key={day.date}>
             <button type="button" onClick={() => onDayClick(day)}>
-              {dayButtonLabel(day, t, locale)}
+              {t("common.tokenGraph2d.dayLabel", {
+                date: day.date,
+                tokens: formatNumber(day.totals.tokens, false, locale),
+                cost: formatCurrency(day.totals.cost, day.totals.cost >= 1000, locale),
+              })}
             </button>
           </li>
         ))}
       </ul>
     </div>
   );
-}
-
-function dayButtonLabel(day: DailyContribution, t: Translate, locale: Locale): string {
-  return t("graph.dayButton", {
-    date: formatContributionDate(day, locale),
-    tokens: day.totals.tokens.toLocaleString(intlTag(locale)),
-    cost: day.totals.cost.toLocaleString(intlTag(locale), { style: "currency", currency: "USD" }),
-  });
 }
 
 function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, radius: number) {

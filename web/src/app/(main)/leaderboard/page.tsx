@@ -1,5 +1,6 @@
 import { Suspense } from "react";
 import { cookies } from "next/headers";
+import type { Metadata } from "next";
 import { LeaderboardSkeleton } from "@/components/leaderboard/LeaderboardSkeleton";
 import { getLeaderboardData, getUserRank } from "@/lib/leaderboard/getLeaderboard";
 import type { LeaderboardData, Period, SortBy } from "@/lib/leaderboard/types";
@@ -10,6 +11,30 @@ import {
 } from "@/lib/leaderboard/constants";
 import { isValidDateString, parseCustomDateRange } from "@/lib/leaderboard/dateRange";
 import LeaderboardClient from "@/components/leaderboard/Leaderboard";
+import { getTranslator } from "@/lib/i18n/server";
+import { localizeHref } from "@/lib/i18n/config";
+
+/**
+ * The board is the page most often linked to from outside, so it is the one
+ * that declares the language alternates. `canonical` is its own translated
+ * address rather than the English one — a Chinese page canonicalised to the
+ * English page would drop it from the Chinese index.
+ */
+export async function generateMetadata(): Promise<Metadata> {
+  const { locale } = await getTranslator();
+
+  return {
+    alternates: {
+      canonical: localizeHref("/leaderboard", locale),
+      languages: {
+        en: "/leaderboard",
+        "zh-CN": "/zh-CN/leaderboard",
+        ja: "/ja/leaderboard",
+        "x-default": "/leaderboard",
+      },
+    },
+  };
+}
 
 function isMissingDatabaseUrl(error: unknown): boolean {
   return error instanceof Error && error.message === "DATABASE_URL environment variable is not set";

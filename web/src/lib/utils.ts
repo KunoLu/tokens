@@ -14,7 +14,7 @@ import type {
   ClientContribution,
   TokenBreakdown,
 } from "./types";
-import { intlTag, type Locale } from "@/lib/i18n/locale";
+import type { Locale } from "@/lib/i18n/config";
 
 export function groupByWeek(contributions: DailyContribution[], year: string): WeekData[] {
   const weeks: WeekData[] = [];
@@ -193,8 +193,8 @@ function recalculateSummary(
 }
 
 export function formatTokenCount(count: number, locale: Locale = "en"): string {
-  if (locale === "zh") {
-    return new Intl.NumberFormat(intlTag(locale), {
+  if (locale === "zh-CN") {
+    return new Intl.NumberFormat(locale, {
       notation: "compact",
       maximumFractionDigits: count >= 100 ? 1 : 2,
     }).format(count);
@@ -228,8 +228,8 @@ export function formatTokenCount(count: number, locale: Locale = "en"): string {
 export const formatNumber = formatTokenCount;
 
 export function formatCurrency(amount: number, locale: Locale = "en"): string {
-  if (locale === "zh") {
-    return new Intl.NumberFormat(intlTag(locale), {
+  if (locale === "zh-CN") {
+    return new Intl.NumberFormat(locale, {
       style: "currency",
       currency: "USD",
       notation: "compact",
@@ -256,7 +256,7 @@ export function formatCurrency(amount: number, locale: Locale = "en"): string {
 }
 
 export function formatDate(dateStr: string, locale: Locale = "en"): string {
-  return new Intl.DateTimeFormat(intlTag(locale), {
+  return new Intl.DateTimeFormat(locale, {
     day: "numeric",
     month: "short",
     year: "numeric",
@@ -264,7 +264,7 @@ export function formatDate(dateStr: string, locale: Locale = "en"): string {
 }
 
 export function formatDateFull(dateStr: string, locale: Locale = "en"): string {
-  return new Intl.DateTimeFormat(intlTag(locale), {
+  return new Intl.DateTimeFormat(locale, {
     day: "numeric",
     month: "long",
     year: "numeric",

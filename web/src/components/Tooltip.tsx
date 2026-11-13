@@ -4,9 +4,9 @@ import { useRef } from "react";
 import { useTheme } from "next-themes";
 import type { DailyContribution, TooltipPosition, GraphColorPalette } from "@/lib/types";
 import { getThemeGradeColor } from "@/lib/themes";
-import { formatCurrency, formatTokenCount } from "@/lib/utils";
 import { formatContributionDate } from "@/lib/date-utils";
-import { intlTag, useI18n } from "@/lib/i18n";
+import { formatCurrency, formatNumber } from "@/lib/format";
+import { useLocale, useT } from "@/components/layout/LocaleProvider";
 
 interface TooltipProps {
   day: DailyContribution | null;
@@ -36,11 +36,11 @@ function useAdjustedPosition(
 }
 
 export function Tooltip({ day, position, visible, palette }: TooltipProps) {
+  const t = useT();
+  const locale = useLocale();
   const tooltipRef = useRef<HTMLDivElement>(null);
   const { resolvedTheme } = useTheme();
   const adjustedPosition = useAdjustedPosition(position, visible, tooltipRef);
-  const { t, locale } = useI18n();
-
 
   if (!visible || !day || !adjustedPosition) return null;
 
@@ -54,7 +54,9 @@ export function Tooltip({ day, position, visible, palette }: TooltipProps) {
         <div className="my-3 border-t border-border" />
 
         <div className="mb-3 flex items-center justify-between">
-          <span className="text-sm font-medium text-muted-foreground">{t("graph.totalTokens")}</span>
+          <span className="text-sm font-medium text-muted-foreground">
+            {t("common.tooltip.totalTokens")}
+          </span>
           <span
             className="text-xl font-bold tracking-tight"
             style={{
@@ -68,30 +70,40 @@ export function Tooltip({ day, position, visible, palette }: TooltipProps) {
                   : "var(--foreground)",
             }}
           >
-            {formatTokenCount(totals.tokens, locale)}
+            {formatNumber(totals.tokens, true, locale)}
           </span>
         </div>
 
         <div className="my-3 border-t border-border" />
 
         <div className="flex flex-col gap-2 text-sm">
-          <TokenRow label={t("graph.tokenInput")} value={tokenBreakdown.input} />
-          <TokenRow label={t("graph.tokenOutput")} value={tokenBreakdown.output} />
-          <TokenRow label={t("graph.tokenCacheRead")} value={tokenBreakdown.cacheRead} />
-          <TokenRow label={t("graph.tokenCacheWrite")} value={tokenBreakdown.cacheWrite} />
-          {tokenBreakdown.reasoning > 0 && <TokenRow label={t("graph.tokenReasoning")} value={tokenBreakdown.reasoning} />}
+          <TokenRow label={t("common.breakdownPanel.input")} value={tokenBreakdown.input} />
+          <TokenRow label={t("common.breakdownPanel.output")} value={tokenBreakdown.output} />
+          <TokenRow label={t("common.breakdownPanel.cacheRead")} value={tokenBreakdown.cacheRead} />
+          <TokenRow label={t("common.breakdownPanel.cacheWrite")} value={tokenBreakdown.cacheWrite} />
+          {tokenBreakdown.reasoning > 0 && (
+            <TokenRow label={t("common.breakdownPanel.reasoning")} value={tokenBreakdown.reasoning} />
+          )}
         </div>
 
         <div className="my-3 border-t border-border" />
 
         <div className="flex items-center justify-between">
-          <span className="text-sm font-semibold text-muted-foreground">{t("graph.cost")}</span>
-          <span className="font-bold text-foreground">{formatCurrency(totals.cost, locale)}</span>
+          <span className="text-sm font-semibold text-muted-foreground">
+            {t("common.tooltip.cost")}
+          </span>
+          <span className="font-bold text-foreground">
+            {formatCurrency(totals.cost, totals.cost >= 1000, locale)}
+          </span>
         </div>
 
         <div className="mt-2 flex items-center justify-between">
-          <span className="text-sm font-medium text-muted-foreground">{t("graph.messages")}</span>
-          <span className="text-sm font-semibold text-foreground">{totals.messages.toLocaleString(intlTag(locale))}</span>
+          <span className="text-sm font-medium text-muted-foreground">
+            {t("common.tooltip.messages")}
+          </span>
+          <span className="text-sm font-semibold text-foreground">
+            {formatNumber(totals.messages, false, locale)}
+          </span>
         </div>
       </div>
     </div>
@@ -99,12 +111,14 @@ export function Tooltip({ day, position, visible, palette }: TooltipProps) {
 }
 
 function TokenRow({ label, value }: { label: string; value: number }) {
-  const { locale } = useI18n();
+  const locale = useLocale();
   if (value === 0) return null;
   return (
     <div className="flex items-center justify-between">
       <span className="font-medium text-muted-foreground">{label}</span>
-      <span className="font-mono font-semibold text-foreground">{formatTokenCount(value, locale)}</span>
+      <span className="font-mono font-semibold text-foreground">
+        {formatNumber(value, true, locale)}
+      </span>
     </div>
   );
 }

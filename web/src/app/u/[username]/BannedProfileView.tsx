@@ -1,5 +1,4 @@
-import { cookies } from "next/headers";
-import { intlTag, LOCALE_COOKIE, parseLocale, t } from "@/lib/i18n";
+import { getTranslator } from "@/lib/i18n/server";
 
 export interface BannedProfileData {
   banned: true;
@@ -19,11 +18,15 @@ export interface BannedProfileData {
  * the identity, a ban stamp, and the reason. The identity block is pushed
  * to grayscale so the stamp is the only thing with any color.
  */
-export default async function BannedProfileView({ data }: { data: BannedProfileData }) {
-  const locale = parseLocale((await cookies()).get(LOCALE_COOKIE)?.value);
+export default async function BannedProfileView({
+  data,
+}: {
+  data: BannedProfileData;
+}) {
+  const { locale, t } = await getTranslator();
   const { user } = data;
   const banDate = data.bannedAt
-    ? new Intl.DateTimeFormat(intlTag(locale), {
+    ? new Intl.DateTimeFormat(locale, {
         day: "numeric",
         month: "long",
         year: "numeric",
@@ -40,7 +43,7 @@ export default async function BannedProfileView({ data }: { data: BannedProfileD
             aria-hidden="true"
             className="pointer-events-none absolute right-4 top-6 rotate-12 rounded-md border-4 border-danger/70 px-3 py-1 font-mono text-xl font-black uppercase tracking-widest text-danger/80"
           >
-            {t(locale, "banned.stamp")}
+            {t("profile.banned.stamp")}
           </div>
 
           <div className="grayscale">
@@ -65,17 +68,19 @@ export default async function BannedProfileView({ data }: { data: BannedProfileD
           </div>
 
           <p className="mt-2 inline-block rounded-md bg-danger/10 px-2.5 py-1 font-mono text-xs font-semibold uppercase tracking-wide text-danger">
-            {banDate ? t(locale, "banned.badgeOn", { date: banDate }) : t(locale, "banned.badge")}
+            {banDate
+              ? t("profile.banned.accountBannedOn", { date: banDate })
+              : t("profile.banned.accountBanned")}
           </p>
 
           <p className="mt-6 text-sm leading-relaxed text-muted-foreground">
-            {t(locale, "banned.desc")}
+            {t("profile.banned.description")}
           </p>
 
           {data.banReason && (
             <div className="mt-6 rounded-xl border border-danger/25 bg-danger/5 p-4 text-left">
               <h2 className="font-mono text-[11px] font-semibold uppercase tracking-wide text-danger">
-                {t(locale, "banned.reason")}
+                {t("profile.banned.reasonHeading")}
               </h2>
               <p className="mt-2 text-sm leading-relaxed text-foreground/85">
                 {data.banReason}

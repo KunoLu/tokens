@@ -1,10 +1,16 @@
 /**
  * Thin fetch wrapper for the /api/teams* mutations. Returns `null` on
  * success, otherwise a locale-mapped server error for toasts.
+ *
+ * The translator comes from the caller (every caller is a component inside
+ * `LocaleProvider`): the URL — not a cookie — is what decided the language,
+ * so a client module cannot read it back on its own.
  */
-import { localizeServerErrorFromCookie } from "@/lib/i18n";
+import { localizeServerError, localizeServerErrorList } from "@/lib/i18n/serverError";
+import type { Translator } from "@/lib/i18n/translate";
 
 export async function teamApi(
+  t: Translator,
   path: string,
   init?: { method?: "POST" | "PATCH" | "PUT" | "DELETE"; body?: unknown }
 ): Promise<string | null> {
@@ -19,15 +25,15 @@ export async function teamApi(
       .json()
       .catch(() => ({}));
     if (Array.isArray(data.details) && data.details.length > 0) {
-      return data.details
-        .filter((item): item is string => typeof item === "string")
-        .map(localizeServerErrorFromCookie)
-        .join("; ");
+      return localizeServerErrorList(
+        t,
+        data.details.filter((item): item is string => typeof item === "string")
+      ).join("; ");
     }
     return typeof data.error === "string"
-      ? localizeServerErrorFromCookie(data.error)
-      : localizeServerErrorFromCookie(`HTTP ${res.status}`);
+      ? localizeServerError(t, data.error)
+      : localizeServerError(t, `HTTP ${res.status}`);
   } catch {
-    return localizeServerErrorFromCookie("Network error");
+    return localizeServerError(t, "Network error");
   }
 }

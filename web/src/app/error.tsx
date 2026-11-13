@@ -2,11 +2,11 @@
 
 import { useEffect } from "react";
 import Link from "next/link";
-import { Button, buttonVariants } from "@/components/ui/button";
-
+import { Button } from "@/components/ui/button";
 import { CONTAINER } from "@/components/layout/Container";
 import { cn } from "@/lib/utils";
-import { useI18n } from "@/lib/i18n";
+import { useLocale, useT } from "@/components/layout/LocaleProvider";
+import { localizeHref } from "@/lib/i18n/config";
 
 /**
  * Root error boundary.
@@ -25,7 +25,9 @@ export default function RootError({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
-  const { t } = useI18n();
+  const t = useT();
+  const locale = useLocale();
+
   useEffect(() => {
     console.error(error);
   }, [error]);
@@ -34,32 +36,31 @@ export default function RootError({
     <main id="main-content" className={cn(CONTAINER, "pb-24 pt-10 sm:pt-14")}>
       <header className="flex flex-col gap-1.5">
         <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">
-          {t("error.title")}
+          {t("errors.rootTitle")}
         </h1>
         <p className="max-w-[90ch] text-sm leading-relaxed text-muted-foreground">
-          {t("error.desc")}
+          {t("errors.rootDescription")}
         </p>
       </header>
 
       <div className="mt-7 flex flex-wrap items-center gap-2">
         <Button size="sm" onClick={reset}>
-          {t("error.retry")}
+          {t("common.retry")}
         </Button>
-        <Link
-          href="/leaderboard"
-          className={buttonVariants({ variant: "outline", size: "sm" })}
+        <Button
+          variant="outline"
+          size="sm"
+          render={<Link href={localizeHref("/leaderboard", locale)} />}
         >
-          {t("error.leaderboard")}
-        </Link>
-
-
+          {t("common.backToLeaderboard")}
+        </Button>
       </div>
 
       {/* The digest is the only handle support has on a specific failure, and
           it carries nothing sensitive. */}
       {error.digest && (
         <p className="mt-6 font-mono text-xs text-muted-foreground">
-          {t("error.reference", { digest: error.digest })}
+          {t("errors.reference")} {error.digest}
         </p>
       )}
     </main>

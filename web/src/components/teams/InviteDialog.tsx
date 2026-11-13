@@ -24,7 +24,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { avatarUrlFor } from "@/lib/avatar";
-import { localizeServerError, localizeServerErrorList, useI18n } from "@/lib/i18n";
+import { useT } from "@/components/layout/LocaleProvider";
+import { localizeServerError, localizeServerErrorList } from "@/lib/i18n/serverError";
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -59,7 +60,7 @@ export function InviteDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
-  const { t } = useI18n();
+  const t = useT();
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchUser[]>([]);
   const [selected, setSelected] = useState<Map<string, Selection>>(new Map());
@@ -87,7 +88,7 @@ export function InviteDialog({
         const res = await fetch(`/api/users/search?q=${encodeURIComponent(q)}`);
         if (seq !== requestSeq.current) return;
         if (!res.ok) {
-          toast.error(t("invite.searchFailed"));
+          toast.error(t("teams.invite.searchFailed"));
           setResults([]);
           return;
         }
@@ -158,12 +159,12 @@ export function InviteDialog({
         toast.error(localizeServerErrorList(t, data.details).join("; "));
       }
       if (sent > 0) {
-        toast.success(t("invite.sent", { n: sent }));
+        toast.success(t("teams.invite.sent", { n: sent }));
         reset();
         onOpenChange(false);
       }
     } catch {
-      toast.error(t("invite.sendFailed"));
+      toast.error(t("teams.invite.sendFailed"));
     } finally {
       setBusy(false);
     }
@@ -179,16 +180,16 @@ export function InviteDialog({
     >
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{t("invite.title")}</DialogTitle>
-          <DialogDescription>{t("invite.desc")}</DialogDescription>
+          <DialogTitle>{t("teams.invite.title")}</DialogTitle>
+          <DialogDescription>{t("teams.invite.desc")}</DialogDescription>
         </DialogHeader>
 
         <Input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder={t("invite.searchPh")}
+          placeholder={t("teams.invite.searchPh")}
           autoComplete="off"
-          aria-label={t("invite.searchPh")}
+          aria-label={t("teams.invite.searchPh")}
         />
 
         <div className="flex max-h-56 flex-col overflow-y-auto rounded-lg border border-border">
@@ -245,17 +246,17 @@ export function InviteDialog({
               }
             >
               <Checkbox checked={false} tabIndex={-1} render={<span className="pointer-events-none" />} />
-              <span className="flex-1">{t("invite.inviteEmail", { email: trimmed })}</span>
+              <span className="flex-1">{t("teams.invite.inviteEmail", { email: trimmed })}</span>
             </button>
           )}
           {trimmed && !showEmailRow && results.length === 0 && (
             <p className="px-2.5 py-2.5 text-xs text-muted-foreground">
-              {t("invite.noMatch")}
+              {t("teams.invite.noMatch")}
             </p>
           )}
           {!trimmed && selected.size === 0 && (
             <p className="px-2.5 py-2.5 text-xs text-muted-foreground">
-              {t("invite.searchPh")}
+              {t("teams.invite.searchPh")}
             </p>
           )}
           {[...selected.entries()]
@@ -278,7 +279,7 @@ export function InviteDialog({
                 <span className="min-w-0 flex-1 truncate">
                   {s.kind === "user"
                     ? `${s.displayName ?? s.username} (@${s.username})`
-                    : t("invite.inviteEmail", { email: s.email })}
+                    : t("teams.invite.inviteEmail", { email: s.email })}
                 </span>
               </button>
             ))}
@@ -286,25 +287,25 @@ export function InviteDialog({
 
         {groups.length > 0 && (
           <div className="flex flex-col gap-1.5">
-            <Label>{t("invite.autoAssign")}</Label>
+            <Label>{t("teams.invite.autoAssign")}</Label>
             <Select
               value={groupId ?? "none"}
               onValueChange={(value) =>
                 setGroupId(value === "none" ? null : value)
               }
             >
-              <SelectTrigger aria-label={t("invite.autoAssign")}>
+              <SelectTrigger aria-label={t("teams.invite.autoAssign")}>
                 <SelectValue>
                   {(value) =>
                     value === "none"
-                      ? t("invite.noGroup")
+                      ? t("teams.invite.noGroup")
                       : (groups.find((g) => g.id === value)?.name ??
-                        t("invite.noGroup"))
+                        t("teams.invite.noGroup"))
                   }
                 </SelectValue>
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="none">{t("invite.noGroup")}</SelectItem>
+                <SelectItem value="none">{t("teams.invite.noGroup")}</SelectItem>
                 {groups.map((g) => (
                   <SelectItem key={g.id} value={g.id}>
                     {g.name}
@@ -316,18 +317,18 @@ export function InviteDialog({
         )}
 
         <p className="text-xs text-muted-foreground tabular">
-          {t("invite.count", { n: selected.size })}
+          {t("teams.invite.count", { n: selected.size })}
         </p>
 
         <DialogFooter>
           <DialogClose render={<Button variant="outline" disabled={busy} />}>
-            {t("dlg.cancel")}
+            {t("teams.dlg.cancel")}
           </DialogClose>
           <Button
             disabled={busy || selected.size === 0}
             onClick={() => void send()}
           >
-            {t("invite.send")}
+            {t("teams.invite.send")}
           </Button>
         </DialogFooter>
       </DialogContent>

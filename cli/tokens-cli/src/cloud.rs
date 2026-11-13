@@ -22,6 +22,7 @@
 //! and a hook payload on stdin/argv is read for its session id alone — prompts,
 //! transcript paths and messages in it are dropped unread.
 
+use crate::{t, tr};
 use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -197,13 +198,18 @@ pub fn detect(inputs: &DetectInputs) -> Result<CloudSession> {
         Some(provider) => provider,
         None => match inputs.env(PROVIDER_ENV) {
             Some(value) => CloudProvider::parse(value).ok_or_else(|| {
-                anyhow!("{PROVIDER_ENV}={value} is not a supported provider (claude-code, codex)")
+                anyhow!(tr!(
+                    "top.cloud.unsupportedProvider",
+                    env = PROVIDER_ENV,
+                    value = value
+                ))
             })?,
             None if is_claude_code_remote(inputs) => CloudProvider::ClaudeCode,
             None => {
-                return Err(anyhow!(
-                    "not a recognised cloud session: pass --provider or set {PROVIDER_ENV}"
-                ))
+                return Err(anyhow!(tr!(
+                    "top.cloud.notACloudSession",
+                    env = PROVIDER_ENV
+                )))
             }
         },
     };
@@ -240,11 +246,11 @@ pub fn detect(inputs: &DetectInputs) -> Result<CloudSession> {
             SessionIdSource::ClaudeCodeSessionEnv,
         )
     } else {
-        return Err(anyhow!(
-            "could not determine the {} session id: pass --session-id, set {SESSION_ID_ENV}, \
-             or run from a hook that provides one",
-            provider.as_str()
-        ));
+        return Err(anyhow!(tr!(
+            "top.cloud.sessionIdUnknown",
+            provider = provider.as_str(),
+            env = SESSION_ID_ENV
+        )));
     };
 
     let session_id = validate_session_id(&session_id)?;
@@ -258,17 +264,16 @@ pub fn detect(inputs: &DetectInputs) -> Result<CloudSession> {
 fn validate_session_id(id: &str) -> Result<String> {
     let trimmed = id.trim();
     if trimmed.is_empty() {
-        return Err(anyhow!("cloud session id must not be empty"));
+        return Err(anyhow!(t!("top.cloud.sessionIdEmpty")));
     }
     if trimmed.len() > MAX_SESSION_ID_LEN {
-        return Err(anyhow!(
-            "cloud session id must be at most {MAX_SESSION_ID_LEN} characters"
-        ));
+        return Err(anyhow!(tr!(
+            "top.cloud.sessionIdTooLong",
+            max = MAX_SESSION_ID_LEN
+        )));
     }
     if trimmed.chars().any(char::is_control) {
-        return Err(anyhow!(
-            "cloud session id must not contain control characters"
-        ));
+        return Err(anyhow!(t!("top.cloud.sessionIdControlChars")));
     }
     Ok(trimmed.to_string())
 }
@@ -367,14 +372,14 @@ pub fn record_submit(device_id: &str, now_ms: i64) -> Result<()> {
     let path = state_path();
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create {}", parent.display()))?;
+            .with_context(|| tr!("top.cloud.createDir", path = parent.display()))?;
     }
     let state = CloudSubmitState {
         device_id: device_id.to_string(),
         last_submit_at_ms: now_ms,
     };
     std::fs::write(&path, serde_json::to_string(&state)?)
-        .with_context(|| format!("failed to write {}", path.display()))?;
+        .with_context(|| tr!("top.cloud.writeFile", path = path.display()))?;
     Ok(())
 }
 
