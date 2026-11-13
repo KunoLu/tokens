@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { useI18n } from "@/lib/i18n";
+import { useT } from "@/components/layout/LocaleProvider";
 
 /**
  * Shared confirmation dialog. With `confirmName` set, the confirm button
@@ -41,7 +41,7 @@ export function ConfirmDialog({
   destructive?: boolean;
   onConfirm: () => Promise<string | null>;
 }) {
-  const { t } = useI18n();
+  const t = useT();
   const [value, setValue] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -70,7 +70,7 @@ export function ConfirmDialog({
         {confirmName !== undefined && (
           <div className="flex flex-col gap-2">
             <Label htmlFor="confirm-name-input">
-              {t("dlg.typeToConfirm", { name: confirmName })}
+              {t("teams.dlg.typeToConfirm", { name: confirmName })}
             </Label>
             <Input
               id="confirm-name-input"
@@ -83,7 +83,7 @@ export function ConfirmDialog({
         )}
         <DialogFooter>
           <DialogClose render={<Button variant="outline" disabled={busy} />}>
-            {t("dlg.cancel")}
+            {t("teams.dlg.cancel")}
           </DialogClose>
           <Button
             variant={destructive ? "destructive" : "default"}

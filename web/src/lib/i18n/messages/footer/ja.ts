@@ -1,0 +1,8 @@
+const messages = {
+  label: "サイトフッター",
+  privacy: "プライバシー",
+  terms: "利用規約",
+  builtOn: "Tokscale をベースに構築",
+};
+
+export default messages;

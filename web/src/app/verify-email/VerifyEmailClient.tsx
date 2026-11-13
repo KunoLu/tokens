@@ -6,12 +6,15 @@ import { Button } from "@/components/ui/button";
 import { CONTAINER } from "@/components/layout/Container";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { cn } from "@/lib/utils";
-import { localizeServerError, useI18n } from "@/lib/i18n";
+import { useLocale, useT } from "@/components/layout/LocaleProvider";
+import { localizeHref } from "@/lib/i18n/config";
+import { localizeServerError } from "@/lib/i18n/serverError";
 
 type State = "verifying" | "success" | "error";
 
 export default function VerifyEmailClient({ token }: { token: string }) {
-  const { t } = useI18n();
+  const t = useT();
+  const locale = useLocale();
   const [state, setState] = useState<State>(token ? "verifying" : "error");
   const [message, setMessage] = useState(
     token ? "" : t("auth.verify.missingToken")
@@ -102,7 +105,7 @@ export default function VerifyEmailClient({ token }: { token: string }) {
       {state === "success" && (
         <div role="status" className="rounded-lg border border-border bg-card px-4 py-3 text-sm">
           {t("auth.verify.success")}{" "}
-          <Link href="/leaderboard" className="text-primary underline-offset-4 hover:underline">
+          <Link href={localizeHref("/leaderboard", locale)} className="text-primary underline-offset-4 hover:underline">
             {t("auth.verify.back")}
           </Link>
         </div>
@@ -130,7 +133,7 @@ export default function VerifyEmailClient({ token }: { token: string }) {
           ) : (
             <p className="text-sm text-muted-foreground">
               {t("auth.verify.signInThen")}{" "}
-              <Link href="/login?returnTo=/verify-email" className="text-primary underline-offset-4 hover:underline">
+              <Link href={localizeHref("/login?returnTo=/verify-email", locale)} className="text-primary underline-offset-4 hover:underline">
                 {t("nav.signIn")}
               </Link>
             </p>

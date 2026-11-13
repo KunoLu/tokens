@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "nextjs-toploader/app";
 import { usePathname, useSearchParams } from "next/navigation";
 import { ChevronDownIcon, SearchIcon } from "lucide-react";
-import { useI18n } from "@/lib/i18n";
+import { useT } from "@/components/layout/LocaleProvider";
 import { useSettings } from "@/lib/useSettings";
 import { cn } from "@/lib/utils";
 import { CONTAINER } from "@/components/layout/Container";
@@ -64,7 +64,7 @@ export function TeamboardClient({ teams, board, currentUserId, period: periodPro
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const { t } = useI18n();
+  const t = useT();
   const { leaderboardTokenFormat: tokenFormat, setLeaderboardTokenFormat } =
     useSettings();
 
@@ -374,7 +374,7 @@ export function TeamboardClient({ teams, board, currentUserId, period: periodPro
                 {/* No Team column: the board is already scoped to one team. */}
                 <MembershipColumnHeaders
                   includeTeam={false}
-                  teamLabel={t("leaderboard.colTeam")}
+                  teamLabel={t("leaderboard.table.team")}
                   groupLabel={t("teamboard.colGroup")}
                 />
                 <TableHead className="pr-4 text-right sm:hidden">

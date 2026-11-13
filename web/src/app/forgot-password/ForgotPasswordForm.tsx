@@ -7,14 +7,17 @@ import { Input } from "@/components/ui/input";
 import { CONTAINER } from "@/components/layout/Container";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { cn } from "@/lib/utils";
-import { localizeServerError, useI18n } from "@/lib/i18n";
+import { useLocale, useT } from "@/components/layout/LocaleProvider";
+import { localizeHref } from "@/lib/i18n/config";
+import { localizeServerError } from "@/lib/i18n/serverError";
 
 export default function ForgotPasswordForm({ returnTo }: { returnTo: string }) {
   const [email, setEmail] = useState("");
   const [sent, setSent] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const { t } = useI18n();
+  const t = useT();
+  const locale = useLocale();
 
   const onSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -92,7 +95,7 @@ export default function ForgotPasswordForm({ returnTo }: { returnTo: string }) {
       <p className="mt-6 text-sm text-muted-foreground">
         {t("auth.forgot.remembered")}{" "}
         <Link
-          href={`/login?returnTo=${encodeURIComponent(returnTo)}`}
+          href={localizeHref(`/login?returnTo=${encodeURIComponent(returnTo)}`, locale)}
           className="text-primary underline-offset-4 hover:underline"
         >
           {t("nav.signIn")}

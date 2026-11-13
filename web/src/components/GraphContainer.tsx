@@ -6,28 +6,35 @@ import type { TokenContributionData, DailyContribution, ViewMode, ClientType, To
 import { getPalette } from "@/lib/themes";
 import { useSettings } from "@/lib/useSettings";
 import { filterByClient, filterByYear, recalculateIntensity, findBestDay, calculateCurrentStreak, calculateLongestStreak, resolveSelectedDay } from "@/lib/utils";
+import { useT } from "@/components/layout/LocaleProvider";
 import { TokenGraph2D } from "./TokenGraph2D";
-import { useI18n } from "@/lib/i18n";
-
-function Graph3DLoading() {
-  const { t } = useI18n();
-  return (
-    <div className="flex h-[400px] items-center justify-center text-sm text-muted-foreground">
-      {t("graph.loading3d")}
-    </div>
-  );
-}
 
 // Lazy load the isometric view (obelisk.js, drawn to a 2D canvas) — it is only
 // needed once someone switches to 3D, and it touches window on import.
 const TokenGraph3D = dynamic(() => import("./TokenGraph3D").then((mod) => mod.TokenGraph3D), {
   ssr: false,
-  loading: () => <Graph3DLoading />,
+  loading: () => <Loading3D />,
 });
 import { GraphControls } from "./GraphControls";
 import { Tooltip } from "./Tooltip";
 import { BreakdownPanel } from "./BreakdownPanel";
 import { StatsPanel } from "./StatsPanel";
+
+/**
+ * The skeleton the lazy chunk shows while it downloads.
+ *
+ * A component rather than inline JSX in the `dynamic()` options because those
+ * options are module scope and `useT()` needs a render inside the provider.
+ */
+function Loading3D() {
+  const t = useT();
+
+  return (
+    <div className="flex h-[400px] items-center justify-center text-sm text-muted-foreground">
+      {t("common.graph.loading3d")}
+    </div>
+  );
+}
 
 interface GraphContainerProps {
   data: TokenContributionData;
@@ -81,8 +88,8 @@ export function GraphContainer({ data, totalActiveTimeMs, sessionCount, mcpServe
     if (yearContributions.length === 0) return { start: "", end: "" };
     const dates = yearContributions.filter((c) => c.totals.tokens > 0).map((c) => c.date).sort();
     return {
-      start: dates[0] || "",
-      end: dates[dates.length - 1] || "",
+      start: dates[0]?.split("-").slice(1).join("/") || "",
+      end: dates[dates.length - 1]?.split("-").slice(1).join("/") || "",
     };
   }, [yearContributions]);
 

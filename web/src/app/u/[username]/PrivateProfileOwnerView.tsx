@@ -2,6 +2,7 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
+import { stripLocale } from "@/lib/i18n/config";
 import type { ProfileDevice } from "@/components/profile";
 import ProfilePageClient, { type ProfileData } from "./ProfilePageClient";
 
@@ -26,7 +27,10 @@ function usernameFromPath(pathname: string | null): string | null {
 export default function PrivateProfileOwnerView({ fallback }: { fallback: ReactNode }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const username = usernameFromPath(pathname);
+  // The prefix is not part of the account name: `/zh-CN/u/someone` is the
+  // same account as `/u/someone`, or the owner view never fires on a
+  // translated URL.
+  const username = usernameFromPath(stripLocale(pathname || "/").path);
   const period = searchParams.get("period");
   const [state, setState] = useState<OwnerState>({ kind: "hidden" });
 

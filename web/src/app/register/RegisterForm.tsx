@@ -7,7 +7,9 @@ import { Input } from "@/components/ui/input";
 import { CONTAINER } from "@/components/layout/Container";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { cn } from "@/lib/utils";
-import { localizeServerError, localizeServerErrorList, useI18n } from "@/lib/i18n";
+import { useLocale, useT } from "@/components/layout/LocaleProvider";
+import { localizeHref } from "@/lib/i18n/config";
+import { localizeServerError, localizeServerErrorList } from "@/lib/i18n/serverError";
 
 export default function RegisterForm({ returnTo }: { returnTo: string }) {
   const [email, setEmail] = useState("");
@@ -16,7 +18,8 @@ export default function RegisterForm({ returnTo }: { returnTo: string }) {
   const [error, setError] = useState<string | null>(null);
   const [details, setDetails] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
-  const { t } = useI18n();
+  const t = useT();
+  const locale = useLocale();
 
   const onSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -97,7 +100,7 @@ export default function RegisterForm({ returnTo }: { returnTo: string }) {
 
         <div className="flex flex-col gap-1.5">
           <label htmlFor="password" className="text-[13px] font-semibold">
-            {t("auth.password")}
+            {t("auth.passwordLabel")}
           </label>
           <Input
             id="password"
@@ -136,7 +139,7 @@ export default function RegisterForm({ returnTo }: { returnTo: string }) {
       <p className="mt-6 text-sm text-muted-foreground">
         {t("auth.register.haveAccount")}{" "}
         <Link
-          href={`/login?returnTo=${encodeURIComponent(returnTo)}`}
+          href={localizeHref(`/login?returnTo=${encodeURIComponent(returnTo)}`, locale)}
           className="text-primary underline-offset-4 hover:underline"
         >
           {t("nav.signIn")}

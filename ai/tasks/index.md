@@ -11,6 +11,7 @@
 - [20261025-pr17-description-record](20261025-pr17-description-record/task.md)
 - [20261025-v104-e-cloud-sessions](20261025-v104-e-cloud-sessions/task.md)
 - [20261025-v104-f-release](20261025-v104-f-release/task.md)
+- [20261114-v2721-pr-a-i18n](20261114-v2721-pr-a-i18n/task.md)
 - [brand-sweep](archive/2026-Q3/brand-sweep/task.md)
 - [prod-docker-assets](archive/2026-Q3/prod-docker-assets/task.md)
 - [scripts-ref-and-automation](archive/2026-Q3/scripts-ref-and-automation/task.md)

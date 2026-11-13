@@ -10,31 +10,35 @@ import {
   SUPPORTED_CLIENTS,
 } from "@/lib/constants";
 import { PageHeader } from "@/components/layout/PageHeader";
-import { LOCALE_COOKIE, parseLocale, t, type Locale, type TranslationKey } from "@/lib/i18n";
-import { cookies } from "next/headers";
+import { getTranslator } from "@/lib/i18n/server";
+import type { TranslationKey, Translator } from "@/lib/i18n/translate";
 import { cn } from "@/lib/utils";
 import { SITE_URL } from "@/lib/site";
 import { SCRIPTS_RAW_BASE, SCRIPTS_BLOB_BASE } from "@/lib/scriptsRef";
 
 
-export const metadata: Metadata = {
-  title: "Docs - Tokens",
-  description: "Install the Tokens CLI on macOS, Linux or Windows.",
-  openGraph: {
-    title: "Docs — Tokens",
-    description: "Install the Tokens CLI.",
-    url: `${SITE_URL}/docs`,
-    siteName: "Tokens",
-    images: [
-      {
-        url: `/api/og?title=Docs&subtitle=Install+the+Tokens+CLI.`,
-        width: 1200,
-        height: 630,
-      },
-    ],
-  },
-  twitter: { card: "summary_large_image" },
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const { t } = await getTranslator();
+
+  return {
+    title: `${t("docs.meta.title")} - Tokens`,
+    description: t("docs.meta.description"),
+    openGraph: {
+      title: `${t("docs.meta.title")} — Tokens`,
+      description: t("docs.meta.ogDescription"),
+      url: `${SITE_URL}/docs`,
+      siteName: "Tokens",
+      images: [
+        {
+          url: `/api/og?title=Docs&subtitle=Install+the+Tokens+CLI.`,
+          width: 1200,
+          height: 630,
+        },
+      ],
+    },
+    twitter: { card: "summary_large_image" },
+  };
+}
 
 /**
  * What the Supported clients grid renders.
@@ -84,12 +88,12 @@ const EVERYDAY = [
 ] as const;
 
 function localize(
-  locale: Locale,
+  t: Translator,
   commands: ReadonlyArray<{ command: string; note: TranslationKey }>
 ): DocCommand[] {
   return commands.map(({ command, note }) => ({
     command,
-    note: t(locale, note),
+    note: t(note),
   }));
 }
 
@@ -147,7 +151,7 @@ function Section({
 }
 
 export default async function DocsPage() {
-  const locale = parseLocale((await cookies()).get(LOCALE_COOKIE)?.value);
+  const { t } = await getTranslator();
   // The install commands must point at the site serving this page.
   const siteUrl = SITE_URL;
   // Pre-install scripts execute straight from this repo's public GitHub at an
@@ -168,15 +172,15 @@ export default async function DocsPage() {
     >
       <div className="mx-auto w-full max-w-[860px]">
       <PageHeader
-        title={t(locale, "nav.docs")}
-        description={t(locale, "docs.desc")}
+        title={t("nav.docs")}
+        description={t("docs.desc")}
       />
 
         <div className="flex flex-col gap-12">
         <Section
           id="cli"
-          title={t(locale, "docs.cliTitle")}
-          description={t(locale, "docs.cliDesc")}
+          title={t("docs.cliTitle")}
+          description={t("docs.cliDesc")}
         >
           <Tabs defaultValue="macos">
             <TabsList>
@@ -184,39 +188,39 @@ export default async function DocsPage() {
                   the monochrome marks legible in both themes. */}
               <TabsTrigger value="macos">
                 <OsIcon name="macos" />
-                {t(locale, "docs.os.macos")}
+                {t("docs.os.macos")}
               </TabsTrigger>
               <TabsTrigger value="linux">
                 <OsIcon name="linux" />
-                {t(locale, "docs.os.linux")}
+                {t("docs.os.linux")}
               </TabsTrigger>
               <TabsTrigger value="windows">
                 <OsIcon name="windows" />
-                {t(locale, "docs.os.windows")}
+                {t("docs.os.windows")}
               </TabsTrigger>
             </TabsList>
 
             <TabsContent value="macos" className="mt-4 flex flex-col gap-3">
               <CommandBlock
                 commands={[
-                  ...localize(locale, [MACOS[0]]),
-                  { command: preinstallSh, note: t(locale, "docs.note.preinstall") },
-                  ...localize(locale, MACOS.slice(1)),
+                  ...localize(t, [MACOS[0]]),
+                  { command: preinstallSh, note: t("docs.note.preinstall") },
+                  ...localize(t, MACOS.slice(1)),
                 ]}
               />
               <p className="text-sm leading-relaxed text-muted-foreground">
-                {t(locale, "docs.reloadNote.posix")}
+                {t("docs.reloadNote.posix")}
               </p>
               <p className="text-sm leading-relaxed text-muted-foreground">
                 <code className="font-mono text-[13px]">tokens serve</code>{" "}
-                {t(locale, "docs.macosNote", { site: siteUrl })}{" "}
+                {t("docs.macosNote", { site: siteUrl })}{" "}
                 <a
                   href={`${SCRIPTS_BLOB_BASE}/docs/deploy/tokens-cli-usage.md`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="text-foreground underline underline-offset-4"
                 >
-                  {t(locale, "docs.cliGuideLink")}
+                  {t("docs.cliGuideLink")}
                 </a>
               </p>
             </TabsContent>
@@ -224,94 +228,94 @@ export default async function DocsPage() {
             <TabsContent value="linux" className="mt-4 flex flex-col gap-3">
               <CommandBlock
                 commands={[
-                  { command: `curl -fsSL ${siteUrl}/install.sh | sh`, note: t(locale, "docs.note.install") },
-                  { command: preinstallSh, note: t(locale, "docs.note.preinstall") },
-                  ...localize(locale, [LINUX[0]]),
-                  { command: enableServiceSh, note: t(locale, "docs.note.setupService") },
-                  ...localize(locale, LINUX.slice(1)),
+                  { command: `curl -fsSL ${siteUrl}/install.sh | sh`, note: t("docs.note.install") },
+                  { command: preinstallSh, note: t("docs.note.preinstall") },
+                  ...localize(t, [LINUX[0]]),
+                  { command: enableServiceSh, note: t("docs.note.setupService") },
+                  ...localize(t, LINUX.slice(1)),
                 ]}
               />
               <p className="text-sm leading-relaxed text-muted-foreground">
-                {t(locale, "docs.reloadNote.posix")}
+                {t("docs.reloadNote.posix")}
               </p>
               <p className="text-sm leading-relaxed text-muted-foreground">
                 <code className="font-mono text-[13px]">tokens serve</code>{" "}
-                {t(locale, "docs.linuxNote")}
+                {t("docs.linuxNote")}
               </p>
             </TabsContent>
 
             <TabsContent value="windows" className="mt-4 flex flex-col gap-3">
               <CommandBlock
                 commands={[
-                  { command: preinstallPs1, note: t(locale, "docs.note.preinstall") },
-                  ...localize(locale, WINDOWS),
-                  { command: registerTaskPs1, note: t(locale, "docs.note.setupTask") },
+                  { command: preinstallPs1, note: t("docs.note.preinstall") },
+                  ...localize(t, WINDOWS),
+                  { command: registerTaskPs1, note: t("docs.note.setupTask") },
                 ]}
               />
               <p className="text-sm leading-relaxed text-muted-foreground">
-                {t(locale, "docs.reloadNote.windows")}
+                {t("docs.reloadNote.windows")}
               </p>
               <p className="text-sm leading-relaxed text-muted-foreground">
-                {t(locale, "docs.windowsNote")}
+                {t("docs.windowsNote")}
               </p>
             </TabsContent>
           </Tabs>
           <p className="mt-4 text-sm leading-relaxed text-muted-foreground">
-            {t(locale, "docs.loginHint")}
+            {t("docs.loginHint")}
           </p>
         </Section>
 
 
         <Section
           id="usage"
-          title={t(locale, "docs.usageTitle")}
-          description={t(locale, "docs.usageDesc")}
+          title={t("docs.usageTitle")}
+          description={t("docs.usageDesc")}
         >
-          <CommandBlock commands={localize(locale, EVERYDAY)} />
+          <CommandBlock commands={localize(t, EVERYDAY)} />
         </Section>
 
         <Section
           id="private"
-          title={t(locale, "docs.privateTitle")}
-          description={t(locale, "docs.privateDesc")}
+          title={t("docs.privateTitle")}
+          description={t("docs.privateDesc")}
         >
           <div className="flex flex-col gap-4">
             <CommandBlock
               commands={[
                 {
                   command: "tokens login --private",
-                  note: t(locale, "docs.privateCommandNote"),
+                  note: t("docs.privateCommandNote"),
                 },
               ]}
             />
             <p className="text-sm leading-relaxed text-muted-foreground">
-              {t(locale, "docs.privateOnOff")}{" "}
+              {t("docs.privateOnOff")}{" "}
               <a href="/settings" className="text-foreground underline underline-offset-4">
-                {t(locale, "docs.privateSettingsLink")}
+                {t("docs.privateSettingsLink")}
               </a>{" "}
-              {t(locale, "docs.privateOnOffAfter")}
+              {t("docs.privateOnOffAfter")}
             </p>
             <p className="text-sm leading-relaxed text-muted-foreground">
-              {t(locale, "docs.privateTokens")}
+              {t("docs.privateTokens")}
             </p>
             <p className="text-sm leading-relaxed text-muted-foreground">
-              {t(locale, "docs.privateDevices")}
+              {t("docs.privateDevices")}
             </p>
           </div>
         </Section>
 
         <Section
           id="clients"
-          title={t(locale, "docs.clientsTitle")}
-          description={t(locale, "docs.clientsDesc")}
+          title={t("docs.clientsTitle")}
+          description={t("docs.clientsDesc")}
         >
           <div className="flex flex-col gap-4">
             <p className="text-sm leading-relaxed text-muted-foreground">
-              {t(locale, "docs.clientsDetected", { n: CLIENT_GRID.length })}
+              {t("docs.clientsDetected", { n: CLIENT_GRID.length })}
             </p>
 
             <p className="text-sm leading-relaxed text-muted-foreground">
-              {t(locale, "docs.paseoUsage")}
+              {t("docs.paseoUsage")}
             </p>
 
             {/* A plain responsive grid rather than a table: these are names,

@@ -7,7 +7,9 @@ import { Input } from "@/components/ui/input";
 import { CONTAINER } from "@/components/layout/Container";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { cn } from "@/lib/utils";
-import { localizeServerError, localizeServerErrorList, useI18n } from "@/lib/i18n";
+import { useLocale, useT } from "@/components/layout/LocaleProvider";
+import { localizeHref } from "@/lib/i18n/config";
+import { localizeServerError, localizeServerErrorList } from "@/lib/i18n/serverError";
 
 export default function ResetPasswordForm({ token }: { token: string }) {
   const [password, setPassword] = useState("");
@@ -15,7 +17,8 @@ export default function ResetPasswordForm({ token }: { token: string }) {
   const [details, setDetails] = useState<string[]>([]);
   const [done, setDone] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const { t } = useI18n();
+  const t = useT();
+  const locale = useLocale();
 
   const onSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -63,7 +66,7 @@ export default function ResetPasswordForm({ token }: { token: string }) {
           className="rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive"
         >
           {t("auth.reset.missingToken")}{" "}
-          <Link href="/forgot-password" className="underline underline-offset-4">
+          <Link href={localizeHref("/forgot-password", locale)} className="underline underline-offset-4">
             {t("auth.reset.forgotPage")}
           </Link>{" "}
           {t("auth.reset.missingTokenEnd")}
@@ -71,7 +74,7 @@ export default function ResetPasswordForm({ token }: { token: string }) {
       ) : done ? (
         <div role="status" className="rounded-lg border border-border bg-card px-4 py-3 text-sm">
           {t("auth.reset.done")}{" "}
-          <Link href="/login" className="text-primary underline-offset-4 hover:underline">
+          <Link href={localizeHref("/login", locale)} className="text-primary underline-offset-4 hover:underline">
             {t("auth.reset.signIn")}
           </Link>{" "}
           {t("auth.reset.doneEnd")}

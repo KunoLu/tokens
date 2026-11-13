@@ -1,13 +1,33 @@
 "use client";
 
+import { useMemo } from "react";
 import type { DailyContribution } from "@/lib/types";
-import { formatCurrency, formatDateFull, formatNumber } from "@/lib/utils";
+import { formatCurrency, formatNumber } from "@/lib/utils";
+import { useLocale, useT } from "@/components/layout/LocaleProvider";
+import { formatDate } from "@/lib/i18n/format";
 import { tw } from "@/lib/tw";
 import { cn } from "@/lib/utils";
-import { intlTag, useI18n } from "@/lib/i18n";
 
-// Bar order is fixed Monday-first; the labels come from the dictionary.
-const WEEKDAY_ORDER = [1, 2, 3, 4, 5, 6, 0] as const;
+/** Monday-first, the order the bar chart draws in. Sunday is 0 as `getUTCDay`. */
+const WEEKDAY_ORDER = [
+  { index: 1 },
+  { index: 2 },
+  { index: 3 },
+  { index: 4 },
+  { index: 5 },
+  { index: 6 },
+  { index: 0 },
+] as const;
+
+/**
+ * One reference date per weekday, so `Intl` can name them.
+ *
+ * 2024-01-07 was a Sunday, and every lookup is pinned to UTC: the label must not
+ * depend on the runner's zone any more than the buckets do.
+ */
+const WEEKDAY_REFERENCE = [7, 8, 9, 10, 11, 12, 13].map(
+  (day) => new Date(Date.UTC(2024, 0, day)),
+);
 
 function weekdayIndex(date: string): number {
   const [year, month, day] = date.split("-").map(Number);
@@ -19,9 +39,28 @@ export interface ProfileHabitsProps {
 }
 
 export function ProfileHabits({ contributions }: ProfileHabitsProps) {
-  const { t, locale } = useI18n();
-  const weekdayNames = t("profile.habits.weekdays").split(",");
-  const weekdayShorts = t("profile.habits.weekdaysShort").split(",");
+  const t = useT();
+  const locale = useLocale();
+  const weekdayNames = useMemo(
+    () =>
+      WEEKDAY_REFERENCE.map((date) =>
+        new Intl.DateTimeFormat(locale, {
+          weekday: "long",
+          timeZone: "UTC",
+        }).format(date),
+      ),
+    [locale],
+  );
+  const weekdayShort = useMemo(
+    () =>
+      WEEKDAY_REFERENCE.map((date) =>
+        new Intl.DateTimeFormat(locale, {
+          weekday: "narrow",
+          timeZone: "UTC",
+        }).format(date),
+      ),
+    [locale],
+  );
   const weekdayTokens = [0, 0, 0, 0, 0, 0, 0];
   let totalTokens = 0;
   let biggestDay: DailyContribution | null = null;
@@ -45,25 +84,33 @@ export function ProfileHabits({ contributions }: ProfileHabitsProps) {
   return (
     <Panel aria-labelledby="profile-habits-title">
       <Header>
-        <Title id="profile-habits-title">{t("profile.habits.title")}</Title>
+        <Title id="profile-habits-title">{t("profile.habits.heading")}</Title>
         <Range>{t("profile.habits.range")}</Range>
       </Header>
 
       <Highlights>
         <Highlight>
-          <Label>{t("profile.habits.mostProductive")}</Label>
+          <Label>{t("profile.habits.topWeekday")}</Label>
           <Value>{weekdayNames[topWeekdayIndex]}</Value>
-          <Meta title={topWeekdayTokens.toLocaleString(intlTag(locale))}>
-            {t("profile.habits.ofTotal", { tokens: formatNumber(topWeekdayTokens, locale), share: topWeekdayShare.toFixed(0) })}
+          <Meta title={topWeekdayTokens.toLocaleString(locale)}>
+            {t("profile.habits.topWeekdayMeta", {
+              tokens: t("profile.units.token", { count: topWeekdayTokens }),
+              share: formatNumber(topWeekdayShare),
+            })}
           </Meta>
         </Highlight>
         <Highlight>
           <Label>{t("profile.habits.biggestDay")}</Label>
-          <Value $accent title={biggestDay.totals.tokens.toLocaleString(intlTag(locale))}>
-            {t("tokens.count", { n: formatNumber(biggestDay.totals.tokens, locale) })}
+          <Value $accent title={biggestDay.totals.tokens.toLocaleString(locale)}>
+            {t("profile.units.token", { count: biggestDay.totals.tokens })}
           </Value>
           <Meta>
-            {formatDateFull(biggestDay.date, locale)} · {formatCurrency(biggestDay.totals.cost, locale)}
+            {formatDate(new Date(`${biggestDay.date}T00:00:00`), locale, {
+              year: "numeric",
+              month: "long",
+              day: "numeric",
+            })}{" "}
+            · {formatCurrency(biggestDay.totals.cost)}
           </Meta>
         </Highlight>
       </Highlights>
@@ -71,7 +118,7 @@ export function ProfileHabits({ contributions }: ProfileHabitsProps) {
       <Distribution>
         <Label>{t("profile.habits.byWeekday")}</Label>
         <Bars>
-          {WEEKDAY_ORDER.map((index) => {
+          {WEEKDAY_ORDER.map(({ index }) => {
             const tokens = weekdayTokens[index];
             const isTop = index === topWeekdayIndex;
             const height = topWeekdayTokens > 0
@@ -83,10 +130,13 @@ export function ProfileHabits({ contributions }: ProfileHabitsProps) {
                   <Bar
                     $height={height}
                     $top={isTop}
-                    title={t("profile.habits.weekdayTitle", { weekday: weekdayNames[index], tokens: formatNumber(tokens, locale) })}
+                    title={t("profile.habits.barTitle", {
+                      weekday: weekdayNames[index],
+                      tokens: t("profile.units.token", { count: tokens }),
+                    })}
                   />
                 </BarTrack>
-                <BarLabel $top={isTop}>{weekdayShorts[index]}</BarLabel>
+                <BarLabel $top={isTop}>{weekdayShort[index]}</BarLabel>
               </BarColumn>
             );
           })}

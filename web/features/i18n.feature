@@ -1,5 +1,6 @@
 Feature: 界面语言切换
-  用户需要在 English 与中文之间切换界面语言，以自己熟悉的语言使用产品。
+  用户需要在 English、简体中文与 日本語 之间切换界面语言，以自己熟悉的语言使用产品。
+  语言由 URL 前缀表达（/zh-CN/...、/ja/...，无前缀即 English）；tt_locale cookie 只记住选择，供根路径 / 重定向使用。
 
   Rule: 语言切换按钮位于导航右上角主题切换的左侧
 
@@ -8,89 +9,81 @@ Feature: 界面语言切换
       When 任意访客打开任意页面
       Then 导航右上角的主题切换按钮左侧有一个语言切换按钮
       And 点击后展开下拉选项
-      And 选项恰好包含 "English" 和 "中文"
+      And 选项恰好包含 "English"、"简体中文"、"日本語"
 
-  Rule: 已包裹的导航文案跟随语言偏好
+  Rule: 语言前缀决定页面语言
 
-    Scenario: 中文语言偏好打开排行榜
-      Given 访客的语言偏好为中文
-      When 访客打开排行榜
+    Scenario: 打开带 zh-CN 前缀的排行榜
+      When 访客打开 "/zh-CN/leaderboard"
       Then 页面的 lang 属性为 "zh-CN"
       And 导航显示 "排行榜"、"文档"、"团队榜"
 
-    Scenario: English 语言偏好打开排行榜
-      Given 访客的语言偏好为 English
-      When 访客打开排行榜
+    Scenario: 打开带 ja 前缀的排行榜
+      When 访客打开 "/ja/leaderboard"
+      Then 页面的 lang 属性为 "ja"
+      And 导航显示 "リーダーボード"
+
+    Scenario: 打开无前缀的排行榜
+      When 访客打开 "/leaderboard"
       Then 页面的 lang 属性为 "en"
       And 导航显示 "Leaderboard"、"Docs"、"Teamboard"
 
-    Scenario: 无法识别的语言偏好回退为 English
-      Given 访客带有无法识别的语言偏好
-      When 访客打开排行榜
-      Then 页面按 English 渲染
+  Rule: 旧无前缀中文链接仍然可用
 
-  Rule: 用量数字跟随当前语言的 NumberFormat
+    # 方案甲切换前，中文界面由 cookie 驱动、URL 不带前缀；这些旧链接不得 404。
+    Scenario: 旧无前缀地址正常打开
+      When 访客打开 "/leaderboard"
+      Then 页面按 English 正常渲染，状态为 200
+    Scenario: 根路径按记忆的语言重定向
+      Given 访客带有 "tt_locale=zh-CN" cookie
+      When 访客打开 "/"
+      Then 访客被 307 重定向到 "/zh-CN/leaderboard"
+    Scenario: 旧版 tt_locale=zh cookie 按 zh-CN 处理
+      Given 访客带有旧版 "tt_locale=zh" cookie
+      When 访客打开 "/"
+      Then 访客被 307 重定向到 "/zh-CN/leaderboard"
 
-    Scenario: 中文界面的用量数字按中文语言环境渲染
-      Given 访客的语言偏好为中文
-      When 访客打开排行榜
-      Then 用量数字按中文语言环境的 NumberFormat 渲染
+  Rule: 切换控件改写 URL 前缀并记住选择
 
-  Rule: 切换控件把选择写入偏好并刷新
-
-    # 覆盖: tests/e2e/i18n-locale.spec.ts「切换到中文」。
-    Scenario: 切换到中文
-      Given 当前语言为 English
-      When 访客在语言切换器中选择 "中文"
-      Then 当前已包裹的导航文案变为中文
-      And 用量数字按中文语言环境的 NumberFormat 渲染（紧凑如 123.5万，非紧凑货币如 US$1,234,567.89）
+    # 覆盖: tests/e2e/i18n-locale.spec.ts「切换到简体中文」。
+    Scenario: 切换到简体中文
+      Given 访客在 "/leaderboard"
+      When 访客在语言切换器中选择 "简体中文"
+      Then 地址变为 "/zh-CN/leaderboard"
+      And 页面以简体中文渲染
+      And "tt_locale" cookie 的值为 "zh-CN"
 
     # 覆盖: tests/e2e/i18n-locale.spec.ts「切换到 English」。
     Scenario: 切换到 English
-      Given 当前语言为中文
+      Given 访客在 "/zh-CN/leaderboard"
       When 访客在语言切换器中选择 "English"
-      Then 当前已包裹的导航文案变为英文
+      Then 地址变为 "/leaderboard"
+      And 页面以 English 渲染
 
-    # 覆盖: tests/e2e/i18n-locale.spec.ts「关闭浏览器后重新打开」。
-    Scenario: 关闭浏览器后重新打开
-      Given 访客已将语言切换为 "中文"
-      When 访客关闭浏览器后重新打开网站
-      Then 界面仍然为中文
+    # 覆盖: tests/e2e/i18n-locale.spec.ts「从 / 回到记忆语言」。
+    Scenario: 从 / 回到记忆语言
+      Given 访客已把语言切换为 "简体中文"
+      When 访客之后打开 "/"
+      Then 访客被重定向到 "/zh-CN/leaderboard"
 
-  Rule: 已包裹的页面文案跟随语言偏好
+  Rule: 已包裹的页面文案跟随语言前缀
 
-    # 覆盖: tests/e2e/i18n-locale.spec.ts「切换后全部页面文案跟随」。
-    Scenario: 切换后全部页面文案跟随
-      Given 访客的语言偏好为中文
-      When 访客依次打开排行榜、团队榜、团队、文档、本地查看器和认证页面
-      Then 每个页面的标题和主要操作文案均为中文
-      And 排行榜、文档和认证表单的已包裹说明文案均为中文
+    Scenario: 设置页未登录重定向保留前缀
+      When 未登录访客打开 "/zh-CN/settings"
+      Then 访客被重定向到 "/login?returnTo=/zh-CN/settings"
 
-    # 覆盖: tests/e2e/i18n-locale.spec.ts「已登录设置页」。
-    Scenario: 已登录用户打开设置页
-      Given 用户已登录
-      And 访客的语言偏好为中文
-      When 访客打开设置页
-      Then 页面标题为 "设置"
-      And 页面说明文案为中文
-
-    # 覆盖: tests/e2e/i18n-locale.spec.ts「隐私页面」。
     Scenario: 隐私页面
-      Given 访客已将语言切换为 "中文"
-      When 访客打开隐私政策页
+      When 访客打开 "/zh-CN/privacy"
       Then 页面为中文
       And 页面明确标注英文版本具有最终效力
 
-    # 覆盖: tests/e2e/i18n-locale.spec.ts「条款页面」。
     Scenario: 条款页面
-      Given 访客已将语言切换为 "中文"
-      When 访客打开服务条款页
-      Then 页面为中文
+      When 访客打开 "/ja/terms"
+      Then 页面为日文
       And 页面明确标注英文版本具有最终效力
 
     # 覆盖: tests/e2e/i18n-locale.spec.ts「中文界面登录失败」。
     Scenario: 中文界面登录失败显示中文错误
-      Given 访客的语言偏好为中文
+      Given 访客在 "/zh-CN/login"
       When 访客用错误密码提交登录
       Then 页面提示「邮箱或密码不正确」
-

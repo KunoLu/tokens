@@ -11,8 +11,10 @@ import { groupCloudDevices, isReservedCloudDeviceKey } from "@/lib/devices/cloud
 import { deviceDisplayLabel } from "@/lib/devices/shared";
 import { tw } from "@/lib/tw";
 import { cn, formatNumber, formatCurrency } from "@/lib/utils";
-import { formatRelativeTime } from "@/lib/formatRelativeTime";
-import { intlTag, useI18n, type Translate } from "@/lib/i18n";
+import { formatRelativeTime } from "@/lib/format";
+import { useLocale, useT } from "@/components/layout/LocaleProvider";
+import { richText } from "@/lib/i18n/rich";
+import type { Translator } from "@/lib/i18n/translate";
 import PrivacySection from "./PrivacySection";
 
 interface User {
@@ -57,12 +59,12 @@ interface SettingsDevice {
 const DEVICE_NAME_MAX_LENGTH = 120;
 const DEVICE_NAME_CONTROL_CHARS = /\p{C}/u;
 
-function validateDeviceName(name: string, t: Translate): string | null {
+function validateDeviceName(name: string, t: Translator): string | null {
   if (name.length > DEVICE_NAME_MAX_LENGTH) {
-    return t("settings.devices.nameTooLong", { max: DEVICE_NAME_MAX_LENGTH });
+    return t("settings.validation.nameTooLong", { max: DEVICE_NAME_MAX_LENGTH });
   }
   if (DEVICE_NAME_CONTROL_CHARS.test(name)) {
-    return t("settings.devices.nameControl");
+    return t("settings.validation.controlChars");
   }
   return null;
 }
@@ -407,79 +409,79 @@ interface ConfirmationConfig {
   onConfirm: () => Promise<void>;
 }
 
-function confirmationConfigs(t: Translate): Record<DangerAction, ConfirmationConfig> {
+function confirmationConfigs(t: Translator): Record<DangerAction, ConfirmationConfig> {
   return {
     "delete-data": {
-      title: t("settings.danger.deleteDataTitle"),
+      title: t("settings.danger.deleteData"),
       steps: [
         {
           body: (
             <>
-              <ModalBody>{t("settings.danger.dataStep1")}</ModalBody>
+              <ModalBody>{t("settings.deleteData.step1Intro")}</ModalBody>
               <ModalBulletList>
-                <li>{t("settings.danger.dataBullet1")}</li>
-                <li>{t("settings.danger.dataBullet2")}</li>
-                <li>{t("settings.danger.dataBullet3")}</li>
+                <li>{t("settings.deleteData.step1Bullet1")}</li>
+                <li>{t("settings.deleteData.step1Bullet2")}</li>
+                <li>{t("settings.deleteData.step1Bullet3")}</li>
               </ModalBulletList>
               <ModalBody style={{ marginBottom: 0 }}>
-                {t("settings.danger.dataStep1End")}
+                {t("settings.deleteData.step1Outro")}
               </ModalBody>
             </>
           ),
-          confirmLabel: t("settings.danger.dataConfirm"),
+          confirmLabel: t("settings.deleteData.step1Confirm"),
         },
         {
           body: (
             <ModalBody>
-              {t("settings.danger.dataStep2A")}{" "}
-              <strong>{t("settings.danger.dataStep2B")}</strong>
-              {t("settings.danger.dataStep2C")}
+              {richText(t("settings.deleteData.step2Body"), {
+                strong: <strong>{t("settings.deleteData.step2Strong")}</strong>,
+              })}
             </ModalBody>
           ),
-          confirmLabel: t("settings.danger.continue"),
+          confirmLabel: t("settings.deleteData.step2Confirm"),
         },
       ],
-      typedConfirmation: t("settings.danger.dataTyped"),
+      typedConfirmation: t("settings.deleteData.typed"),
       onConfirm: async () => {
         const res = await fetch("/api/settings/submitted-data", { method: "DELETE" });
-        if (!res.ok) throw new Error(t("settings.danger.dataFailedToast"));
+        if (!res.ok) throw new Error(t("settings.deleteData.failure"));
       },
     },
     "delete-account": {
-      title: t("settings.danger.deleteAccountTitle"),
+      title: t("settings.danger.deleteAccount"),
       steps: [
         {
           body: (
             <>
-              <ModalBody>{t("settings.danger.accountStep1")}</ModalBody>
+              <ModalBody>{t("settings.deleteAccount.step1Intro")}</ModalBody>
               <ModalBulletList>
-                <li>{t("settings.danger.accountBullet1")}</li>
-                <li>{t("settings.danger.accountBullet2")}</li>
-                <li>{t("settings.danger.accountBullet3")}</li>
-                <li>{t("settings.danger.accountBullet4")}</li>
+                <li>{t("settings.deleteAccount.step1Bullet1")}</li>
+                <li>{t("settings.deleteAccount.step1Bullet2")}</li>
+                <li>{t("settings.deleteAccount.step1Bullet3")}</li>
+                <li>{t("settings.deleteAccount.step1Bullet4")}</li>
               </ModalBulletList>
               <ModalBody style={{ marginBottom: 0 }}>
-                {t("settings.danger.accountStep1End")}
+                {t("settings.deleteAccount.step1Outro")}
               </ModalBody>
             </>
           ),
-          confirmLabel: t("settings.danger.accountConfirm"),
+          confirmLabel: t("settings.deleteAccount.step1Confirm"),
         },
         {
           body: (
             <ModalBody>
-              {t("settings.danger.accountStep2A")}{" "}
-              <strong>{t("settings.danger.accountStep2B")}</strong>
-              {t("settings.danger.accountStep2C")}
+              {richText(t("settings.deleteAccount.step2Body"), {
+                strong: <strong>{t("settings.deleteAccount.step2Strong")}</strong>,
+              })}
             </ModalBody>
           ),
-          confirmLabel: t("settings.danger.continue"),
+          confirmLabel: t("settings.deleteAccount.step2Confirm"),
         },
       ],
-      typedConfirmation: t("settings.danger.accountTyped"),
+      typedConfirmation: t("settings.deleteAccount.typed"),
       onConfirm: async () => {
         const res = await fetch("/api/settings/account", { method: "DELETE" });
-        if (!res.ok) throw new Error(t("settings.danger.accountFailedToast"));
+        if (!res.ok) throw new Error(t("settings.deleteAccount.failure"));
       },
     },
   };
@@ -494,7 +496,7 @@ function DangerConfirmationModal({
   onClose: () => void;
   onSuccess: () => void;
 }) {
-  const { t } = useI18n();
+  const t = useT();
   const config = confirmationConfigs(t)[action];
   const totalSteps = config.steps.length + 1; // +1 for typed confirmation step
   const titleId = useId();
@@ -515,8 +517,8 @@ function DangerConfirmationModal({
       } catch {
         toast.error(
           action === "delete-data"
-            ? t("settings.danger.dataFailedToast")
-            : t("settings.danger.accountFailedToast")
+            ? t("settings.deleteData.failure")
+            : t("settings.deleteAccount.failure")
         );
         setIsSubmitting(false);
       }
@@ -542,9 +544,9 @@ function DangerConfirmationModal({
       {isTypedStep ? (
         <>
           <ModalBody>
-            {t("settings.danger.typePrefix")}{" "}
-            <strong>{config.typedConfirmation}</strong>{" "}
-            {t("settings.danger.typeSuffix")}
+            {richText(t("settings.modal.typeToConfirm"), {
+              word: <strong>{config.typedConfirmation}</strong>,
+            })}
           </ModalBody>
           <ModalInput
             autoFocus
@@ -564,7 +566,7 @@ function DangerConfirmationModal({
 
       <ModalActions>
         <CancelButton onClick={onClose} disabled={isSubmitting}>
-          {t("settings.cancel")}
+          {t("settings.actions.cancel")}
         </CancelButton>
         <ConfirmDangerButton
           $disabled={isTypedStep ? !typedMatch : false}
@@ -572,9 +574,9 @@ function DangerConfirmationModal({
           onClick={handleConfirm}
         >
           {isSubmitting
-            ? t("settings.danger.deleting")
+            ? t("settings.actions.deleting")
             : isTypedStep
-              ? t("settings.danger.deletePermanently")
+              ? t("settings.modal.deletePermanently")
               : config.steps[step].confirmLabel}
         </ConfirmDangerButton>
       </ModalActions>
@@ -597,7 +599,7 @@ function RevokeTokenModal({
   onConfirm: () => Promise<void>;
 }) {
   const titleId = useId();
-  const { t } = useI18n();
+  const t = useT();
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleConfirm = async () => {
@@ -616,18 +618,21 @@ function RevokeTokenModal({
       dismissable={!isSubmitting}
       onClose={onClose}
     >
-      <ModalTitle id={titleId}>⚠ {t("settings.tokens.revokeTitle")}</ModalTitle>
+      <ModalTitle id={titleId}>⚠ {t("settings.revoke.title")}</ModalTitle>
       <ModalBody>
-        <strong>{token.name}</strong> {t("settings.tokens.revokeBodyA")}{" "}
-        <code>tokens serve</code>{" "}
-        {t("settings.tokens.revokeBodyB")}
+        {richText(t("settings.revoke.body"), {
+          name: <strong>{token.name}</strong>,
+          consequence: richText(t("settings.revoke.apiConsequence"), {
+            command: <code>tokens serve</code>,
+          }),
+        })}
       </ModalBody>
       <ModalActions>
         <CancelButton onClick={onClose} disabled={isSubmitting}>
-          {t("settings.cancel")}
+          {t("settings.actions.cancel")}
         </CancelButton>
         <ConfirmDangerButton disabled={isSubmitting} onClick={handleConfirm}>
-          {isSubmitting ? t("settings.tokens.revoking") : t("settings.tokens.revokeTitle")}
+          {isSubmitting ? t("settings.actions.revoking") : t("settings.revoke.title")}
         </ConfirmDangerButton>
       </ModalActions>
     </ModalShell>
@@ -683,14 +688,15 @@ async function fetchDevices(username: string): Promise<SettingsDevice[]> {
 
 export default function SettingsClient() {
   const router = useRouter();
-  const { t, locale } = useI18n();
+  const t = useT();
+  const locale = useLocale();
   const createTokenErrorId = useId();
   const deviceErrorId = useId();
   const [user, setUser] = useState<User | null>(null);
   const [tokens, setTokens] = useState<ApiToken[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [dangerAction, setDangerAction] = useState<DangerAction | null>(null);
-  const [tokenName, setTokenName] = useState(t("settings.tokens.defaultName"));
+  const [tokenName, setTokenName] = useState("CI token");
   const [createdToken, setCreatedToken] = useState<CreatedApiToken | null>(null);
   const [isCreatingToken, setIsCreatingToken] = useState(false);
   const [createTokenError, setCreateTokenError] = useState<string | null>(null);
@@ -769,9 +775,9 @@ export default function SettingsClient() {
 
       setTokens((current) => current.filter((t) => t.id !== token.id));
       setRevokingToken(null);
-      toast.success(t("settings.tokens.revoked", { name: token.name }));
+      toast.success(t("settings.toasts.revoked", { name: token.name }));
     } catch {
-      toast.error(t("settings.tokens.revokeError"));
+      toast.error(t("settings.toasts.revokeFailed"));
     } finally {
       setRevokingTokenId(null);
     }
@@ -784,7 +790,7 @@ export default function SettingsClient() {
     } else {
       // Data deleted — close modal and stay.
       setDangerAction(null);
-      toast.success(t("settings.danger.dataDeleted"));
+      toast.success(t("settings.toasts.dataDeleted"));
     }
   }, [dangerAction, t]);
 
@@ -801,7 +807,7 @@ export default function SettingsClient() {
 
       const data = await response.json();
       if (!response.ok || !data.token) {
-        throw new Error(data.error || t("settings.tokens.createError"));
+        throw new Error(data.error || t("settings.errors.createToken"));
       }
 
       setCreatedToken(data.token);
@@ -809,7 +815,7 @@ export default function SettingsClient() {
         prependApiToken(current, apiTokenListItem(data.token))
       );
     } catch (error) {
-      setCreateTokenError(error instanceof Error ? error.message : t("settings.tokens.createError"));
+      setCreateTokenError(error instanceof Error ? error.message : t("settings.errors.createToken"));
     } finally {
       setIsCreatingToken(false);
     }
@@ -852,7 +858,7 @@ export default function SettingsClient() {
 
       const data = await response.json();
       if (!response.ok || !data.device) {
-        throw new Error(data.error || t("settings.devices.renameFailed"));
+        throw new Error(data.error || t("settings.errors.renameDevice"));
       }
 
       setDevices((current) =>
@@ -873,7 +879,7 @@ export default function SettingsClient() {
       setEditingDeviceName("");
     } catch (error) {
       setDeviceError(
-        error instanceof Error ? error.message : t("settings.devices.renameFailed")
+        error instanceof Error ? error.message : t("settings.errors.renameDevice")
       );
     } finally {
       setIsSavingDeviceName(false);
@@ -897,7 +903,7 @@ export default function SettingsClient() {
     // full-height wrapper, so arriving content jumped a whole viewport.
     return (
       <PageWrapper style={{ backgroundColor: "var(--background)" }}>
-        <MainContent aria-busy="true" aria-label={t("settings.loadingAria")}>
+        <MainContent aria-busy="true" aria-label={t("settings.loading")}>
           <Skeleton className="h-8 w-40 sm:h-9" />
           <Skeleton className="mb-7 mt-1.5 h-5 w-full max-w-[28rem]" />
           {[0, 1, 2].map((section) => (
@@ -922,7 +928,7 @@ export default function SettingsClient() {
         <Title style={{ color: "var(--foreground)" }}>
           {t("settings.title")}
         </Title>
-        <Subtitle>{t("settings.desc")}</Subtitle>
+        <Subtitle>{t("settings.subtitle")}</Subtitle>
 
         <Section>
           <SectionTitle style={{ color: "var(--foreground)" }}>
@@ -950,7 +956,7 @@ export default function SettingsClient() {
             </div>
           </ProfileWrapper>
           <InfoBanner style={{ marginTop: 16 }}>
-            {t("settings.profileLocked")}
+            {t("settings.profile.lockedNote")}
           </InfoBanner>
         </Section>
 
@@ -959,20 +965,20 @@ export default function SettingsClient() {
             {t("settings.tokens.title")}
           </SectionTitle>
           <Description style={{ color: "var(--muted-foreground)" }}>
-            {t("settings.tokens.descA")}{" "}
-            <CodeText
-              style={{ backgroundColor: "var(--muted)" }}
-            >
-              tokens login
-            </CodeText>{" "}
-            {t("settings.tokens.descB")}
+            {richText(t("settings.tokens.description"), {
+              command: (
+                <CodeText style={{ backgroundColor: "var(--muted)" }}>
+                  tokens login
+                </CodeText>
+              ),
+            })}
           </Description>
 
           <FieldLabel
             htmlFor="token-name"
             style={{ color: "var(--foreground)" }}
           >
-            {t("settings.tokens.name")}
+            {t("settings.tokens.nameLabel")}
           </FieldLabel>
           <ActionRow>
             <TextInput
@@ -988,7 +994,7 @@ export default function SettingsClient() {
               disabled={isCreatingToken}
               onClick={handleCreateToken}
             >
-              {isCreatingToken ? t("settings.tokens.creating") : t("settings.tokens.create")}
+              {isCreatingToken ? t("settings.actions.creating") : t("settings.tokens.create")}
             </PrimaryButton>
           </ActionRow>
 
@@ -998,7 +1004,7 @@ export default function SettingsClient() {
               variant="destructive"
               className="mb-4"
             >
-              <AlertTitle>{t("settings.tokens.createFailed")}</AlertTitle>
+              <AlertTitle>{t("settings.tokens.createFailedTitle")}</AlertTitle>
               <AlertDescription>{createTokenError}</AlertDescription>
             </Alert>
           )}
@@ -1006,14 +1012,14 @@ export default function SettingsClient() {
           {createdToken && (
             <TokenReveal>
               <SmallText style={{ color: "var(--foreground)", fontWeight: 600 }}>
-                {t("settings.tokens.copyNow")}
+                {t("settings.actions.copyNow")}
               </SmallText>
               <TokenCodeRow>
                 <TokenCode style={{ color: "var(--foreground)" }}>
                   {createdToken.token}
                 </TokenCode>
                 <SecondaryButton type="button" onClick={handleCopyCreatedToken}>
-                  {t("settings.tokens.copy")}
+                  {t("settings.actions.copy")}
                 </SecondaryButton>
               </TokenCodeRow>
             </TokenReveal>
@@ -1029,7 +1035,7 @@ export default function SettingsClient() {
                   className="ml-1 h-7 px-2 text-xs"
                   onClick={loadTokens}
                 >
-                  {t("error.retry")}
+                  {t("common.retry")}
                 </SecondaryButton>
               </AlertDescription>
             </Alert>
@@ -1040,13 +1046,13 @@ export default function SettingsClient() {
               </EmptyIcon>
               <p>{t("settings.tokens.empty")}</p>
               <EmptyText>
-                {t("settings.tokens.emptyHintA")}{" "}
-                <CodeText
-                  style={{ backgroundColor: "var(--muted)" }}
-                >
-                  tokens login
-                </CodeText>{" "}
-                {t("settings.tokens.descB")}
+                {richText(t("settings.tokens.emptyHint"), {
+                  command: (
+                    <CodeText style={{ backgroundColor: "var(--muted)" }}>
+                      tokens login
+                    </CodeText>
+                  ),
+                })}
               </EmptyText>
             </EmptyState>
           ) : (
@@ -1062,9 +1068,14 @@ export default function SettingsClient() {
                         {token.name}
                       </TokenName>
                       <SmallText style={{ color: "var(--muted-foreground)" }}>
-                        {t("settings.tokens.created", { date: new Date(token.createdAt).toLocaleDateString(intlTag(locale)) })}
-                        {token.lastUsedAt &&
-                          t("settings.tokens.lastUsed", { date: new Date(token.lastUsedAt).toLocaleDateString(intlTag(locale)) })}
+                        {token.lastUsedAt
+                          ? t("settings.tokens.createdLastUsed", {
+                              created: new Date(token.createdAt).toLocaleDateString(locale),
+                              lastUsed: new Date(token.lastUsedAt).toLocaleDateString(locale),
+                            })
+                          : t("settings.tokens.created", {
+                              date: new Date(token.createdAt).toLocaleDateString(locale),
+                            })}
                       </SmallText>
                     </div>
                   </TokenInfo>
@@ -1074,7 +1085,7 @@ export default function SettingsClient() {
                     className="disabled:cursor-not-allowed disabled:opacity-60"
                     onClick={() => setRevokingToken(token)}
                   >
-                    {revokingTokenId === token.id ? t("settings.tokens.revoking") : t("settings.tokens.revoke")}
+                    {revokingTokenId === token.id ? t("settings.actions.revoking") : t("settings.actions.revoke")}
                   </DangerButton>
                 </TokenItem>
               ))}
@@ -1087,7 +1098,7 @@ export default function SettingsClient() {
             {t("settings.devices.title")}
           </SectionTitle>
           <Description style={{ color: "var(--muted-foreground)" }}>
-            {t("settings.devices.desc")}
+            {t("settings.devices.description")}
           </Description>
 
           {deviceError && (
@@ -1107,7 +1118,7 @@ export default function SettingsClient() {
                   className="ml-1 h-7 px-2 text-xs"
                   onClick={() => user && loadDevices(user.username)}
                 >
-                  {t("error.retry")}
+                  {t("common.retry")}
                 </SecondaryButton>
               </AlertDescription>
             </Alert>
@@ -1115,13 +1126,13 @@ export default function SettingsClient() {
             <EmptyState style={{ color: "var(--muted-foreground)" }}>
               <p>{t("settings.devices.empty")}</p>
               <EmptyText>
-                {t("settings.devices.emptyHintA")}{" "}
-                <CodeText
-                  style={{ backgroundColor: "var(--muted)" }}
-                >
-                  bunx tokens-cli submit
-                </CodeText>{" "}
-                {t("settings.devices.emptyHintB")}
+                {richText(t("settings.devices.emptyHint"), {
+                  command: (
+                    <CodeText style={{ backgroundColor: "var(--muted)" }}>
+                      bunx tokens-cli submit
+                    </CodeText>
+                  ),
+                })}
               </EmptyText>
             </EmptyState>
           ) : (
@@ -1136,7 +1147,7 @@ export default function SettingsClient() {
                         aria-label={t("settings.devices.nameAria")}
                         value={editingDeviceName}
                         maxLength={DEVICE_NAME_MAX_LENGTH}
-                        placeholder={t("settings.devices.placeholder")}
+                        placeholder={t("settings.devices.namePlaceholder")}
                         autoFocus
                         disabled={isSavingDeviceName}
                         aria-invalid={deviceError ? true : undefined}
@@ -1158,14 +1169,14 @@ export default function SettingsClient() {
                         disabled={isSavingDeviceName}
                         onClick={() => handleSaveDeviceName(device)}
                       >
-                        {isSavingDeviceName ? t("settings.devices.saving") : t("settings.devices.save")}
+                        {isSavingDeviceName ? t("settings.actions.saving") : t("settings.actions.save")}
                       </PrimaryButton>
                       <SecondaryButton
                         type="button"
                         disabled={isSavingDeviceName}
                         onClick={cancelEditingDevice}
                       >
-                        {t("settings.cancel")}
+                        {t("settings.actions.cancel")}
                       </SecondaryButton>
                     </DeviceEditRow>
                   ) : (
@@ -1176,19 +1187,20 @@ export default function SettingsClient() {
                             {device.displayName}
                           </TokenName>
                           <SmallText style={{ color: "var(--muted-foreground)" }}>
-                            {device.cloudSessions != null &&
-                              `${t(device.cloudSessions === 1 ? "devices.cloud.session" : "devices.cloud.sessions", {
-                                n: device.cloudSessions.toLocaleString(intlTag(locale)),
-                              })} · `}
-                            {t("settings.devices.tokens", { n: formatNumber(device.totalTokens, locale) })}
-                            {" · "}
-                            {formatCurrency(device.totalCost, locale)}
-                            {" · "}
-                            {device.activeDays === 1
-                              ? t("settings.devices.activeDay", { n: device.activeDays })
-                              : t("settings.devices.activeDays", { n: device.activeDays })}
-                            {" · "}
-                            {t("settings.devices.lastSubmit", { time: formatRelativeTime(device.lastSubmittedAt, undefined, locale) })}
+                            {t(
+                              device.cloudSessions != null
+                                ? "settings.devices.statsWithSessions"
+                                : "settings.devices.stats",
+                              {
+                                sessions: device.cloudSessions ?? 0,
+                                tokens: formatNumber(device.totalTokens, locale),
+                                cost: formatCurrency(device.totalCost, locale),
+                                count: device.activeDays,
+                                lastSubmit:
+                                  formatRelativeTime(device.lastSubmittedAt, locale) ||
+                                  t("common.never"),
+                              }
+                            )}
                           </SmallText>
                         </div>
                       </TokenInfo>
@@ -1218,9 +1230,9 @@ export default function SettingsClient() {
 
           <DangerActionRow>
             <DangerActionInfo>
-              <DangerActionTitle>{t("settings.danger.deleteDataTitle")}</DangerActionTitle>
+              <DangerActionTitle>{t("settings.danger.deleteData")}</DangerActionTitle>
               <DangerActionDescription>
-                {t("settings.danger.deleteDataDesc")}
+                {t("settings.danger.deleteDataDescription")}
               </DangerActionDescription>
             </DangerActionInfo>
             <DangerActionButton onClick={() => setDangerAction("delete-data")}>
@@ -1230,9 +1242,9 @@ export default function SettingsClient() {
 
           <DangerActionRow>
             <DangerActionInfo>
-              <DangerActionTitle>{t("settings.danger.deleteAccountTitle")}</DangerActionTitle>
+              <DangerActionTitle>{t("settings.danger.deleteAccount")}</DangerActionTitle>
               <DangerActionDescription>
-                {t("settings.danger.deleteAccountDesc")}
+                {t("settings.danger.deleteAccountDescription")}
               </DangerActionDescription>
             </DangerActionInfo>
             <DangerActionButton onClick={() => setDangerAction("delete-account")}>

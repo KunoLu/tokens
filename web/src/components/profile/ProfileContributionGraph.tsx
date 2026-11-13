@@ -13,6 +13,7 @@ import {
   type PointerEvent,
 } from "react";
 import { SourceLogo } from "@/components/SourceLogo";
+import { useLocale, useT } from "@/components/layout/LocaleProvider";
 import { SpeedTierLabel } from "./SpeedTier";
 import { SOURCE_COLORS, SOURCE_DISPLAY_NAMES, SOURCE_LOGOS } from "@/lib/constants";
 import { getContributionIntensity } from "@/lib/embed/embedShared";
@@ -24,6 +25,7 @@ import type {
   TokenBreakdown,
 } from "@/lib/types";
 import { getSpeedTierRows, mergeSpeedUsage } from "@/lib/speedUsage";
+import { formatWholePercents } from "@/lib/format";
 import {
   DEFAULT_PALETTE,
   getDarkGradeColors,
@@ -33,9 +35,10 @@ import {
   type GraphColorPalette,
 } from "@/lib/themes";
 import { formatCurrency, formatTokenCount } from "@/lib/utils";
+import type { Translator } from "@/lib/i18n/translate";
+import type { Locale } from "@/lib/i18n/config";
 import { tw } from "@/lib/tw";
 import { cn } from "@/lib/utils";
-import { intlTag, PALETTE_LABEL_KEYS, t as translate, useFormat, useI18n, type Locale, type Translate, type TranslationKey } from "@/lib/i18n";
 
 export interface ProfileContributionGraphProps {
   breakdownId?: string;
@@ -203,9 +206,66 @@ export function isContributionDateHit(target: Element | null): boolean {
   return Boolean(target?.closest("[data-contribution-date]"));
 }
 
+/**
+ * One cached set of formatters per locale.
+ *
+ * The calendar asks for a formatted date once per cell — a few hundred calls on
+ * every render — and building an `Intl` object per call is the expensive half of
+ * that. Every formatter is pinned to UTC because contribution days are calendar
+ * dates, not instants, and a viewer west of UTC would otherwise see yesterday's
+ * date on today's cell.
+ */
+interface GraphFormatters {
+  day: Intl.DateTimeFormat;
+  fullDay: Intl.DateTimeFormat;
+  month: Intl.DateTimeFormat;
+  weekday: Intl.DateTimeFormat;
+  weekdayLong: Intl.DateTimeFormat;
+}
 
+const FORMATTERS = new Map<Locale, GraphFormatters>();
 
+/**
+ * One reference date per weekday (`getUTCDay` order), so weekday labels can come
+ * from `Intl` instead of a hardcoded "Mon"/"Wed"/"Fri". 2024-01-07 was a Sunday.
+ */
+const WEEKDAY_REFERENCE = Array.from(
+  { length: 7 },
+  (_, index) => new Date(Date.UTC(2024, 0, 7 + index)),
+);
 
+function formattersFor(locale: Locale): GraphFormatters {
+  const cached = FORMATTERS.get(locale);
+  if (cached) return cached;
+
+  const created: GraphFormatters = {
+    day: new Intl.DateTimeFormat(locale, {
+      day: "numeric",
+      month: "short",
+      timeZone: "UTC",
+      year: "numeric",
+    }),
+    fullDay: new Intl.DateTimeFormat(locale, {
+      day: "numeric",
+      month: "long",
+      timeZone: "UTC",
+      weekday: "long",
+      year: "numeric",
+    }),
+    month: new Intl.DateTimeFormat(locale, { month: "short", timeZone: "UTC" }),
+    weekday: new Intl.DateTimeFormat(locale, {
+      weekday: "narrow",
+      timeZone: "UTC",
+    }),
+    weekdayLong: new Intl.DateTimeFormat(locale, {
+      weekday: "short",
+      timeZone: "UTC",
+    }),
+  };
+
+  FORMATTERS.set(locale, created);
+  return created;
+}
 
 const EMPTY_TOKEN_BREAKDOWN: TokenBreakdown = {
   cacheRead: 0,
@@ -215,13 +275,14 @@ const EMPTY_TOKEN_BREAKDOWN: TokenBreakdown = {
   reasoning: 0,
 };
 
+/** Catalogue path segments, paired with the field they label. */
 const TOKEN_CATEGORIES = [
-  ["graph.tokenInput", "input"],
-  ["graph.tokenOutput", "output"],
-  ["graph.tokenCacheRead", "cacheRead"],
-  ["graph.tokenCacheWrite", "cacheWrite"],
-  ["graph.tokenReasoning", "reasoning"],
-] as const satisfies ReadonlyArray<readonly [TranslationKey, keyof TokenBreakdown]>;
+  ["profile.tokens.input", "input"],
+  ["profile.tokens.output", "output"],
+  ["profile.tokens.cacheRead", "cacheRead"],
+  ["profile.tokens.cacheWrite", "cacheWrite"],
+  ["profile.tokens.reasoning", "reasoning"],
+] as const;
 
 function parseUtcDate(date: string): number | null {
   const match = DATE_PATTERN.exec(date);
@@ -252,7 +313,7 @@ export function createContributionRangeOptions(
   contributions: readonly DailyContribution[],
   recentStart: string | null | undefined,
   recentEnd: string | null | undefined,
-  locale: Locale = "en",
+  recentLabel = "Recent year",
 ): ContributionRangeOption[] {
   const startTimestamp = recentStart ? parseUtcDate(recentStart) : null;
   const endTimestamp = recentEnd ? parseUtcDate(recentEnd) : null;
@@ -277,7 +338,7 @@ export function createContributionRangeOptions(
   return [
     {
       endDate: recentEnd!,
-      label: translate(locale, "profile.recentYear"),
+      label: recentLabel,
       startDate: recentStart!,
       value: "recent",
     },
@@ -675,10 +736,6 @@ export function createContributionCalendar(
 
   const monthMarkers: MonthMarker[] = [];
   const markerWeeks = new Set<number>();
-  const monthFormatter = new Intl.DateTimeFormat(intlTag(locale), {
-    month: "short",
-    timeZone: "UTC",
-  });
   let cursor = firstTimestamp;
 
   while (cursor <= lastTimestamp) {
@@ -689,7 +746,7 @@ export function createContributionCalendar(
       const month = date.getUTCMonth();
       const marker = {
         compactVisible: monthMarkers.length === 0 || month % 3 === 0,
-        label: monthFormatter.format(date),
+        label: formattersFor(locale).month.format(date),
         weekIndex,
       };
       const previous = monthMarkers.at(-1);
@@ -740,12 +797,14 @@ export function getDefaultContributionDate(
   rangeStart?: string | null,
   rangeEnd?: string | null,
   selectableRangeEnd?: string | null,
+  locale: Locale = "en",
 ): string | null {
   const calendar = createContributionCalendar(
     contributions,
     rangeStart,
     rangeEnd,
     selectableRangeEnd,
+    locale,
   );
   return calendar.selectableEndDate ?? calendar.endDate;
 }
@@ -912,42 +971,25 @@ export function getNearestContributionDate(
 function formatRange(
   startDate: string | null,
   endDate: string | null,
-  t: Translate,
   locale: Locale,
+  t: Translator,
 ): string {
-  if (!startDate || !endDate) return t("profile.graph.noActivityYet");
+  if (!startDate || !endDate) return t("profile.graph.noActivity");
+
   const start = parseUtcDate(startDate);
   const end = parseUtcDate(endDate);
-  if (start === null || end === null) return t("profile.graph.noActivityYet");
-  const fmt = new Intl.DateTimeFormat(intlTag(locale), {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-    timeZone: "UTC",
-  });
-  if (start === end) return fmt.format(start);
-  return `${fmt.format(start)} – ${fmt.format(end)}`;
+  if (start === null || end === null) return t("profile.graph.noActivity");
+
+  const day = formattersFor(locale).day;
+  if (start === end) return day.format(start);
+  return `${day.format(start)} – ${day.format(end)}`;
 }
 
-function cellTitle(
-  cell: ContributionCell,
-  t: Translate,
-  locale: Locale,
-): string {
+function cellTitle(cell: ContributionCell, locale: Locale, t: Translator): string {
   const timestamp = parseUtcDate(cell.date);
   const date =
-    timestamp === null
-      ? cell.date
-      : new Intl.DateTimeFormat(intlTag(locale), {
-          day: "numeric",
-          month: "short",
-          year: "numeric",
-          timeZone: "UTC",
-        }).format(timestamp);
-  return t(cell.tokens === 1 ? "profile.graph.cellOne" : "profile.graph.cellMany", {
-    date,
-    n: cell.tokens.toLocaleString(intlTag(locale)),
-  });
+    timestamp === null ? cell.date : formattersFor(locale).day.format(timestamp);
+  return t("profile.graph.cellTitle", { date, count: cell.tokens });
 }
 
 export function getContributionColor(
@@ -1545,14 +1587,7 @@ const NoDayActivity = tw("p", "m-0 text-xs text-muted-foreground");
 
 function formatFullDay(date: string, locale: Locale): string {
   const timestamp = parseUtcDate(date);
-  if (timestamp === null) return date;
-  return new Intl.DateTimeFormat(intlTag(locale), {
-    day: "numeric",
-    month: "long",
-    weekday: "long",
-    year: "numeric",
-    timeZone: "UTC",
-  }).format(timestamp);
+  return timestamp === null ? date : formattersFor(locale).fullDay.format(timestamp);
 }
 
 function getClientName(client: ClientType): string {
@@ -1568,43 +1603,38 @@ function getClientColor(
 
 function modelMeta(
   model: ContributionModelDetail,
-  t: Translate,
-  locale: Locale,
+  t: Translator,
 ): string {
   const metrics = TOKEN_CATEGORIES.flatMap(([labelKey, key]) =>
     model.tokens[key] > 0
-      ? [`${t(labelKey)} ${formatTokenCount(model.tokens[key], locale)}`]
+      ? [`${t(labelKey)} ${formatTokenCount(model.tokens[key])}`]
       : [],
   );
   if (model.messages > 0) {
-    metrics.push(
-      t(model.messages === 1 ? "graph.messagesOne" : "graph.messagesMany", {
-        n: model.messages.toLocaleString(intlTag(locale)),
-      }),
-    );
+    metrics.push(t("profile.units.message", { count: model.messages }));
   }
   return metrics.join(" · ");
 }
 
 function ModelSpeedTiers({ model }: { model: ContributionModelDetail }) {
-  const { t, locale } = useI18n();
-  const { formatWholePercents } = useFormat();
+  const t = useT();
+  const locale = useLocale();
   const tiers = getSpeedTierRows(model.speedUsage, model.totalTokens, model.messages);
   if (tiers.length === 0) return null;
   const percents = formatWholePercents(
     tiers.map((tier) => (model.totalTokens > 0 ? (tier.tokens / model.totalTokens) * 100 : 0)),
+    locale,
   );
 
   return (
     <SpeedTierList>
       {tiers.map((tier, index) => {
-        const metrics = [t("tokens.count", { n: formatTokenCount(tier.tokens, locale) }), percents[index]];
+        const metrics = [
+          t("profile.units.token", { count: tier.tokens }),
+          percents[index],
+        ];
         if (tier.messages > 0) {
-          metrics.push(
-            t(tier.messages === 1 ? "graph.messagesCountOne" : "graph.messagesCountMany", {
-              n: tier.messages.toLocaleString(intlTag(locale)),
-            }),
-          );
+          metrics.push(t("profile.units.message", { count: tier.messages }));
         }
         return (
           <SpeedTierLine key={tier.speed}>
@@ -1621,7 +1651,8 @@ function ModelSpeedTiers({ model }: { model: ContributionModelDetail }) {
 }
 
 function ContributionDayTooltip({ day }: { day: DailyContribution }) {
-  const { t, locale } = useI18n();
+  const t = useT();
+  const locale = useLocale();
   const clients = createContributionClientDetails(day);
   const messageCount = getContributionDayMessageCount(day, clients);
   const visibleCategories = TOKEN_CATEGORIES.filter(
@@ -1632,9 +1663,9 @@ function ContributionDayTooltip({ day }: { day: DailyContribution }) {
     <>
       <CellTooltipDate>{formatFullDay(day.date, locale)}</CellTooltipDate>
       <TooltipTotal>
-        <TooltipTotalLabel>{t("profile.graph.totalTokens")}</TooltipTotalLabel>
+        <TooltipTotalLabel>{t("profile.day.totalTokens")}</TooltipTotalLabel>
         <CellTooltipValue>
-          {formatTokenCount(day.totals.tokens, locale)}
+          {formatTokenCount(day.totals.tokens)}
         </CellTooltipValue>
       </TooltipTotal>
       <TooltipDivider />
@@ -1644,26 +1675,26 @@ function ContributionDayTooltip({ day }: { day: DailyContribution }) {
             <Fragment key={key}>
               <TooltipMetricLabel>{t(labelKey)}</TooltipMetricLabel>
               <TooltipMetricValue>
-                {formatTokenCount(day.tokenBreakdown[key], locale)}
+                {formatTokenCount(day.tokenBreakdown[key])}
               </TooltipMetricValue>
             </Fragment>
           ))}
         </TooltipMetricGrid>
       )}
       <TooltipMetricGrid>
-        <TooltipMetricLabel>{t("profile.cost")}</TooltipMetricLabel>
+        <TooltipMetricLabel>{t("profile.day.cost")}</TooltipMetricLabel>
         <TooltipMetricValue>
-          {formatCurrency(day.totals.cost, locale)}
+          {formatCurrency(day.totals.cost)}
         </TooltipMetricValue>
-        <TooltipMetricLabel>{t("graph.messages")}</TooltipMetricLabel>
+        <TooltipMetricLabel>{t("profile.day.messages")}</TooltipMetricLabel>
         <TooltipMetricValue>
-          {messageCount.toLocaleString(intlTag(locale))}
+          {messageCount.toLocaleString(locale)}
         </TooltipMetricValue>
       </TooltipMetricGrid>
       {clients.length > 0 && (
         <>
           <TooltipDivider />
-        <TooltipSectionLabel>{t("profile.graph.clients")}</TooltipSectionLabel>
+          <TooltipSectionLabel>{t("profile.day.clients")}</TooltipSectionLabel>
           <TooltipMetricGrid>
             {clients.slice(0, 3).map((client) => (
               <Fragment key={client.client}>
@@ -1671,16 +1702,16 @@ function ContributionDayTooltip({ day }: { day: DailyContribution }) {
                   {getClientName(client.client)}
                 </TooltipMetricLabel>
                 <TooltipMetricValue>
-                  {formatTokenCount(client.totalTokens, locale)}
+                  {formatTokenCount(client.totalTokens)}
                 </TooltipMetricValue>
               </Fragment>
             ))}
             {clients.length > 3 && (
               <>
                 <TooltipMetricLabel>
-                  {t("profile.graph.more", { n: clients.length - 3 })}
+                  {t("profile.day.more", { count: clients.length - 3 })}
                 </TooltipMetricLabel>
-                <TooltipMetricValue>{t("graph.clickForDetail")}</TooltipMetricValue>
+                <TooltipMetricValue>{t("profile.day.clickForDetail")}</TooltipMetricValue>
               </>
             )}
           </TooltipMetricGrid>
@@ -1705,7 +1736,8 @@ function ContributionDayBreakdown({
   palette: GraphColorPalette;
   standalone?: boolean;
 }) {
-  const { t, locale } = useI18n();
+  const t = useT();
+  const locale = useLocale();
   const headingId = `${id}-heading`;
   const clients = createContributionClientDetails(day);
   const messageCount = getContributionDayMessageCount(day, clients);
@@ -1719,14 +1751,16 @@ function ContributionDayBreakdown({
     >
       <DetailHeader>
         <div>
-          <DetailEyebrow>{t("graph.dayBreakdownEyebrow")}</DetailEyebrow>
-          <DetailTitle id={headingId}>{formatFullDay(day.date, locale)}</DetailTitle>
+          <DetailEyebrow>{t("profile.day.eyebrow")}</DetailEyebrow>
+          <DetailTitle id={headingId}>
+            {formatFullDay(day.date, locale)}
+          </DetailTitle>
         </div>
         {onClose && (
           <DetailClose
             type="button"
             onClick={onClose}
-            aria-label={t("graph.closeDayAria")}
+            aria-label={t("profile.day.close")}
           >
             <svg
               aria-hidden="true"
@@ -1748,33 +1782,33 @@ function ContributionDayBreakdown({
       <DetailBody>
         <DetailSummary>
           <DetailMetric>
-            <DetailMetricLabel>{t("profile.graph.totalTokens")}</DetailMetricLabel>
+            <DetailMetricLabel>{t("profile.day.totalTokens")}</DetailMetricLabel>
             <DetailMetricValue>
-              {formatTokenCount(day.totals.tokens, locale)}
+              {formatTokenCount(day.totals.tokens)}
             </DetailMetricValue>
           </DetailMetric>
           <DetailMetric>
-            <DetailMetricLabel>{t("profile.cost")}</DetailMetricLabel>
+            <DetailMetricLabel>{t("profile.day.cost")}</DetailMetricLabel>
             <DetailMetricValue>
-              {formatCurrency(day.totals.cost, locale)}
+              {formatCurrency(day.totals.cost)}
             </DetailMetricValue>
           </DetailMetric>
           <DetailMetric>
-            <DetailMetricLabel>{t("graph.messages")}</DetailMetricLabel>
+            <DetailMetricLabel>{t("profile.day.messages")}</DetailMetricLabel>
             <DetailMetricValue>
-              {messageCount.toLocaleString(intlTag(locale))}
+              {messageCount.toLocaleString(locale)}
             </DetailMetricValue>
           </DetailMetric>
         </DetailSummary>
 
         <DetailSection>
-          <DetailSectionTitle>{t("graph.tokenCategories")}</DetailSectionTitle>
+          <DetailSectionTitle>{t("profile.day.categories")}</DetailSectionTitle>
           <TokenDetailGrid>
             {TOKEN_CATEGORIES.map(([labelKey, key]) => (
               <DetailMetric key={key}>
                 <DetailMetricLabel>{t(labelKey)}</DetailMetricLabel>
                 <DetailMetricValue>
-                  {formatTokenCount(day.tokenBreakdown[key], locale)}
+                  {formatTokenCount(day.tokenBreakdown[key])}
                 </DetailMetricValue>
               </DetailMetric>
             ))}
@@ -1782,12 +1816,12 @@ function ContributionDayBreakdown({
         </DetailSection>
 
         <DetailSection>
-          <DetailSectionTitle>{t("graph.clientsAndModels")}</DetailSectionTitle>
+          <DetailSectionTitle>{t("profile.day.clientsAndModels")}</DetailSectionTitle>
           {clients.length > 0 ? (
             <ClientList
               $standalone={standalone}
               tabIndex={standalone ? undefined : 0}
-              aria-label={t("graph.clientModelAria")}
+              aria-label={t("profile.day.clientListAria")}
             >
               {clients.map((client) => (
                 <ClientSection key={client.client}>
@@ -1808,40 +1842,35 @@ function ContributionDayBreakdown({
                       <ClientName>{getClientName(client.client)}</ClientName>
                     </ClientIdentity>
                     <ClientTotal>
-                      {formatTokenCount(client.totalTokens, locale)} ·{" "}
-                      {formatCurrency(client.cost, locale)}
+                      {formatTokenCount(client.totalTokens)} ·{" "}
+                      {formatCurrency(client.cost)}
                     </ClientTotal>
                   </ClientHeader>
                   {client.models.length > 0 && (
                     <ModelList>
-                      {client.models.map((model) => {
-                        const meta = modelMeta(model, t, locale);
-                        return (
+                      {client.models.map((model) => (
                         <ModelRow
                           key={`${model.providerId ?? ""}-${model.modelId}`}
                         >
                           <ModelName title={model.modelId}>
                             {model.modelId}
                           </ModelName>
-                          <ModelValue>{formatCurrency(model.cost, locale)}</ModelValue>
+                          <ModelValue>{formatCurrency(model.cost)}</ModelValue>
                           <ModelMeta>
                             {model.providerId && `${model.providerId} · `}
-                            {t("tokens.count", { n: formatTokenCount(model.totalTokens, locale) })}
-                            {meta && ` · ${meta}`}
+                            {t("profile.units.token", { count: model.totalTokens })}
+                            {modelMeta(model, t) && ` · ${modelMeta(model, t)}`}
                           </ModelMeta>
                           <ModelSpeedTiers model={model} />
                         </ModelRow>
-                        );
-                      })}
+                      ))}
                     </ModelList>
                   )}
                 </ClientSection>
               ))}
             </ClientList>
           ) : (
-            <NoDayActivity>
-              {t("graph.noClientDetail")}
-            </NoDayActivity>
+            <NoDayActivity>{t("profile.day.noDetail")}</NoDayActivity>
           )}
         </DetailSection>
       </DetailBody>
@@ -1882,7 +1911,7 @@ export function ProfileContributionGraph({
   breakdownId: providedBreakdownId,
   className,
   contributions,
-  description,
+  description: providedDescription,
   onPaletteChange,
   onRangeChange,
   onSelectedDateChange,
@@ -1898,7 +1927,8 @@ export function ProfileContributionGraph({
   showBreakdown = true,
   view: providedView,
 }: ProfileContributionGraphProps) {
-  const { t, locale } = useI18n();
+  const t = useT();
+  const locale = useLocale();
   const titleId = useId();
   const descriptionId = useId();
   const tooltipId = useId();
@@ -1939,17 +1969,15 @@ export function ProfileContributionGraph({
       ),
     [contributions, rangeStart, rangeEnd, selectableRangeEnd, locale],
   );
-  const resolvedDescription = description ?? t("graph.defaultDescription");
-  const activeDayLabel = t(
-    calendar.activeDays === 1 ? "profile.graph.activeDayOne" : "profile.graph.activeDaysMany",
-    { n: calendar.activeDays.toLocaleString(intlTag(locale)) },
-  );
+  const description =
+    providedDescription ?? t("profile.graph.description");
+  const activeDayLabel = t("profile.graph.activeDays", { count: calendar.activeDays });
   const accessibleDetail = calendar.highestDay
-    ? t("graph.highestActivity", {
-        cell: cellTitle(calendar.highestDay, t, locale),
-        count: calendar.freeTokenDays.toLocaleString(intlTag(locale)),
+    ? t("profile.graph.accessibleDetail", {
+        highest: cellTitle(calendar.highestDay, locale, t),
+        days: calendar.freeTokenDays,
       })
-    : t("graph.noActiveDays");
+    : t("profile.graph.noActivityDetail");
   const inRangeDates = useMemo(
     () =>
       calendar.cells
@@ -2197,12 +2225,12 @@ export function ProfileContributionGraph({
       <Header>
         <HeadingGroup>
           <HeadingRow>
-            <Heading id={titleId}>{t("graph.contributions")}</Heading>
+            <Heading id={titleId}>{t("profile.graph.heading")}</Heading>
             {rangeOptions.length > 1 && rangeValue && onRangeChange && (
               <RangeSelectWrapper>
                 <RangeSelect
                   name="profile-contribution-range"
-                  aria-label={t("graph.rangeAria")}
+                  aria-label={t("profile.graph.rangeLabel")}
                   aria-controls={calendarId}
                   value={rangeValue}
                   onChange={(event) => commitRange(event.currentTarget.value)}
@@ -2216,10 +2244,10 @@ export function ProfileContributionGraph({
               </RangeSelectWrapper>
             )}
           </HeadingRow>
-          <Description id={descriptionId}>{resolvedDescription}</Description>
+          <Description id={descriptionId}>{description}</Description>
         </HeadingGroup>
         <HeaderAside>
-          <ViewToggle role="group" aria-label={t("graph.viewAria")}>
+          <ViewToggle role="group" aria-label={t("profile.graph.viewLabel")}>
             {(["2d", "3d"] as const).map((option) => (
               <ViewButton
                 key={option}
@@ -2235,7 +2263,9 @@ export function ProfileContributionGraph({
           </ViewToggle>
           <Summary aria-live="polite">
             <ActiveDays>{activeDayLabel}</ActiveDays>
-            <Range>{formatRange(calendar.startDate, calendar.endDate, t, locale)}</Range>
+            <Range>
+              {formatRange(calendar.startDate, calendar.endDate, locale, t)}
+            </Range>
           </Summary>
         </HeaderAside>
       </Header>
@@ -2258,14 +2288,18 @@ export function ProfileContributionGraph({
               </MonthRow>
               <CalendarRow>
                 <DayLabels aria-hidden="true">
-                  <DayLabel $row={2}>{t("weekdays.short.mon")}</DayLabel>
-                  <DayLabel $row={4}>{t("weekdays.short.wed")}</DayLabel>
-                  <DayLabel $row={6}>{t("weekdays.short.fri")}</DayLabel>
+                  {/* Three columns only, so the labels are the same three
+                      weekdays in every language, named by `Intl`. */}
+                  {[1, 3, 5].map((index, position) => (
+                    <DayLabel key={index} $row={position * 2 + 2}>
+                      {formattersFor(locale).weekday.format(WEEKDAY_REFERENCE[index])}
+                    </DayLabel>
+                  ))}
                 </DayLabels>
                 <Grid
                   $weeks={calendar.weekCount}
                   role="group"
-                  aria-label={t("graph.gridAria")}
+                  aria-label={t("profile.graph.gridLabel")}
                   aria-describedby={calendarInstructionsId}
                   data-contribution-hit-surface="2d"
                   onClick={selectNearestCell}
@@ -2289,7 +2323,9 @@ export function ProfileContributionGraph({
                           cell.selectable && cell.date === tabbableDate ? 0 : -1
                         }
                         aria-hidden={cell.inRange ? undefined : true}
-                        aria-label={cell.inRange ? cellTitle(cell, t, locale) : undefined}
+                        aria-label={
+                          cell.inRange ? cellTitle(cell, locale, t) : undefined
+                        }
                         aria-current={
                           cell.selectable && cell.date === selectedDate
                             ? "date"
@@ -2337,7 +2373,7 @@ export function ProfileContributionGraph({
               <IsometricSvg
                 viewBox={`0 0 ${isometricGeometry.viewBox.width} ${isometricGeometry.viewBox.height}`}
                 role="group"
-                aria-label={t("graph.gridAriaIso")}
+                aria-label={t("profile.graph.isometricLabel")}
                 aria-describedby={calendarInstructionsId}
                 data-contribution-hit-surface="3d"
                 onClick={selectNearestCell}
@@ -2367,7 +2403,9 @@ export function ProfileContributionGraph({
                         interactive && cell.date === tabbableDate ? 0 : -1
                       }
                       aria-hidden={interactive ? undefined : true}
-                      aria-label={interactive ? cellTitle(cell, t, locale) : undefined}
+                      aria-label={
+                        interactive ? cellTitle(cell, locale, t) : undefined
+                      }
                       aria-current={
                         interactive && selected ? "date" : undefined
                       }
@@ -2431,7 +2469,7 @@ export function ProfileContributionGraph({
           )}
           <Footer>
             <PaletteControl>
-              <span>{t("graph.color")}</span>
+              <span>{t("profile.graph.color")}</span>
               <PalettePreview aria-hidden="true">
                 {([1, 2, 3, 4] as const).map((level) => {
                   const colors = getContributionColors(palette, level);
@@ -2446,7 +2484,7 @@ export function ProfileContributionGraph({
               </PalettePreview>
               <PaletteSelect
                 name="profile-contribution-palette"
-                aria-label={t("graph.color")}
+                aria-label={t("profile.graph.colorLabel")}
                 value={paletteName}
                 onChange={(event) =>
                   commitPalette(event.currentTarget.value as ColorPaletteName)
@@ -2454,13 +2492,13 @@ export function ProfileContributionGraph({
               >
                 {getPaletteNames().map((name) => (
                   <option key={name} value={name}>
-                    {t(PALETTE_LABEL_KEYS[name])}
+                    {t(`profile.palette.${name.toLowerCase()}`)}
                   </option>
                 ))}
               </PaletteSelect>
             </PaletteControl>
-            <Legend aria-label={t("graph.legendAria")}>
-              <span>{t("graph.low")}</span>
+            <Legend aria-label={t("profile.graph.legend")}>
+              <span>{t("profile.graph.low")}</span>
               <LegendSwatches>
                 {[0, 1, 2, 3, 4].map((level) => {
                   const colors = getContributionColors(
@@ -2476,7 +2514,7 @@ export function ProfileContributionGraph({
                   );
                 })}
               </LegendSwatches>
-              <span>{t("graph.high")}</span>
+              <span>{t("profile.graph.high")}</span>
             </Legend>
           </Footer>
           {showBreakdown && selectedDay && (
@@ -2489,10 +2527,10 @@ export function ProfileContributionGraph({
           )}
         </>
       ) : (
-        <EmptyState>{t("graph.empty")}</EmptyState>
+        <EmptyState>{t("profile.graph.empty")}</EmptyState>
       )}
       <VisuallyHidden id={calendarInstructionsId}>
-        {t("graph.instructions")}
+        {t("profile.graph.instructions")}
       </VisuallyHidden>
     </Figure>
   );

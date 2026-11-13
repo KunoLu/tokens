@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useId, useState } from "react";
-import { useI18n } from "@/lib/i18n";
+import { useT } from "@/components/layout/LocaleProvider";
 
 const Section = "mb-6 rounded-xl border bg-card p-6";
 const SectionTitle = "mb-4 text-lg font-semibold text-foreground";
@@ -18,7 +18,7 @@ interface IssuedReadToken extends ReadTokenRow {
 }
 
 export default function PrivacySection() {
-  const { t } = useI18n();
+  const t = useT();
   const errorId = useId();
   const [isPrivate, setIsPrivate] = useState<boolean | null>(null);
   const [privacyLoadFailed, setPrivacyLoadFailed] = useState(false);
@@ -70,12 +70,12 @@ export default function PrivacySection() {
       });
       const data = (await response.json()) as { private?: unknown };
       if (!response.ok || typeof data.private !== "boolean") {
-        setError(t("settings.privacy.saveFailed"));
+        setError(t("settings.errors.updatePrivacy"));
         return;
       }
       setIsPrivate(data.private);
     } catch {
-      setError(t("settings.privacy.saveFailed"));
+      setError(t("settings.errors.updatePrivacy"));
     } finally {
       setIsSavingPrivacy(false);
     }
@@ -90,7 +90,7 @@ export default function PrivacySection() {
     });
     const data = (await response.json()) as { token?: IssuedReadToken };
     if (!response.ok || !data.token?.token) {
-      setError(t("settings.privacy.tokenFailed"));
+      setError(t("settings.errors.createReadToken"));
       return;
     }
     setCreatedToken(data.token);
@@ -102,7 +102,7 @@ export default function PrivacySection() {
     setError(null);
     const response = await fetch(`/api/settings/read-tokens/${tokenId}`, { method: "DELETE" });
     if (!response.ok) {
-      setError(t("settings.privacy.tokenFailed"));
+      setError(t("settings.errors.revokeReadToken"));
       return;
     }
     setTokens((current) => current.filter((token) => token.id !== tokenId));
@@ -111,17 +111,17 @@ export default function PrivacySection() {
   return (
     <section className={Section}>
       <h2 className={SectionTitle}>{t("settings.privacy.title")}</h2>
-      <p className="mb-4 text-sm text-muted-foreground">{t("settings.privacy.desc")}</p>
+      <p className="mb-4 text-sm text-muted-foreground">{t("settings.privacy.description")}</p>
       {privacyLoadFailed ? (
         <button type="button" className="text-sm underline" onClick={() => void loadPrivacy()}>
-          {t("settings.privacy.retry")}
+          {t("common.retry")}
         </button>
       ) : (
         <div className="mb-6 flex items-center justify-between gap-4">
           <div>
-            <p className="text-sm font-medium">{t("settings.privacy.switchLabel")}</p>
+            <p className="text-sm font-medium">{t("settings.privacy.privateMode")}</p>
             <p className="text-sm text-muted-foreground">
-              {isPrivate ? t("settings.privacy.on") : t("settings.privacy.off")}
+              {isPrivate ? t("settings.privacy.stateOn") : t("settings.privacy.stateOff")}
             </p>
           </div>
           <button
@@ -137,8 +137,8 @@ export default function PrivacySection() {
         </div>
       )}
 
-      <h3 className="mb-2 text-sm font-semibold">{t("settings.privacy.tokensTitle")}</h3>
-      <p className="mb-4 text-sm text-muted-foreground">{t("settings.privacy.tokensDesc")}</p>
+      <h3 className="mb-2 text-sm font-semibold">{t("settings.readTokens.label")}</h3>
+      <p className="mb-4 text-sm text-muted-foreground">{t("settings.readTokens.description")}</p>
       {createdToken ? (
         <p className="mb-4 break-all rounded-md border border-[var(--success)] p-3 font-mono text-sm">
           {createdToken.token}
@@ -148,7 +148,7 @@ export default function PrivacySection() {
         <input
           value={tokenName}
           onChange={(event) => setTokenName(event.target.value)}
-          placeholder={t("settings.privacy.tokenName")}
+          placeholder={t("settings.tokens.nameLabel")}
           className="h-10 rounded-md border bg-background px-3 text-sm"
           aria-describedby={error ? errorId : undefined}
         />
@@ -157,7 +157,7 @@ export default function PrivacySection() {
           onClick={() => void createToken()}
           className="h-10 cursor-pointer rounded-md border border-primary bg-primary px-3.5 text-sm font-semibold text-primary-foreground"
         >
-          {t("settings.privacy.createToken")}
+          {t("settings.readTokens.create")}
         </button>
       </div>
       {error ? (
@@ -167,17 +167,17 @@ export default function PrivacySection() {
       ) : null}
       {tokensLoadFailed ? (
         <button type="button" className="text-sm underline" onClick={() => void loadTokens()}>
-          {t("settings.privacy.retry")}
+          {t("common.retry")}
         </button>
       ) : tokens.length === 0 ? (
-        <p className="text-sm text-muted-foreground">{t("settings.privacy.noTokens")}</p>
+        <p className="text-sm text-muted-foreground">{t("settings.readTokens.empty")}</p>
       ) : (
         <ul className="space-y-2">
           {tokens.map((token) => (
             <li key={token.id} className="flex items-center justify-between gap-3 text-sm">
               <span>{token.name}</span>
               <button type="button" className="underline" onClick={() => void revokeToken(token.id)}>
-                {t("settings.privacy.revoke")}
+                {t("settings.actions.revoke")}
               </button>
             </li>
           ))}

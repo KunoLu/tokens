@@ -1,13 +1,14 @@
 import type { Metadata } from 'next';
-import { cookies } from 'next/headers';
 import { notFound, permanentRedirect } from 'next/navigation';
 import type { ProfileDevice } from '@/components/profile';
 import { getGitHubSocialLinks } from '@/lib/githubSocials';
 import { loadPublicProfileDevicesForPage } from '@/lib/publicProfileDevices';
 import { loadPublicProfileForPage } from '@/lib/publicProfileData';
 import { loadProfileMembershipForPage } from '@/lib/teams/profileMembership';
-import { LOCALE_COOKIE, parseLocale } from '@/lib/i18n';
 import { SITE_URL } from '@/lib/site';
+import { getTranslator } from '@/lib/i18n/server';
+import { localizeHref } from '@/lib/i18n/config';
+import { formatCurrency, formatNumber } from '@/lib/format';
 import ProfilePageClient, { type ProfileData } from './ProfilePageClient';
 import BannedProfileView, { type BannedProfileData } from './BannedProfileView';
 
@@ -27,7 +28,7 @@ async function getProfileData(
   username: string,
   period: ProfilePeriod,
 ): Promise<ProfileData | BannedProfileData | null> {
-  const locale = parseLocale((await cookies()).get(LOCALE_COOKIE)?.value);
+  const { locale } = await getTranslator();
   const result = await loadPublicProfileForPage(username, period, locale);
 
   if (result.kind === "redirect") {
@@ -82,6 +83,7 @@ async function getProfileMembership(username: string) {
 
 export async function generateMetadata({ params }: { params: Promise<{ username: string }> }): Promise<Metadata> {
   const { username } = await params;
+  const { locale, t } = await getTranslator();
 
   // Built from the profile's own figures so a shared link previews that
   // person's standing rather than a generic banner. Falls back to the plain
@@ -105,22 +107,38 @@ export async function generateMetadata({ params }: { params: Promise<{ username:
   if (stats?.totalCost) og.set("cost", String(stats.totalCost));
   const image = `/api/og?${og.toString()}`;
 
+  // Upstream's i18n changeset points these four lookups at `meta.*`, where
+  // they miss (or worse, hit the site-wide title); the keys live under
+  // `profile.meta.*` and are used from there here.
+  const shareTitle =
+    displayName && displayName !== username
+      ? t("profile.meta.shareTitleNamed", { displayName, handle: username })
+      : t("profile.meta.shareTitlePlain", { handle: username });
+  // The figures are formatted for the reader's locale here rather than inside
+  // the catalogue: `formatNumber` needs the number, not a slot it would have to
+  // re-parse.
+  const shareDescription = stats
+    ? t(rank != null ? "profile.meta.statsWithRank" : "profile.meta.statsNoRank", {
+        tokens: formatNumber(stats.totalTokens, true, locale),
+        cost: formatCurrency(stats.totalCost, true, locale),
+        rank: rank ?? 0,
+      })
+    : t("profile.meta.description", { handle: username });
+
   return {
-    title: `@${username} - Token Usage | Tokens`,
-    description: `AI coding token usage for ${username} on Tokens.`,
+    title: t("profile.meta.title", { handle: username }),
+    description: shareDescription,
     openGraph: {
-      title: `@${username} on Tokens`,
-      description: stats
-        ? `${username} has used ${stats.totalTokens.toLocaleString("en-US")} tokens across their AI coding clients.`
-        : `AI coding token usage for ${username}.`,
+      title: shareTitle,
+      description: shareDescription,
       type: "profile",
-      url: `${SITE_URL}/u/${username}`,
+      url: `${SITE_URL}${localizeHref(`/u/${username}`, locale)}`,
       siteName: "Tokens",
-      images: [{ url: image, width: 1200, height: 630, alt: `@${username} on Tokens` }],
+      images: [{ url: image, width: 1200, height: 630, alt: shareTitle }],
     },
     twitter: {
       card: "summary_large_image",
-      title: `@${username} on Tokens`,
+      title: shareTitle,
       images: [image],
     },
   };
@@ -136,6 +154,7 @@ export default async function ProfilePage({
   const { username } = await params;
   const resolvedSearchParams = await searchParams;
   const period = parseProfilePeriod(resolvedSearchParams.period);
+  const { locale } = await getTranslator();
   const [data, devices, socialLinks, membership] = await Promise.all([
     getProfileData(username, period),
     getProfileDevices(username),
@@ -147,8 +166,15 @@ export default async function ProfilePage({
     notFound();
   }
 
+  // Canonical casing, in the language being read: `/zh-CN/u/old` must land on
+  // `/zh-CN/u/new` rather than dropping the reader back into English.
   if (data.user?.username && data.user.username !== username) {
-    permanentRedirect(`/u/${data.user.username}${period === "all" ? "" : `?period=${period}`}`);
+    permanentRedirect(
+      localizeHref(
+        `/u/${data.user.username}${period === "all" ? "" : `?period=${period}`}`,
+        locale,
+      ),
+    );
   }
 
   if (isBannedProfile(data)) {

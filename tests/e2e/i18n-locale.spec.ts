@@ -1,8 +1,14 @@
 import { expect, test, type Page } from "@playwright/test";
 import { deleteFixtureUsers, fixtureUser, registerUser } from "./users";
 
-// Traces the LocaleToggle scenarios in web/features/i18n.feature (T10/T11).
-// Scenario names are kept in the test titles for traceability.
+// Traces the scenarios in web/features/i18n.feature (locale prefix cutover,
+// PR A of the v27.2.1 upstream sync). Scenario names are kept in the test
+// titles for traceability.
+//
+// The scheme under test: the language lives in the URL prefix
+// (/zh-CN/..., /ja/...; unprefixed is English). tt_locale only remembers the
+// choice for the root redirect; it never decides what an unprefixed page
+// renders. A pre-cutover `tt_locale=zh` cookie still means Chinese.
 
 const BASE_URL = "http://localhost:3000";
 
@@ -12,11 +18,11 @@ function mainNav(page: Page, name = "Main navigation") {
 
 async function switchLocale(page: Page, buttonName: string, optionName: string) {
   await page.getByRole("button", { name: buttonName }).click();
-  // Clicking an option writes tt_locale and reloads the page.
+  // Clicking an option writes tt_locale and navigates to the prefixed address.
   await page.getByRole("menuitem", { name: optionName }).click();
 }
 
-test("按钮位置与选项: 语言按钮在主题切换左侧，选项恰好为 English / 中文", async ({
+test("按钮位置与选项: 语言按钮在主题切换左侧，选项恰好为 English / 简体中文 / 日本語", async ({
   page,
 }) => {
   await page.goto("/leaderboard");
@@ -36,24 +42,26 @@ test("按钮位置与选项: 语言按钮在主题切换左侧，选项恰好为
 
   await languageButton.click();
   const items = page.getByRole("menuitem");
-  await expect(items).toHaveCount(2);
+  await expect(items).toHaveCount(3);
   await expect(items.nth(0)).toHaveText("English");
-  await expect(items.nth(1)).toHaveText("中文");
+  await expect(items.nth(1)).toHaveText("简体中文");
+  await expect(items.nth(2)).toHaveText("日本語");
 });
 
-test("切换到中文: 选择中文后 lang=zh-CN、cookie tt_locale=zh、导航变中文", async ({
+test("切换到简体中文: 选择后地址变为 /zh-CN/leaderboard、cookie 为 zh-CN、导航变中文", async ({
   page,
   context,
 }) => {
   await page.goto("/leaderboard");
   await expect(page.locator("html")).toHaveAttribute("lang", "en");
 
-  await switchLocale(page, "Language", "中文");
+  await switchLocale(page, "Language", "简体中文");
 
+  await expect(page).toHaveURL(/\/zh-CN\/leaderboard$/);
   await expect(page.locator("html")).toHaveAttribute("lang", "zh-CN");
   const cookies = await context.cookies();
   expect(cookies.find((cookie) => cookie.name === "tt_locale")?.value).toBe(
-    "zh"
+    "zh-CN"
   );
 
   const nav = mainNav(page, "主导航");
@@ -62,18 +70,15 @@ test("切换到中文: 选择中文后 lang=zh-CN、cookie tt_locale=zh、导航
   await expect(nav.getByRole("link", { name: "文档" })).toBeVisible();
 });
 
-test("切换到 English: 中文偏好下选择 English 后 lang=en、导航变英文", async ({
+test("切换到 English: 中文前缀下选择 English 后回到无前缀地址、导航变英文", async ({
   page,
-  context,
 }) => {
-  await context.addCookies([
-    { name: "tt_locale", value: "zh", url: BASE_URL },
-  ]);
-  await page.goto("/leaderboard");
+  await page.goto("/zh-CN/leaderboard");
   await expect(page.locator("html")).toHaveAttribute("lang", "zh-CN");
 
   await switchLocale(page, "语言", "English");
 
+  await expect(page).toHaveURL(/\/leaderboard$/);
   await expect(page.locator("html")).toHaveAttribute("lang", "en");
   const nav = mainNav(page);
   await expect(nav.getByRole("link", { name: "Leaderboard" })).toBeVisible();
@@ -81,89 +86,94 @@ test("切换到 English: 中文偏好下选择 English 后 lang=en、导航变�
   await expect(nav.getByRole("link", { name: "Teamboard" })).toBeVisible();
 });
 
-test("关闭浏览器后重新打开: 中文偏好随 cookie 跨浏览器会话保持", async ({
+test("从 / 回到记忆语言: 切换为简体中文后打开 / 重定向到 /zh-CN/leaderboard", async ({
   page,
-  context,
-  browser,
 }) => {
   await page.goto("/leaderboard");
-  await switchLocale(page, "Language", "中文");
-  await expect(page.locator("html")).toHaveAttribute("lang", "zh-CN");
+  await switchLocale(page, "Language", "简体中文");
+  await expect(page).toHaveURL(/\/zh-CN\/leaderboard$/);
 
-  // A fresh context seeded with the persisted cookie stands in for closing
-  // and reopening the browser (tt_locale has Max-Age=1y, so it survives).
-  const state = await context.storageState();
-  const reopened = await browser.newContext({ storageState: state });
-  try {
-    const reopenedPage = await reopened.newPage();
-    await reopenedPage.goto("/leaderboard");
-    await expect(reopenedPage.locator("html")).toHaveAttribute(
-      "lang",
-      "zh-CN"
-    );
-    await expect(
-      mainNav(reopenedPage, "主导航").getByRole("link", { name: "排行榜" })
-    ).toBeVisible();
-  } finally {
-    await reopened.close();
-  }
+  await page.goto("/");
+  await expect(page).toHaveURL(/\/zh-CN\/leaderboard$/);
+  await expect(page.locator("html")).toHaveAttribute("lang", "zh-CN");
 });
 
-test("切换后全部页面文案跟随: 中文偏好渲染公共页面标题和主要文案", async ({
+test("旧版 tt_locale=zh cookie: 打开 / 重定向到 /zh-CN/leaderboard", async ({
   page,
   context,
 }) => {
   await context.addCookies([
     { name: "tt_locale", value: "zh", url: BASE_URL },
   ]);
+  const response = await page.goto("/");
+  // The middleware answers with a 307 to the zh-CN board before any render.
+  expect(response?.request().redirectedFrom()?.url()).toBe(`${BASE_URL}/`);
+  await expect(page).toHaveURL(/\/zh-CN\/leaderboard$/);
+  await expect(page.locator("html")).toHaveAttribute("lang", "zh-CN");
+});
 
+test("旧无前缀地址正常打开: /leaderboard 不 404、按 English 渲染", async ({
+  page,
+  context,
+}) => {
+  // Pre-cutover Chinese links carried no prefix; they must still answer.
+  // Unprefixed is English by design — the prefix, not the cookie, decides.
+  await context.addCookies([
+    { name: "tt_locale", value: "zh", url: BASE_URL },
+  ]);
+  const response = await page.goto("/leaderboard");
+  expect(response?.status()).toBe(200);
+  await expect(page.locator("html")).toHaveAttribute("lang", "en");
+});
+
+test("带前缀页面文案跟随: /zh-CN 渲染公共页面标题和主要文案", async ({ page }) => {
   const pages = [
     {
-      path: "/leaderboard",
+      path: "/zh-CN/leaderboard",
       heading: "排行榜",
       copy: "AI 编程 token 用量，由 Tokens CLI 上报。",
     },
     {
-      path: "/teamboard",
+      path: "/zh-CN/teamboard",
       heading: "团队榜",
       copy: "查看单个团队内的 token 用量排名，可按分组筛选。",
     },
     {
-      path: "/teams",
+      path: "/zh-CN/teams",
       heading: "团队",
       copy: "登录后可创建团队，或管理你所在的团队。",
     },
     {
-      path: "/docs",
+      path: "/zh-CN/docs",
       heading: "文档",
       copy: "安装 CLI",
     },
     {
-      path: "/local",
+      path: "/zh-CN/local",
       heading: "本地查看器",
       copy: "在本地查看 token 用量数据，无需提交",
     },
     {
-      path: "/login",
+      path: "/zh-CN/login",
       heading: "登录",
       copy: "使用你注册时的邮箱和密码。",
     },
     {
-      path: "/register",
+      path: "/zh-CN/register",
       heading: "创建账号",
       copy: "用邮箱和密码注册。",
     },
     {
-      path: "/forgot-password",
+      path: "/zh-CN/forgot-password",
       heading: "重置密码",
       copy: "输入账号邮箱，我们会发送重置链接。",
     },
     {
-      path: "/reset-password",
+      path: "/zh-CN/reset-password",
       heading: "选择新密码",
     },
     {
-      path: "/verify-email",
+      path: "/zh-CN/verify-email",
       heading: "验证邮箱",
       copy: "此验证链接缺少 token。",
     },
@@ -176,85 +186,47 @@ test("切换后全部页面文案跟随: 中文偏好渲染公共页面标题和
     if (copy) {
       await expect(page.getByText(copy, { exact: true })).toBeVisible();
     }
-    if (path === "/reset-password") {
+    if (path === "/zh-CN/reset-password") {
       await expect(
-        page.locator('[role="alert"]:not(#__next-route-announcer__)'),
-      ).toContainText("此重置链接缺少 token");
+        page.getByText("此重置链接缺少 token", { exact: false })
+      ).toBeVisible();
     }
   }
 });
 
-test("隐私页面: 中文内容明确标注英文版本具有最终效力", async ({
+test("设置页未登录重定向保留前缀: /zh-CN/settings → /login?returnTo=/zh-CN/settings", async ({
   page,
-  context,
 }) => {
-  await context.addCookies([
-    { name: "tt_locale", value: "zh", url: BASE_URL },
-  ]);
-
-  await page.goto("/privacy");
-
-  await expect(page.getByRole("heading", { name: "隐私政策" })).toBeVisible();
-  await expect(
-    page.getByText("本页内容以英文版本为准。", { exact: true }),
-  ).toBeVisible();
+  await page.goto("/zh-CN/settings");
+  await expect(page).toHaveURL(
+    `/login?returnTo=${encodeURIComponent("/zh-CN/settings")}`
+  );
 });
 
-test("条款页面: 中文内容明确标注英文版本具有最终效力", async ({
-  page,
-  context,
-}) => {
-  await context.addCookies([
-    { name: "tt_locale", value: "zh", url: BASE_URL },
-  ]);
+test("隐私与条款页面: 中文与日文翻译均标注英文版本具有最终效力", async ({ page }) => {
+  await page.goto("/zh-CN/privacy");
+  await expect(page.getByText("以英文版", { exact: false })).toBeVisible();
 
-  await page.goto("/terms");
+  await page.goto("/zh-CN/terms");
+  await expect(page.getByText("以英文版", { exact: false })).toBeVisible();
 
-  await expect(page.getByRole("heading", { name: "服务条款" })).toBeVisible();
-  await expect(
-    page.getByText("本页内容以英文版本为准。", { exact: true }),
-  ).toBeVisible();
+  await page.goto("/ja/terms");
+  await expect(page.getByText("英語版", { exact: false })).toBeVisible();
 });
 
-const settingsRunId = Date.now().toString(36);
-const settingsUser = fixtureUser(settingsRunId, "a");
-
-test.afterAll(async () => {
-  await deleteFixtureUsers([settingsUser.username]);
-});
-
-test("已登录设置页: 中文偏好渲染设置标题和说明", async ({
+test("中文界面登录失败: 在 /zh-CN/login 用错误密码提交显示中文错误", async ({
   page,
-  context,
+  baseURL,
 }) => {
-  test.setTimeout(180_000);
-  await registerUser(page, settingsUser);
-  await context.addCookies([
-    { name: "tt_locale", value: "zh", url: BASE_URL },
-  ]);
-  await page.goto("/settings");
-  await expect(page.locator("html")).toHaveAttribute("lang", "zh-CN");
-  await expect(page.getByRole("heading", { name: "设置" })).toBeVisible({
-    timeout: 60_000,
-  });
-  await expect(
-    page.getByText("管理你的资料、API token、设备和已提交数据。", {
-      exact: true,
-    })
-  ).toBeVisible();
-});
+  const user = fixtureUser("i18nloginfail", "a");
+  await registerUser(page, user);
 
-test("中文界面登录失败: 错误密码提示邮箱或密码不正确", async ({
-  page,
-  context,
-}) => {
-  await context.addCookies([
-    { name: "tt_locale", value: "zh", url: BASE_URL },
-  ]);
-  await page.goto("/login");
-  await page.getByLabel("邮箱").fill("nobody@example.test");
-  await page.getByLabel("密码").fill("WrongPass1!");
+  await page.goto("/zh-CN/login");
+  await page.getByLabel("邮箱").fill(user.email);
+  await page.getByLabel("密码").fill("WrongPass!234");
   await page.getByRole("button", { name: "登录" }).click();
-  await expect(page.getByText("邮箱或密码不正确")).toBeVisible();
-});
 
+  await expect(page.getByText("邮箱或密码不正确")).toBeVisible();
+
+  await deleteFixtureUsers([user.username]);
+});

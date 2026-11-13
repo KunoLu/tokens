@@ -1,7 +1,8 @@
-import { cookies } from "next/headers";
 import { CONTAINER } from "@/components/layout/Container";
 import { PageHeader } from "@/components/layout/PageHeader";
-import { intlTag, LOCALE_COOKIE, parseLocale, t, type Locale } from "@/lib/i18n";
+import { getTranslator } from "@/lib/i18n/server";
+import { DEFAULT_LOCALE, LOCALE_TAGS, type Locale } from "@/lib/i18n/config";
+import { richText } from "@/lib/i18n/rich";
 import { cn } from "@/lib/utils";
 
 /** 联系邮箱由部署方配置；未配置时法律页不渲染 mailto 链接（不造假地址）。 */
@@ -9,7 +10,9 @@ export const CONTACT_EMAIL = process.env.CONTACT_EMAIL || undefined;
 
 function formatUpdated(updated: string, locale: Locale): string {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(updated)) return updated;
-  const tag = locale === "zh" ? intlTag(locale) : "en-GB";
+  // English legal pages traditionally read "25 July 2026"; every other locale
+  // gets its own `Intl` ordering.
+  const tag = locale === DEFAULT_LOCALE ? "en-GB" : LOCALE_TAGS[locale].lang;
   return new Intl.DateTimeFormat(tag, {
     day: "numeric",
     month: "long",
@@ -29,24 +32,39 @@ export async function LegalPage({
   title,
   description,
   updated,
+  englishHref,
   children,
 }: {
   title: string;
   description: string;
   updated: string;
+  /** The unprefixed (English, binding) address of this policy. */
+  englishHref: string;
   children: React.ReactNode;
 }) {
-  const locale = parseLocale((await cookies()).get(LOCALE_COOKIE)?.value);
+  const { locale, t } = await getTranslator();
   return (
     <main className={cn(CONTAINER, "pb-24 pt-10 sm:pt-14")} id="main-content">
       <div className="mx-auto w-full max-w-[720px]">
         <PageHeader title={title} description={description} />
         <p className="-mt-2 text-xs text-muted-foreground">
-          {t(locale, "legal.updated", { date: formatUpdated(updated, locale) })}
+          {t("legal.lastUpdated", { date: formatUpdated(updated, locale) })}
         </p>
-        {locale === "zh" && (
+        {/* A translation is a courtesy, not the agreement: the English text
+            is the one that holds, so every other language says so up front. */}
+        {locale !== DEFAULT_LOCALE && (
           <p className="mt-4 rounded-md border bg-muted px-4 py-3 text-sm text-muted-foreground">
-            {t(locale, "legal.enPrevails")}
+            {richText(t("legal.translationNotice"), {
+              english: (
+                <a
+                  href={englishHref}
+                  hrefLang="en"
+                  className="underline underline-offset-2 hover:text-foreground"
+                >
+                  {t("legal.englishVersion")}
+                </a>
+              ),
+            })}
           </p>
         )}
         <div className="mt-8 flex flex-col gap-8">{children}</div>

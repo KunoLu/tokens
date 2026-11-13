@@ -18,11 +18,13 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { CONTAINER } from "@/components/layout/Container";
+import { useLocale, useT } from "@/components/layout/LocaleProvider";
 import { SourceLogo } from "@/components/SourceLogo";
+import { avatarUrlFor } from "@/lib/avatar";
 import { ProfileSocialLinks } from "./ProfileSocialLinks";
 import { cn } from "@/lib/utils";
-import { avatarUrlFor } from "@/lib/avatar";
-import { intlTag, useFormat, useI18n, type TranslationKey } from "@/lib/i18n";
+import { formatCurrency, formatNumber, formatPercent } from "@/lib/format";
+import { formatDate } from "@/lib/i18n/format";
 import type { ProfileSocialLink } from "./types";
 
 export interface ProfileViewStats {
@@ -58,6 +60,8 @@ export interface ProfileViewProps {
   models: ProfileViewModel[];
   mcpServers?: string[];
   socialLinks?: ProfileSocialLink[];
+  /** Team/Group affiliation. Omitted entirely when the user has none. */
+  membership?: React.ReactNode;
   hasBackfill?: boolean;
   period: "all" | "month" | "week";
   onPeriodChange: (period: "all" | "month" | "week") => void;
@@ -76,14 +80,13 @@ export interface ProfileViewProps {
   breakdown?: React.ReactNode;
   modelsSection?: React.ReactNode;
   devices?: React.ReactNode;
-  /** Team/Group affiliation. Omitted entirely when the user has none. */
-  membership?: React.ReactNode;
 }
 
+/** `labelKey` is a catalogue key: the words are resolved where they render. */
 const PERIODS = [
-  { value: "all", key: "profile.periodAll" },
-  { value: "month", key: "profile.periodMonth" },
-  { value: "week", key: "profile.periodWeek" },
+  { value: "all", labelKey: "profile.period.allTime" },
+  { value: "month", labelKey: "profile.period.month" },
+  { value: "week", labelKey: "profile.period.week" },
 ] as const;
 
 function Stat({
@@ -116,18 +119,16 @@ function Stat({
  * shares stay underneath for anyone who wants them.
  */
 function TokenComposition({ stats }: { stats: ProfileViewStats }) {
-  const { t } = useI18n();
-  const { formatNumber, formatPercent } = useFormat();
+  const t = useT();
+  const locale = useLocale();
   const parts = useMemo(() => {
-    const nonZero = ([
-      { labelKey: "tokens.input", value: stats.inputTokens, className: "bg-chart-1" },
-      { labelKey: "tokens.output", value: stats.outputTokens, className: "bg-chart-2" },
-      { labelKey: "tokens.cacheRead", value: stats.cacheReadTokens, className: "bg-chart-3" },
-      { labelKey: "tokens.cacheWrite", value: stats.cacheWriteTokens, className: "bg-chart-4" },
-      { labelKey: "tokens.reasoning", value: stats.reasoningTokens ?? 0, className: "bg-chart-5" },
-    ] satisfies ReadonlyArray<{ labelKey: TranslationKey; value: number; className: string }>).filter(
-      (p) => p.value > 0
-    );
+    const nonZero = [
+      { key: "input", value: stats.inputTokens, className: "bg-chart-1" },
+      { key: "output", value: stats.outputTokens, className: "bg-chart-2" },
+      { key: "cacheRead", value: stats.cacheReadTokens, className: "bg-chart-3" },
+      { key: "cacheWrite", value: stats.cacheWriteTokens, className: "bg-chart-4" },
+      { key: "reasoning", value: stats.reasoningTokens ?? 0, className: "bg-chart-5" },
+    ].filter((p) => p.value > 0);
     const total = nonZero.reduce((sum, p) => sum + p.value, 0);
     return nonZero.map((p) => ({ ...p, share: (p.value / total) * 100 }));
   }, [stats]);
@@ -139,24 +140,26 @@ function TokenComposition({ stats }: { stats: ProfileViewStats }) {
       <div className="flex h-1.5 w-full overflow-hidden rounded-full">
         {parts.map((p) => (
           <div
-            key={p.labelKey}
+            key={p.key}
             className={p.className}
             style={{ width: `${p.share}%` }}
-            title={t("profile.breakdown.segmentTitle", {
-              label: t(p.labelKey),
-              tokens: formatNumber(p.value, true),
+            title={t("profile.composition.segmentTitle", {
+              label: t(`profile.tokens.${p.key}`),
+              value: formatNumber(p.value, true, locale),
             })}
           />
         ))}
       </div>
       <dl className="flex flex-wrap gap-x-6 gap-y-2">
         {parts.map((p) => (
-          <div key={p.labelKey} className="flex items-center gap-2">
+          <div key={p.key} className="flex items-center gap-2">
             <span className={cn("size-2 rounded-full", p.className)} aria-hidden="true" />
-            <dt className="text-xs text-muted-foreground">{t(p.labelKey)}</dt>
+            <dt className="text-xs text-muted-foreground">{t(`profile.tokens.${p.key}`)}</dt>
             <dd className="whitespace-nowrap font-mono text-xs tabular-nums">
-              {formatNumber(p.value, true)}{" "}
-              <span className="text-muted-foreground">{formatPercent(p.share)}</span>
+              {formatNumber(p.value, true, locale)}{" "}
+              <span className="text-muted-foreground">
+                {formatPercent(p.share, locale)}
+              </span>
             </dd>
           </div>
         ))}
@@ -202,7 +205,6 @@ function CollapsibleSection({
   );
 }
 
-
 export function ProfileView({
   user,
   stats,
@@ -211,6 +213,7 @@ export function ProfileView({
   models,
   mcpServers,
   socialLinks,
+  membership,
   hasBackfill,
   period,
   onPeriodChange,
@@ -222,26 +225,28 @@ export function ProfileView({
   breakdown,
   modelsSection,
   devices,
-  membership,
 }: ProfileViewProps) {
-  const { t, locale } = useI18n();
-  const { formatNumber, formatCurrency } = useFormat();
+  const t = useT();
+  const locale = useLocale();
   const [copied, setCopied] = useState(false);
   const avatar = avatarUrlFor(user);
-  const joined = new Date(user.createdAt).toLocaleDateString(intlTag(locale), {
-    month: "short",
-    year: "numeric",
-  });
+  // Month and year only, so the two locales that do not order it that way still
+  // get their own order from `Intl` rather than an English template.
+  const joined = formatDate(
+    new Date(user.createdAt),
+    locale,
+    { month: "short", year: "numeric" },
+  );
 
   const share = async () => {
     const url = `${window.location.origin}/u/${user.username}`;
     try {
       await navigator.clipboard.writeText(url);
       setCopied(true);
-      toast.success(t("profile.linkCopied"));
+      toast.success(t("profile.actions.shareCopied"));
       window.setTimeout(() => setCopied(false), 1600);
     } catch {
-      toast.error(t("profile.copyFailed"));
+      toast.error(t("profile.actions.shareFailed"));
     }
   };
 
@@ -266,10 +271,12 @@ export function ProfileView({
               </h1>
               {user.rank != null && (
                 <Badge variant="secondary" className="font-mono tabular-nums">
-                  {t("profile.rank", { n: formatNumber(user.rank, false) })}
+                  {t("profile.stats.rank", { rank: user.rank.toLocaleString(locale) })}
                 </Badge>
               )}
-              {hasBackfill && <Badge variant="outline">{t("profile.backfill")}</Badge>}
+              {hasBackfill && (
+                <Badge variant="outline">{t("profile.stats.importedHistory")}</Badge>
+              )}
             </div>
 
             <span className="truncate font-mono text-sm text-muted-foreground">
@@ -277,15 +284,23 @@ export function ProfileView({
             </span>
 
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-              {/* toLocaleDateString reads the runtime's locale and zone, so the
-                  server and the browser can disagree — same reason as Updated
-                  below. */}
-              <span suppressHydrationWarning>{t("profile.joined", { date: joined })}</span>
+              {/* The date formatters read the runtime's time zone, so the
+                  server and the browser can disagree about the day — hence the
+                  hydration suppression rather than a fixed zone. */}
+              <span suppressHydrationWarning>
+                {t("profile.stats.joined", { date: joined })}
+              </span>
               {updatedAt && (
                 <>
                   <span aria-hidden="true">·</span>
                   <span suppressHydrationWarning>
-                    {t("profile.updated", { date: new Date(updatedAt).toLocaleDateString(intlTag(locale)) })}
+                    {t("profile.stats.updated", {
+                      date: formatDate(new Date(updatedAt), locale, {
+                        year: "numeric",
+                        month: "numeric",
+                        day: "numeric",
+                      }),
+                    })}
                   </span>
                 </>
               )}
@@ -300,11 +315,11 @@ export function ProfileView({
         <div className="flex flex-wrap items-center gap-2">
           <Button size="sm" onClick={onEmbedClick}>
             <Code2Icon data-icon="inline-start" />
-            {t("profile.embed")}
+            {t("profile.actions.embed")}
           </Button>
           <Button variant="outline" size="sm" onClick={share}>
             <Share2Icon data-icon="inline-start" />
-            {copied ? t("profile.copied") : t("profile.share")}
+            {copied ? t("profile.actions.copied") : t("profile.actions.share")}
           </Button>
         </div>
       </header>
@@ -313,17 +328,26 @@ export function ProfileView({
       <Separator className="my-7" />
 
       {/* ---- Headline figures ------------------------------------------ */}
-      <section className="grid grid-cols-2 gap-6 sm:grid-cols-4" aria-label={t("leaderboard.totalsAria")}>
-        <Stat label={t("profile.tokens")} value={formatNumber(stats.totalTokens, true)} />
-        <Stat label={t("profile.cost")} value={formatCurrency(stats.totalCost, true)} />
+      <section
+        className="grid grid-cols-2 gap-6 sm:grid-cols-4"
+        aria-label={t("profile.stats.totals")}
+      >
         <Stat
-          label={t("profile.activeDays")}
-          value={formatNumber(stats.activeDays, false)}
-          hint={t("profile.sessions", { n: formatNumber(stats.sessionCount, false) })}
+          label={t("profile.stats.tokens")}
+          value={formatNumber(stats.totalTokens, true, locale)}
         />
         <Stat
-          label={t("profile.submissions")}
-          value={formatNumber(stats.submissionCount, false)}
+          label={t("profile.stats.cost")}
+          value={formatCurrency(stats.totalCost, true, locale)}
+        />
+        <Stat
+          label={t("profile.stats.activeDays")}
+          value={formatNumber(stats.activeDays, false, locale)}
+          hint={t("profile.units.session", { count: stats.sessionCount })}
+        />
+        <Stat
+          label={t("profile.stats.submissions")}
+          value={formatNumber(stats.submissionCount, false, locale)}
         />
       </section>
 
@@ -353,40 +377,48 @@ export function ProfileView({
             if (next) onPeriodChange(next);
           }}
           variant="outline"
-          aria-label={t("profile.periodAria")}
+          aria-label={t("profile.period.label")}
           className="[&>*]:h-8 [&>*]:px-2.5 [&>*]:text-xs"
         >
           {PERIODS.map((p) => (
             <ToggleGroupItem key={p.value} value={p.value}>
-              {t(p.key)}
+              {t(p.labelKey)}
             </ToggleGroupItem>
           ))}
         </ToggleGroup>
       </div>
 
       <div className="mt-8 flex flex-col gap-12">
-        <Section title={t("profile.contributions")}>{activity}</Section>
+        <Section title={t("profile.sections.contributions")}>{activity}</Section>
 
-        {usageChart && <Section title={t("profile.usage")}>{usageChart}</Section>}
+        {usageChart && <Section title={t("profile.sections.usage")}>{usageChart}</Section>}
 
-        {breakdown && <Section title={t("profile.tokenBreakdown")}>{breakdown}</Section>}
+        {breakdown && (
+          <Section title={t("profile.sections.tokenBreakdown")}>{breakdown}</Section>
+        )}
 
-        {habits && <Section title={t("profile.habits")}>{habits}</Section>}
+        {habits && <Section title={t("profile.sections.habits")}>{habits}</Section>}
 
-        <CollapsibleSection title={t("profile.models")}>
+        <CollapsibleSection title={t("profile.sections.models")}>
           {modelsSection ?? (
             topModels.length === 0 ? (
               <p className="py-8 text-center text-sm text-muted-foreground">
-                {t("profile.noModels")}
+                {t("profile.models.empty")}
               </p>
             ) : (
               <div className="overflow-hidden rounded-lg border">
                 <Table>
                   <TableHeader>
                     <TableRow className="hover:bg-transparent">
-                      <TableHead className="pl-4 sm:pl-6">{t("profile.model")}</TableHead>
-                      <TableHead className="text-right">{t("profile.tokens")}</TableHead>
-                      <TableHead className="pr-4 text-right sm:pr-6">{t("profile.cost")}</TableHead>
+                      <TableHead className="pl-4 sm:pl-6">
+                        {t("profile.models.columnModel")}
+                      </TableHead>
+                      <TableHead className="text-right">
+                        {t("profile.models.columnTokens")}
+                      </TableHead>
+                      <TableHead className="pr-4 text-right sm:pr-6">
+                        {t("profile.models.columnCost")}
+                      </TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -396,10 +428,10 @@ export function ProfileView({
                           {model.name}
                         </TableCell>
                         <TableCell className="text-right font-mono text-sm tabular-nums">
-                          {formatNumber(model.tokens, true)}
+                          {formatNumber(model.tokens, true, locale)}
                         </TableCell>
                         <TableCell className="pr-4 text-right font-mono text-sm tabular-nums sm:pr-6">
-                          {formatCurrency(model.cost, true)}
+                          {formatCurrency(model.cost, true, locale)}
                         </TableCell>
                       </TableRow>
                     ))}
@@ -410,11 +442,13 @@ export function ProfileView({
           )}
         </CollapsibleSection>
 
-        <Section title={t("profile.clients")}>
+        <Section title={t("profile.sections.clients")}>
           <div className="flex flex-col gap-6">
             <div className="flex flex-wrap gap-2">
               {clients.length === 0 ? (
-                <span className="text-sm text-muted-foreground">{t("profile.noneRecorded")}</span>
+                <span className="text-sm text-muted-foreground">
+                  {t("profile.clients.none")}
+                </span>
               ) : (
                 clients.map((client) => (
                   <span
@@ -431,7 +465,7 @@ export function ProfileView({
             {mcpServers && mcpServers.length > 0 && (
               <div>
                 <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                  {t("profile.mcp")}
+                  {t("profile.sections.mcpServers")}
                 </span>
                 <div className="mt-3 flex flex-wrap gap-1.5">
                   {mcpServers.map((server) => (

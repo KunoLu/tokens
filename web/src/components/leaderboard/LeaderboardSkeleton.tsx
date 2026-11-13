@@ -11,8 +11,7 @@ import {
 import { cn } from "@/lib/utils";
 import { CONTAINER } from "@/components/layout/Container";
 import { MembershipColumnHeaders } from "@/components/leaderboard/MembershipCells";
-import { cookies } from "next/headers";
-import { LOCALE_COOKIE, parseLocale, t } from "@/lib/i18n";
+import { getTranslator } from "@/lib/i18n/server";
 
 /**
  * The Suspense fallback for /leaderboard.
@@ -107,7 +106,7 @@ export async function LeaderboardSkeleton({
 }: {
   showUserRank?: boolean;
 }) {
-  const locale = parseLocale((await cookies()).get(LOCALE_COOKIE)?.value);
+  const { t } = await getTranslator();
   return (
     <div className={cn(CONTAINER, "pb-24 pt-10 sm:pt-14")}>
       {/* PageHeader. The title and description are known before the data is,
@@ -160,7 +159,7 @@ export async function LeaderboardSkeleton({
           {/* The label is a permanent string in the loaded page, so it renders
               as itself — same reasoning as the column headings below. */}
           <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-            {t(locale, "leaderboard.yourPosition")}
+            {t("leaderboard.yourPosition")}
           </span>
           <div className="mt-1.5 overflow-hidden rounded-lg border">
             <Table>
@@ -180,17 +179,17 @@ export async function LeaderboardSkeleton({
                 never was. */}
             <TableRow className="hover:bg-transparent">
               <TableHead className="w-12 pl-4 sm:pl-6">#</TableHead>
-              <TableHead>{t(locale, "leaderboard.colDeveloper")}</TableHead>
+              <TableHead>{t("leaderboard.table.developer")}</TableHead>
               <MembershipColumnHeaders
-                teamLabel={t(locale, "leaderboard.colTeam")}
-                groupLabel={t(locale, "teamboard.colGroup")}
+                teamLabel={t("leaderboard.table.team")}
+                groupLabel={t("leaderboard.table.group")}
               />
-              <TableHead className="pr-4 text-right sm:hidden">{t(locale, "teamboard.colUsage")}</TableHead>
+              <TableHead className="pr-4 text-right sm:hidden">{t("leaderboard.table.usage")}</TableHead>
               <TableHead className="hidden w-44 px-2 py-2 text-right sm:table-cell">
-                {t(locale, "leaderboard.colTokens")}
+                {t("leaderboard.sort.tokens")}
               </TableHead>
               <TableHead className="hidden w-32 pr-6 text-right sm:table-cell">
-                {t(locale, "leaderboard.colCost")}
+                {t("leaderboard.sort.cost")}
               </TableHead>
             </TableRow>
           </TableHeader>

@@ -1,5 +1,4 @@
 import type { Metadata, Viewport } from "next";
-import { cookies } from "next/headers";
 import { Geist, JetBrains_Mono } from "next/font/google";
 import NextTopLoader from "nextjs-toploader";
 import { Providers } from "@/lib/providers";
@@ -9,8 +8,12 @@ import { ThemedToastContainer } from "@/components/layout/ThemedToastContainer";
 import "./globals.css";
 import "react-toastify/dist/ReactToastify.css";
 import { cn } from "@/lib/utils";
-import { htmlLang, LOCALE_COOKIE, parseLocale, t } from "@/lib/i18n";
 import { SITE_URL } from "@/lib/site";
+import { getTranslator } from "@/lib/i18n/server";
+import { LOCALE_TAGS } from "@/lib/i18n/config";
+import { resolveMessages } from "@/lib/i18n/messages";
+import { LocaleProvider } from "@/components/layout/LocaleProvider";
+
 // Geist carries interface text and JetBrains Mono carries every figure, so
 // numeric columns stay aligned when scanned down the page.
 const geist = Geist({
@@ -25,60 +28,84 @@ const jetbrainsMono = JetBrains_Mono({
   display: "swap",
 });
 
+/**
+ * Metadata is generated rather than exported as a constant because the title
+ * and description are now translated, and a constant cannot call `headers()`.
+ *
+ * `metadataBase` and the icons stay literal: a URL and a PNG do not vary by
+ * language. The OG image URL keeps its English title/subtitle: this fork's OG
+ * renderer ships no CJK font, so translated text would render as tofu until
+ * the upstream OG rework lands in a later sync PR.
+ *
+ * `alternates` is deliberately *not* set here. Every route has its own address,
+ * so a canonical declared at the layout would claim the docs page canonically
+ * lives at /leaderboard. The board sets its own, which is the page most often
+ * linked to from outside.
+ */
+export async function generateMetadata(): Promise<Metadata> {
+  const { t } = await getTranslator();
+  const title = t("meta.title");
+  const description = t("meta.description");
 
-export const metadata: Metadata = {
-  title: "Tokens - AI Token Usage Tracker & Leaderboard",
-  description: "Track, visualize, and compete on AI coding assistant token usage across Claude Code, Cursor, OpenCode, Codex, Gemini, Kimi, and Qwen. The Kardashev Scale for AI Devs.",
-  // Everything relative below (OG images, icons) resolves against this base —
-  // the deployment's own origin, never a hardcoded upstream domain.
-  metadataBase: new URL(SITE_URL),
-  icons: {
-    icon: [
-      // SVG first so capable browsers get the theme-aware mark; the .ico stays
-      { url: "/brand/tokens-favicon.svg?v=3", type: "image/svg+xml" },
-      { url: "/favicon.ico?v=3", sizes: "48x48", type: "image/x-icon" },
-      { url: "/favicon-16x16.png?v=3", sizes: "16x16", type: "image/png" },
-      { url: "/favicon-32x32.png?v=3", sizes: "32x32", type: "image/png" },
-    ],
-    apple: "/brand/tokens-app-icon-180.png",
-  },
-  manifest: "/site.webmanifest",
-  openGraph: {
-    title: "Tokens - AI Token Usage Tracker & Leaderboard",
-    description: "Track, visualize, and compete on AI coding assistant token usage across Claude Code, Cursor, OpenCode, Codex, Gemini, Kimi, and Qwen. The Kardashev Scale for AI Devs.",
-    type: "website",
-    url: SITE_URL,
-    siteName: "Tokens",
-    // The dynamic renderer, not a static file: it draws the current mark, so
-    // the share card cannot drift from the brand the way a checked-in PNG did.
-    images: [
-      {
-        url: "/api/og?title=Tokens&subtitle=The%20leaderboard%20for%20AI%20coding%20usage",
-        width: 1200,
-        height: 630,
-        alt: "Tokens - AI Token Usage Tracker",
-      },
-    ],
-  },
-  twitter: {
-    card: "summary_large_image",
-    title: "Tokens - AI Token Usage Tracker & Leaderboard",
-    description: "Track, visualize, and compete on AI coding assistant token usage across Claude Code, Cursor, OpenCode, Codex, Gemini, Kimi, and Qwen.",
-    images: ["/api/og?title=Tokens&subtitle=The%20leaderboard%20for%20AI%20coding%20usage"],
-  },
-};
+  return {
+    title,
+    description,
+    // Everything relative below (OG images, icons) resolves against this base —
+    // the deployment's own origin, never a hardcoded upstream domain.
+    metadataBase: new URL(SITE_URL),
+    icons: {
+      icon: [
+        // SVG first so capable browsers get the theme-aware mark; the .ico stays
+        // for the ones that do not support SVG favicons.
+        { url: "/brand/tokens-favicon.svg?v=3", type: "image/svg+xml" },
+        { url: "/favicon.ico?v=3", sizes: "48x48", type: "image/x-icon" },
+        { url: "/favicon-16x16.png?v=3", sizes: "16x16", type: "image/png" },
+        { url: "/favicon-32x32.png?v=3", sizes: "32x32", type: "image/png" },
+      ],
+      apple: "/brand/tokens-app-icon-180.png",
+    },
+    manifest: "/site.webmanifest",
+    openGraph: {
+      title,
+      description,
+      type: "website",
+      url: SITE_URL,
+      siteName: "Tokens",
+      // The dynamic renderer, not a static file: it draws the current mark, so
+      // the share card cannot drift from the brand the way a checked-in PNG did.
+      images: [
+        {
+          url: "/api/og?title=Tokens&subtitle=The%20leaderboard%20for%20AI%20coding%20usage",
+          width: 1200,
+          height: 630,
+          alt: t("meta.ogAlt"),
+        },
+      ],
+    },
+    twitter: {
+      card: "summary_large_image",
+      title,
+      description,
+      images: ["/api/og?title=Tokens&subtitle=The%20leaderboard%20for%20AI%20coding%20usage"],
+    },
+  };
+}
 
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
 };
 
-export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  const jar = await cookies();
-  const locale = parseLocale(jar.get(LOCALE_COOKIE)?.value);
+export default async function RootLayout({
+  children,
+}: Readonly<{ children: React.ReactNode }>) {
+  const { locale, t } = await getTranslator();
+  const { lang, dir } = LOCALE_TAGS[locale];
+
   return (
     <html
-      lang={htmlLang(locale)}
+      lang={lang}
+      dir={dir}
       suppressHydrationWarning
       className={cn(geist.variable, jetbrainsMono.variable)}
     >
@@ -100,18 +127,31 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
       </head>
       <body className="flex min-h-dvh flex-col font-sans">
         <NextTopLoader color="#0073FF" showSpinner={false} />
+        {/* Every route's <main> carries id="main-content"; this is the link the
+            anchors were always for. Off-screen until focused, so it costs
+            nothing visually and is the first stop for a keyboard user. */}
         <a
           href="#main-content"
           className="sr-only rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-[100]"
         >
-          {t(locale, "nav.skipToContent")}
+          {t("common.skipToContent")}
         </a>
-        <Providers locale={locale}>
-          <Navigation />
-          <div className="flex flex-1 flex-col">{children}</div>
-          <ServiceFooter />
-          <ThemedToastContainer />
-        </Providers>
+        {/* Outside the theme provider but inside the document: the locale is
+            known before the first byte, and every client component below it
+            reads one merge instead of threading a prop through each layer. */}
+        <LocaleProvider locale={locale} messages={resolveMessages(locale)}>
+          <Providers>
+            {/* Rendered once here so it persists across route changes (no remount
+                flicker) and switching Leaderboard <-> Profile is a seamless
+                client-side transition. */}
+            <Navigation />
+            {/* Grows to fill the viewport so the footer stays at the bottom on
+                short pages instead of floating up under the content. */}
+            <div className="flex flex-1 flex-col">{children}</div>
+            <ServiceFooter />
+            <ThemedToastContainer />
+          </Providers>
+        </LocaleProvider>
       </body>
     </html>
   );

@@ -1,12 +1,9 @@
-import type { Translate } from "./I18nProvider";
-import { LOCALE_COOKIE, parseLocale } from "./locale";
-import { t } from "./t";
-import type { TranslationKey } from "./t";
+import type { Translator } from "./translate";
 
 /** Exact English `{ error }` / TeamError / password-detail strings from APIs. */
-const EXACT: Record<string, TranslationKey> = {
+const EXACT: Record<string, string> = {
   "Invalid email or password": "auth.login.invalidCredentials",
-  "Account banned": "banned.badge",
+  "Account banned": "profile.banned.accountBanned",
   Forbidden: "auth.forbidden",
   "Too many requests": "auth.tooMany",
   "Invalid email address": "auth.invalidEmail",
@@ -64,7 +61,7 @@ const EXACT: Record<string, TranslationKey> = {
 const UNKNOWN_USERNAME = "Unknown username: ";
 
 export function localizeServerError(
-  translate: Translate,
+  translate: Translator,
   message: string
 ): string {
   const key = EXACT[message];
@@ -81,23 +78,9 @@ export function localizeServerError(
   return translate("auth.somethingWrong");
 }
 
-
 export function localizeServerErrorList(
-  translate: Translate,
+  translate: Translator,
   details: string[]
 ): string[] {
   return details.map((item) => localizeServerError(translate, item));
-}
-
-/** Client fetch helpers that are not React hooks. */
-export function localizeServerErrorFromCookie(message: string): string {
-  const raw =
-    typeof document === "undefined"
-      ? null
-      : document.cookie
-          .split("; ")
-          .find((part) => part.startsWith(`${LOCALE_COOKIE}=`))
-          ?.slice(LOCALE_COOKIE.length + 1);
-  const locale = parseLocale(raw);
-  return localizeServerError((key, vars) => t(locale, key, vars), message);
 }

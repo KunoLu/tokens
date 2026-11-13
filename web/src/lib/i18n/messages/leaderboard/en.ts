@@ -1,0 +1,58 @@
+/**
+ * Every rendered string on the board, the contribution graph it embeds, and the
+ * panels hanging off it.
+ *
+ * Split into `statsPanel` / `breakdownPanel` / `tokenGraph*` groups because
+ * those components are also mounted by the local viewer, so they are the first
+ * candidates to move into `common` once a second page needs them translated.
+ */
+const messages = {
+  "description": "AI coding token usage, reported by the Tokens CLI.",
+  "totals": "Totals",
+  "yourPosition": "Your position",
+  "stats": {
+    "developers": "Developers",
+    "yourRank": "Your rank",
+  },
+  "period": {
+    "label": "Period",
+    "allTime": "All time",
+    "today": "Today",
+    "week": "Week",
+    "month": "Month",
+    "lastMonth": "Last month"
+  },
+  "sortBy": "Sort by",
+  "sort": {
+    "tokens": "Tokens",
+    "cost": "Cost",
+  },
+  "search": {
+    "placeholder": "Search…",
+    "label": "Search developers"
+  },
+  "formatToggle": {
+    "exact": "Show exact numbers",
+    "abbreviate": "Abbreviate numbers",
+  },
+  "table": {
+    "developer": "Developer",
+    "team": "Team",
+    "group": "Group",
+    "usage": "Usage"
+  },
+  "empty": {
+    "noResults": "No developers found",
+    "nothing": "Nothing recorded",
+    "noMatch": "No developer matches \"{query}\" for this period.",
+    "none": "No usage was submitted for this period."
+  },
+  "pagination": {
+    "label": "Pagination",
+    "previous": "Previous",
+    "next": "Next",
+    "page": "{current} of {total}"
+  }
+};
+
+export default messages;
