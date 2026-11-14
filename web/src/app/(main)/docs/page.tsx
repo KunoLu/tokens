@@ -12,6 +12,7 @@ import {
 import { PageHeader } from "@/components/layout/PageHeader";
 import { getTranslator } from "@/lib/i18n/server";
 import { richText } from "@/lib/i18n/rich";
+import { ogImageUrl } from "@/lib/og/ogImage";
 import type { TranslationKey, Translator } from "@/lib/i18n/translate";
 import { cn } from "@/lib/utils";
 import { SITE_URL } from "@/lib/site";
@@ -19,7 +20,7 @@ import { SCRIPTS_RAW_BASE, SCRIPTS_BLOB_BASE } from "@/lib/scriptsRef";
 
 
 export async function generateMetadata(): Promise<Metadata> {
-  const { t } = await getTranslator();
+  const { locale, t } = await getTranslator();
 
   return {
     title: `${t("docs.meta.title")} - Tokens`,
@@ -31,7 +32,7 @@ export async function generateMetadata(): Promise<Metadata> {
       siteName: "Tokens",
       images: [
         {
-          url: `/api/og?title=Docs&subtitle=Install+the+Tokens+CLI.`,
+          url: ogImageUrl({ title: t("docs.meta.title"), locale }),
           width: 1200,
           height: 630,
         },

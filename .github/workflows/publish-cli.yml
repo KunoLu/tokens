@@ -28,6 +28,11 @@ on:
 
 permissions:
   contents: write
+  # npm Trusted Publishing: the publish job exchanges a GitHub OIDC token for
+  # a short-lived npm credential, so there is no NPM_TOKEN to rotate every
+  # 90 days (which is what took 27.0.5 down twice). Each package on npmjs.com
+  # must list this repository + workflow filename as a trusted publisher.
+  id-token: write
 
 env:
   CARGO_TERM_COLOR: always
@@ -50,8 +55,9 @@ jobs:
           - { target: x86_64-unknown-linux-musl,   os: ubuntu-latest,  pkg: cli-linux-x64-musl,   bin: tokens, zig: true }
           - { target: aarch64-unknown-linux-gnu,   os: ubuntu-latest,  pkg: cli-linux-arm64-gnu,  bin: tokens, zig: true }
           - { target: aarch64-unknown-linux-musl,  os: ubuntu-latest,  pkg: cli-linux-arm64-musl, bin: tokens, zig: true }
-          - { target: x86_64-pc-windows-msvc,      os: windows-latest, pkg: cli-win32-x64-msvc,   bin: tokens.exe }
-          - { target: aarch64-pc-windows-msvc,     os: windows-latest, pkg: cli-win32-arm64-msvc, bin: tokens.exe }
+          # `launcher` is the windowless tokensw.exe the autosubmit task runs.
+          - { target: x86_64-pc-windows-msvc,      os: windows-latest, pkg: cli-win32-x64-msvc,   bin: tokens.exe, launcher: tokensw.exe }
+          - { target: aarch64-pc-windows-msvc,     os: windows-latest, pkg: cli-win32-arm64-msvc, bin: tokens.exe, launcher: tokensw.exe }
 
     steps:
       - uses: actions/checkout@v6
@@ -125,10 +131,23 @@ jobs:
           echo "$OUT"
           [ "$OUT" = "tokens ${{ inputs.version }}" ] || { echo "expected 'tokens ${{ inputs.version }}'" >&2; exit 1; }
 
+      # Copy exactly what ships into one directory, so the artifact holds the
+      # binaries and none of the .d/.pdb files next to them in release/.
+      - name: Collect
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ship
+          cp -p "cli/target/${{ matrix.target }}/release/${{ matrix.bin }}" ship/
+          if [ -n "${{ matrix.launcher }}" ]; then
+            cp -p "cli/target/${{ matrix.target }}/release/${{ matrix.launcher }}" ship/
+          fi
+          ls -l ship
+
       - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.pkg }}
-          path: cli/target/${{ matrix.target }}/release/${{ matrix.bin }}
+          path: ship/
           if-no-files-found: error
 
   publish:
@@ -139,10 +158,13 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      # No registry-url: that option writes an .npmrc pointing at
+      # NODE_AUTH_TOKEN, which trusted publishing does not use. The registry
+      # comes from each package's publishConfig. Node 24 bundles npm 11, and
+      # trusted publishing needs npm >= 11.5.1.
       - uses: actions/setup-node@v6
         with:
-          node-version: 22
-          registry-url: https://registry.npmjs.org
+          node-version: 24
 
       - uses: oven-sh/setup-bun@v2
 
@@ -182,11 +204,14 @@ jobs:
           bun install
           bun run --cwd packages/cli build
 
+      # Authenticated by OIDC (see `id-token: write` above), not a token.
+      # npm also attaches provenance automatically on this path, which
+      # requires each package.json `repository.url` to name this repository.
       - name: Publish to npm
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           set -euo pipefail
+          npm --version
+          node -e 'const [a,b,c]=require("child_process").execSync("npm --version").toString().trim().split(".").map(Number); if (a<11 || (a===11 && (b<5 || (b===5 && c<1)))) { console.error("npm >= 11.5.1 required for trusted publishing"); process.exit(1) }'
           # A prerelease must never land on the `latest` dist-tag, or every
           # plain `npm i tokens-cli` would pull it.
           V="${{ inputs.version }}"
@@ -229,22 +254,37 @@ jobs:
             cli-win32-x64-msvc:x86_64-pc-windows-msvc
             cli-win32-arm64-msvc:aarch64-pc-windows-msvc
           "
-          # Archive layout is a bare binary at the root, matching every release
-          # since 3.x — install.sh and the Homebrew tap depend on it.
+          # Archive layout is bare binaries at the root, matching every release
+          # since 3.x — install.sh and the Homebrew tap depend on it. Windows
+          # archives also carry tokensw.exe beside tokens.exe.
           mkdir -p dist
           for pair in $PAIRS; do
             pkg="${pair%%:*}"; target="${pair#*:}"
-            # Name the member explicitly: `-C dir .` would add a leading `./`
-            # that previous releases do not have.
+            # Name the members explicitly: `-C dir .` would add a leading `./`
+            # that previous releases do not have. Left unquoted so a Windows
+            # package's two binaries become two members; the names have no
+            # spaces.
+            # shellcheck disable=SC2046
             tar czf "dist/tokens-v${{ inputs.version }}-${target}.tar.gz" \
-              -C "artifacts/$pkg" "$(ls "artifacts/$pkg")"
+              -C "artifacts/$pkg" $(ls "artifacts/$pkg")
           done
           ls -la dist
 
           PRERELEASE=""
           case "${{ inputs.version }}" in *-*) PRERELEASE="--prerelease" ;; esac
 
+          # Tag the commit this release was actually built from. Without
+          # --target, `gh release create` creates the tag on the repository's
+          # DEFAULT branch, which is only correct while releases are cut from
+          # main. Releasing from any other branch would otherwise tag a tree
+          # whose Cargo.toml still carries the previous version, and the
+          # tarballs would describe a commit that does not contain them.
+          # HEAD here is the version-bump commit pushed by the step above.
+          TARGET="$(git rev-parse HEAD)"
+          echo "tagging v${{ inputs.version }} at ${TARGET} (${{ github.ref_name }})"
+
           gh release create "v${{ inputs.version }}" \
+            --target "$TARGET" \
             --title "v${{ inputs.version }}" \
             --generate-notes \
             $PRERELEASE \
