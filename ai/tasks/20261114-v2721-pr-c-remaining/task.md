@@ -7,8 +7,8 @@ mode_note: 用户 2026-11-13 10:32 群内选定多语言方案甲、10:33 确认
   v1.0.5 按模板发布且文档补全，Lord 记录；本会话明确选择 strict。
 status: "done"
 branch: sync/upstream-v27.2.1-pr-c
-created_at: '2026-11-14T13:10:00.000000+08:00'
-updated_at: "2026-11-14T15:24:28.000000+08:00"
+created_at: '2026-11-14T13:08:12.000000+08:00'
+updated_at: "2026-11-14T15:42:07.000000+08:00"
 completed_at: "2026-11-14T15:24:28.000000+08:00"
 ---
 # 同步上游 v27.2.1 拆分 PR C — 其余提交（解析器、cursor 登录计费、MCP opt-in、Windows autosubmit、OG 重做、缓存与 publish 修复）
@@ -25,12 +25,12 @@ completed_at: "2026-11-14T15:24:28.000000+08:00"
 - Windows autosubmit：79feedb、583c5b5、33ee973（含 tokensw 无窗启动器与 publish 打包）；
 - 缓存与发布：7f30fd6（数据库抖动不缓存 404）、8cf8f8e（npm OIDC trusted publishing）、8415a71（tag 固定在构建提交）。
 
-保持本仓差异：隐私模式、无 shame 页、无 GitHub 登录与 verified 徽章、/settings 未登录跳 /login、品牌色、邮箱登录、teams/teamboard、SITE_URL 派生用户可见 URL。新增与改动文案 en、zh-CN、ja 三语齐备。不做：榜单转私密的 90 秒缓存窗口（等 640 选择，本 PR 不动）。（旧状态，见 2026-11-14T15:05 更正：方案甲投票过半后第三轮落地清除，取舍说明 12）
+保持本仓差异：隐私模式、无 shame 页、无 GitHub 登录与 verified 徽章、/settings 未登录跳 /login、品牌色、邮箱登录、teams/teamboard、SITE_URL 派生用户可见 URL。新增与改动文案 en、zh-CN、ja 三语齐备。榜单转私密共享缓存清除：2026-11-14 13:59–14:12 群成员投票（甲），Lord 记录，第三轮落地——统一标签 leaderboard＋revalidateTag { expire: 0 } 清数据层三处 unstable_cache，对 en、zh-CN、ja 三个榜单地址逐个 revalidatePath，/api/me/private 与 /api/settings/privacy 两条转私密入口共用同一清除，页面层无 ISR 可清，新增 cache.test.ts 5 条（取舍说明 12）。
 
 ## 已确认范围与授权
 
 - 用户 2026-11-13 10:32 群内选定多语言方案甲、10:33 确认 A/B/C 拆法；2026-11-14 01:50 用户在群内开启全自动模式直到 v1.0.5 按模板发布且文档补全，Lord 记录。
-- 2026-11-14 Tokens 群全自动模式下按方案甲投票（Researchy、Reviewy 投甲，过半），Lord 14:47 记录并下令并进 PR C：第三轮落地榜单转私密的共享缓存清除，不再保留最长 90 秒的失效窗口。
+- 2026-11-14 13:59–14:12 群成员投票（甲），Lord 记录：榜单转私密共享缓存清除并进 PR C（第三轮落地），不再保留最长 90 秒的失效窗口。
 - 本会话明确选择 strict 模式。不 commit、不 push，只改工作区文件。
 - 起点：`main` a85690935f94d45f94b57873f15620c7a84a3d40（已含 PR A #20 与 PR B #22）；分支 `sync/upstream-v27.2.1-pr-c`，开工前 `git status` 实测干净，与 origin/main 一致。上游 `missuo/tokens` tag v27.2.1 = e39110ddc5ca9b2b8b25abcf57738b23931755d1，merge-base f114057。
 - 范围锚点：`ai/tasks/20261114-v2721-pr-b-mixed-fixes/task.md`「上游提交归类」表 C 类 20 行＋42e63c2 行内注明归 C 的功能代码部分；OG 多语言部分按 PR A task.md 登记随 OG 重做一并处理。
@@ -47,7 +47,7 @@ completed_at: "2026-11-14T15:24:28.000000+08:00"
 7. 验证全部真实执行并记录：`cd web && bunx tsc --noEmit`、`bun run lint`、`bun test`、`bun run build`；`cargo test --manifest-path cli/Cargo.toml`、`cargo clippy --manifest-path cli/Cargo.toml --all-targets -- -D warnings`、`cargo build --release --manifest-path cli/Cargo.toml -p tokens-cli`。本机预装 rustc 1.85.1 低于代码所需的 1.87，CLI 验证使用会话临时目录内的隔离工具链（PR A 架设、PR B 沿用的 rustup stable 1.100.0 与手工解包 make 4.4.1 仍在，不改 HOME、不动仓内配置）。lint 结果与 base a856909 对比，写清新增 warning 数。
 8. 本文件模型表为真实计数；本文件通过禁用词与本机路径扫描，零命中。
 9. 跑完验证后关掉本会话启动的 next start 等进程。
-10. 第三轮（方案甲）：转私密时统一标签 LEADERBOARD_CACHE_TAG 以 { expire: 0 } 立即过期、三语榜单地址全部 revalidatePath；cache.test.ts 5 条覆盖两条转私密端点、helper 直调与参数变体挂标，先红后绿；目标节与取舍说明 7 的旧状态行保留原文并补更正标记。
+10. 第三轮（方案甲）：转私密时统一标签 LEADERBOARD_CACHE_TAG 以 { expire: 0 } 立即过期、三语榜单地址全部 revalidatePath；cache.test.ts 5 条覆盖两条转私密端点、helper 直调与参数变体挂标，先红后绿；目标节与取舍说明 7 写为落地后的表述，不留与现状矛盾旧文。
 
 ## 模型与调用
 
@@ -55,10 +55,11 @@ completed_at: "2026-11-14T15:24:28.000000+08:00"
 
 | 角色 | 模型 | 密钥来源 | 调用次数 |
 |---|---|---|---|
-| 主 agent | k3:max | 环境变量 KIMI_API_KEY | 工具报错 = 会话文件中标记为报错的工具结果条数（含命令非零退出）；第一轮：回复 51、工具调用 65、工具报错 4（截至 2026-11-14 13:10 +08:00，含本次写入）。旧数，中断前快照，见 2026-11-14 14:33 更正 |
-| 主 agent | k3:max | 环境变量 KIMI_API_KEY | 第一轮最终（会话 01a1d839 因主机暂停被看门狗结束，代码零改动）：回复 71、工具调用 90、工具报错 4（截至 2026-11-14 14:33 +08:00，含本次写入） |
-| 主 agent | k3:max | 环境变量 KIMI_API_KEY | 第二轮：回复 131、工具调用 164、工具报错 3（截至 2026-11-14 14:45 +08:00，含本次写入；按本会话文件统计：## assistant 小节数、→ 工具行数、⇒ error 行数。14:33 写入的进行中快照为回复 24、工具调用 39、工具报错 3，本行终值取代之） |
-| 主 agent | k3:max | 环境变量 KIMI_API_KEY | 第三轮：回复 84、工具调用 114、工具报错 3（截至 2026-11-14 15:24 +08:00，含本次写入；按本会话文件统计：assistant 角色消息条数、tool_execution_start 条数、isError 标记为 true 的工具结果条数（含命令非零退出）） |
+| 主 agent | k3:max | 环境变量 KIMI_API_KEY | 第一轮：回复 71、工具调用 90、工具报错 4（会话 01a1d839 因主机暂停被看门狗结束，代码零改动） |
+| 主 agent | k3:max | 环境变量 KIMI_API_KEY | 第二轮：回复 136、工具调用 168、工具报错 3 |
+| 主 agent | k3:max | 环境变量 KIMI_API_KEY | 第三轮：回复 96、工具调用 126、工具报错 3 |
+
+统计口径：工具报错 = 会话文件中标记为报错的工具结果条数（含命令非零退出）。每轮一行，取该轮会话文件的最终计数；第四轮只改记录，不进本表计数。
 
 未启动子代理；密钥不写入本文件与任何产物。
 
@@ -129,19 +130,21 @@ TDD：4c98999 先写失败测试再改实现；上游自带测试（解析器、
 
 ## 进度
 
-- 2026-11-14 13:10 +08:00 主 agent：开始调查与血缘核对（PR B 归类表、上游 21 个提交 diff、本仓逐文件 blob 等价测试）。
-- 2026-11-14 13:10 +08:00 主 agent：完成调查。结论：(1) tokens-core 与 tokens-cli 多数目标文件与上游某一历史 blob 完全一致（mcp.rs==53082d7、clients.rs==0532b9d、lib.rs==1216cdd、message_cache.rs==00579f7、scanner.rs==427b514、sessions/{devin,dsh,cursor}.rs==53082d7、sessions/pi.rs==b728ee2、sessions/utils.rs==42d7185、settings.rs/autosubmit.rs==59f31ae、Cargo.toml==53082d7、api/submit/route.ts==42d7185、publish-cli.yml==160c24d），匹配点之后仅剩 C 提交，可整取 e39110d 版本；(2) b4f6459 与 3db0468 的内容已在本仓（本仓 70b8245/dd2dfda 与上游同作者同 diff，PR B 归类表按标题把它们留在 C，本会话更正为「已在仓」）；(3) main.rs==cbf1ecd＋1 处本仓 help 文本、cursor.rs==cbf1ecd＋4 处小 delta（早退分支删除、注释措辞、2 处格式化），整取 e39110d 后本仓 delta 或被上游覆盖或等价保留，唯一需回贴的是 main.rs 的 login --private help 文本；(4) 本仓 4c98999 等价物只覆盖 cron strict 路径，资料页非 strict 路径仍中招，确认必须带；(5) codex.rs 与上游 00579f7 仅差 21 行 rustfmt 风格，整取上游版只损失该格式细节。逐条去向见「上游提交去向」。
-- 2026-11-14 13:10 +08:00 主 agent：创建本文件与 index 行；基线环境核对——web/node_modules 缺失，已以 bun install --frozen-lockfile 恢复（658 包）；会话临时目录隔离工具链在位（rustc/cargo/clippy 1.100.0、make 4.4.1）；本机预装 rustc 1.85.1 不满足代码所需 1.87。
-- 2026-11-14 14:41 +08:00 主 agent：第二轮开始移植（会话 01a1d839 第一轮因主机暂停中断、代码零改动，本轮接续）。先复核第一轮 blob 等价结论：mcp/clients/lib/message_cache/scanner/sessions/settings/autosubmit/tokens-cli Cargo.toml/api submit 路由/publish-cli.yml 与所记上游历史 blob 逐一 diff 为 0，cursor.rs 四处 delta、main.rs 一处 help 文本 delta、codex.rs 21 行格式差均与第一轮记录一致；cli/Cargo.toml 与上游的差异仅为 workspace version（本仓 1.0.4 线，保留）。
-- 2026-11-14 14:41 +08:00 主 agent：完成 CLI 移植。tokens-core 11 文件与 tokens-cli 9 文件（含新增 mcp_names.rs、cursor/billing.rs、cursor/cli_auth.rs、cursor/desktop.rs、bin/tokensw.rs）整取 e39110d；main.rs 回贴本仓 login --private help 文本；locales 三语 cli.json 取上游 8 条新键（cli.mcp-names.* 5 条、cli.submit.include_mcp.help、cli.submit.json.help、cli.cursor.login.source.help）与 3 条修订值（cli.cursor.login.about、cli.cursor.sync.about、cli.submit.dryRun），cli.login.private.help 保留本仓三语值（与 main.rs 回贴一致）。
-- 2026-11-14 14:41 +08:00 主 agent：完成 web 移植。整取 api/submit/route.ts、validation/submission.ts、submission.test.ts、lib/og/ogImage.ts、lib/og/fonts.generated.ts、scripts/generate-og-fonts.ts、scripts/og-cjk-hanzi.txt、api/og/route.tsx、i18n messages og 三语并注册进 messages/index.ts（保留本仓 auth/teams/teamboard 命名空间，不建 shame）；OG 路由适配——BRAND 与 HEAT 末档换 #4f8ff0、Background 径向渐变换 rgba(79,143,240,…)、三处 tokens.ci 字样换 SITE_HOST；next.config.ts 只加 htmlLimitedBots；layout 保留 SITE_URL metadataBase 与 favicon v3、OG 图改 ogImageUrl({locale})；docs 与 teamboard 页 OG 地址改走 ogImageUrl；u 页加 7f30fd6 的 5xx 抛出、ogImageUrl 全参数（avatar/rank/tokens/cost/days/clients/activity/locale）、规范 handle 与 twitter description，保留 profile.meta.* 键、SITE_URL/localizeHref、membership 与 locale 参数；publicProfileData 只在 cached 函数内加 5xx 抛出，保留 locale 缓存键与本仓访问检查次序。
-- 2026-11-14 14:41 +08:00 主 agent：完成 4c98999 TDD。先写 githubSocials.test.ts 6 条并实跑：4 条失败（双路 403 写库、半失败写库、传输失败写库，另 1 条为测试自身 URL 归一化预期错误，修正测试后仍 3 条红在写库断言）；随后把 syncGitHubSocialLinks 改为仅在 complete 时写库，strict 变体与本仓 404 语义不动；复跑 6 条全绿。
-- 2026-11-14 14:41 +08:00 主 agent：完成 publish-cli.yml 移植：取 33ee973（matrix launcher 字段、Collect 步、ship/  artifact、双成员打包）、8cf8f8e（id-token: write、node-version 24、去 registry-url 与 NODE_AUTH_TOKEN、npm≥11.5.1 自检）、8415a71（gh release create --target 固定在构建提交）；actions 主版本（checkout v6、cache v5、setup-node v6）保持不动（取舍说明 6）。
-- 2026-11-14 14:41 +08:00 主 agent：完成七条验证命令实跑与冒烟，全部通过，数字见证据节。冒烟覆盖：/api/og 站点卡、页面卡（ja title）、资料卡（zh-CN，tokens/cost/rank/days/clients/activity 全参数）均 200 image/png 1200×630 且 Cache-Control 为一年 immutable；/、/zh-CN/leaderboard、/docs 头部 og:image 带 locale 与 v=2；CLI 的 mcp-names enable/status/disable 闭环（默认关闭、status 可读、disable 提示下次提交清空）、submit --dry-run --json 走通扫描路径（隔离 HOME 无数据，止于空数据提示）、三语 help 新键渲染正常。冒烟用 next start 进程已关闭；基线对比用临时 worktree 已移除。
-- 2026-11-14 15:05 +08:00 主 agent：重开任务——状态 done→planned→in-progress，旧完成证据保留在状态事件表，completed_at 清空待第三轮验收后重记。第三轮开始：榜单转私密共享缓存窗口按方案甲落地（授权见「已确认范围与授权」第二条）。
-- 2026-11-14 15:05 +08:00 主 agent：完成第三轮调查。结论：(1) 榜单缓存共三层——getLeaderboard.ts 三处 unstable_cache 数据缓存（getPeriodRanking 的 period-ranking 键覆盖时间段/日期/排序变体，getLeaderboardData 的 leaderboard:* 键覆盖 all 时间段与 client:/model: 指令搜索的分页/排序/搜索/日期变体，getUserRank 的 user-rank 键覆盖 all 时间段个人名次；三处 tags 均含字面量 leaderboard，revalidate 60，键不含语言，三语共用一份数据）；页面层无 ISR（leaderboard 页读 searchParams 且 getTranslator 读 headers 为动态渲染，无 Full Route Cache；/api/leaderboard 为 force-dynamic）；middleware 给 /leaderboard 及 /zh-CN、/ja 前缀与 period/from/to/sortBy/page/search 查询变体盖 `public, max-age=0, s-maxage=30, stale-while-revalidate=60` 共享缓存头（90 秒窗口所在，边缘按完整 URL 建副本）。(2) teamboard 的三处 unstable_cache 同样只挂 leaderboard 标签，统一标签清除一并覆盖其数据层。(3) 转私密路径恰两条——/api/me/private POST（tokens login --private，只设私密）与 /api/settings/privacy PATCH（双向），均汇于 privacy.ts 的 revalidateUserVisibility。(4) 现状缺口与 PR B 取舍 11 记录一致：revalidateUserVisibility 只 revalidatePath("/leaderboard")，覆盖不到 /zh-CN/leaderboard、/ja/leaderboard 两个语言前缀副本。(5) 榜单查询经 publicUserCondition() 排除私密与封禁账号，清除后新渲染即不含该用户。
-- 2026-11-14 15:21 +08:00 主 agent：完成第三轮 TDD。先写 cache.test.ts 5 条并实跑：3 条红在缺 /zh-CN/leaderboard、/ja/leaderboard 清除（统一标签清除断言本已成立），2 条绿（10 个参数变体条目全挂统一标签、helper 自身语义）；随后落地 lib/leaderboard/cache.ts 新建、privacy.ts 改走 revalidateLeaderboard()、getLeaderboard.ts 三处 tags 改引用常量，复跑 5 条全绿。
-- 2026-11-14 15:21 +08:00 主 agent：完成第三轮七条验证与冒烟，全部通过，数字见证据节。冒烟（next start 端口 3103）实测 /leaderboard、/zh-CN/leaderboard、/ja/leaderboard 及 period/sortBy/page/search 与 custom 日期查询变体均 200 且共享缓存头在位（即本轮清除所命名的副本形态）；本地无 DATABASE_URL，页面走空板兜底路径，清除行为由 cache.test.ts 覆盖；验毕 next 进程全部关闭。
+- 2026-11-14 12:04:54 +08:00 主 agent（补记，按会话记录还原）：开始调查与血缘核对（PR B 归类表、上游 21 个提交 diff、本仓逐文件 blob 等价测试）。
+- 2026-11-14 13:03:43 +08:00 主 agent（补记，按会话记录还原）：完成调查。结论：(1) tokens-core 与 tokens-cli 多数目标文件与上游某一历史 blob 完全一致（mcp.rs==53082d7、clients.rs==0532b9d、lib.rs==1216cdd、message_cache.rs==00579f7、scanner.rs==427b514、sessions/{devin,dsh,cursor}.rs==53082d7、sessions/pi.rs==b728ee2、sessions/utils.rs==42d7185、settings.rs/autosubmit.rs==59f31ae、Cargo.toml==53082d7、api/submit/route.ts==42d7185、publish-cli.yml==160c24d），匹配点之后仅剩 C 提交，可整取 e39110d 版本；(2) b4f6459 与 3db0468 的内容已在本仓（本仓 70b8245/dd2dfda 与上游同作者同 diff，PR B 归类表按标题把它们留在 C，本会话更正为「已在仓」）；(3) main.rs==cbf1ecd＋1 处本仓 help 文本、cursor.rs==cbf1ecd＋4 处小 delta（早退分支删除、注释措辞、2 处格式化），整取 e39110d 后本仓 delta 或被上游覆盖或等价保留，唯一需回贴的是 main.rs 的 login --private help 文本；(4) 本仓 4c98999 等价物只覆盖 cron strict 路径，资料页非 strict 路径仍中招，确认必须带；(5) codex.rs 与上游 00579f7 仅差 21 行 rustfmt 风格，整取上游版只损失该格式细节。逐条去向见「上游提交去向」。
+- 2026-11-14 13:08:12 +08:00 主 agent：创建本文件与 index 行；基线环境核对——web/node_modules 缺失，已以 bun install --frozen-lockfile 恢复（658 包）；会话临时目录隔离工具链在位（rustc/cargo/clippy 1.100.0、make 4.4.1）；本机预装 rustc 1.85.1 不满足代码所需 1.87。
+- 2026-11-14 13:58:49 +08:00 主 agent（补记，按会话记录还原）：第二轮开始移植（会话 01a1d839 第一轮因主机暂停中断、代码零改动，本轮接续）。先复核第一轮 blob 等价结论：mcp/clients/lib/message_cache/scanner/sessions/settings/autosubmit/tokens-cli Cargo.toml/api submit 路由/publish-cli.yml 与所记上游历史 blob 逐一 diff 为 0，cursor.rs 四处 delta、main.rs 一处 help 文本 delta、codex.rs 21 行格式差均与第一轮记录一致；cli/Cargo.toml 与上游的差异仅为 workspace version（本仓 1.0.4 线，保留）。
+- 2026-11-14 14:14:05 +08:00 主 agent（补记，按会话记录还原）：完成 CLI 移植。tokens-core 11 文件与 tokens-cli 9 文件（含新增 mcp_names.rs、cursor/billing.rs、cursor/cli_auth.rs、cursor/desktop.rs、bin/tokensw.rs）整取 e39110d；main.rs 回贴本仓 login --private help 文本；locales 三语 cli.json 取上游 8 条新键（cli.mcp-names.* 5 条、cli.submit.include_mcp.help、cli.submit.json.help、cli.cursor.login.source.help）与 3 条修订值（cli.cursor.login.about、cli.cursor.sync.about、cli.submit.dryRun），cli.login.private.help 保留本仓三语值（与 main.rs 回贴一致）。
+- 2026-11-14 14:19:07 +08:00 主 agent（补记，按会话记录还原）：完成 web 移植。整取 api/submit/route.ts、validation/submission.ts、submission.test.ts、lib/og/ogImage.ts、lib/og/fonts.generated.ts、scripts/generate-og-fonts.ts、scripts/og-cjk-hanzi.txt、api/og/route.tsx、i18n messages og 三语并注册进 messages/index.ts（保留本仓 auth/teams/teamboard 命名空间，不建 shame）；OG 路由适配——BRAND 与 HEAT 末档换 #4f8ff0、Background 径向渐变换 rgba(79,143,240,…)、三处 tokens.ci 字样换 SITE_HOST；next.config.ts 只加 htmlLimitedBots；layout 保留 SITE_URL metadataBase 与 favicon v3、OG 图改 ogImageUrl({locale})；docs 与 teamboard 页 OG 地址改走 ogImageUrl；u 页加 7f30fd6 的 5xx 抛出、ogImageUrl 全参数（avatar/rank/tokens/cost/days/clients/activity/locale）、规范 handle 与 twitter description，保留 profile.meta.* 键、SITE_URL/localizeHref、membership 与 locale 参数；publicProfileData 只在 cached 函数内加 5xx 抛出，保留 locale 缓存键与本仓访问检查次序。
+- 2026-11-14 14:20:49 +08:00 主 agent（补记，按会话记录还原）：完成 4c98999 TDD。先写 githubSocials.test.ts 6 条并实跑：4 条失败（双路 403 写库、半失败写库、传输失败写库，另 1 条为测试自身 URL 归一化预期错误，修正测试后仍 3 条红在写库断言）；随后把 syncGitHubSocialLinks 改为仅在 complete 时写库，strict 变体与本仓 404 语义不动；复跑 6 条全绿。
+- 2026-11-14 14:21:45 +08:00 主 agent（补记，按会话记录还原）：完成 publish-cli.yml 移植：取 33ee973（matrix launcher 字段、Collect 步、ship/  artifact、双成员打包）、8cf8f8e（id-token: write、node-version 24、去 registry-url 与 NODE_AUTH_TOKEN、npm≥11.5.1 自检）、8415a71（gh release create --target 固定在构建提交）；actions 主版本（checkout v6、cache v5、setup-node v6）保持不动（取舍说明 6）。
+- 2026-11-14 14:35:02 +08:00 主 agent（补记，按会话记录还原）：完成七条验证命令实跑与冒烟，全部通过，数字见证据节。冒烟覆盖：/api/og 站点卡、页面卡（ja title）、资料卡（zh-CN，tokens/cost/rank/days/clients/activity 全参数）均 200 image/png 1200×630 且 Cache-Control 为一年 immutable；/、/zh-CN/leaderboard、/docs 头部 og:image 带 locale 与 v=2；CLI 的 mcp-names enable/status/disable 闭环（默认关闭、status 可读、disable 提示下次提交清空）、submit --dry-run --json 走通扫描路径（隔离 HOME 无数据，止于空数据提示）、三语 help 新键渲染正常。冒烟用 next start 进程已关闭；基线对比用临时 worktree 已移除。
+- 2026-11-14 14:48:28 +08:00 主 agent（补记，按会话记录还原）：第三轮开始，处理榜单转私密缓存清除（方案甲）。
+- 2026-11-14 15:03:57 +08:00 主 agent（补记，按会话记录还原）：完成第三轮调查。结论：(1) 榜单缓存共三层——getLeaderboard.ts 三处 unstable_cache 数据缓存（getPeriodRanking 的 period-ranking 键覆盖时间段/日期/排序变体，getLeaderboardData 的 leaderboard:* 键覆盖 all 时间段与 client:/model: 指令搜索的分页/排序/搜索/日期变体，getUserRank 的 user-rank 键覆盖 all 时间段个人名次；三处 tags 均含字面量 leaderboard，revalidate 60，键不含语言，三语共用一份数据）；页面层无 ISR（leaderboard 页读 searchParams 且 getTranslator 读 headers 为动态渲染，无 Full Route Cache；/api/leaderboard 为 force-dynamic）；middleware 给 /leaderboard 及 /zh-CN、/ja 前缀与 period/from/to/sortBy/page/search 查询变体盖 `public, max-age=0, s-maxage=30, stale-while-revalidate=60` 共享缓存头（90 秒窗口所在，边缘按完整 URL 建副本）。(2) teamboard 的三处 unstable_cache 同样只挂 leaderboard 标签，统一标签清除一并覆盖其数据层。(3) 转私密路径恰两条——/api/me/private POST（tokens login --private，只设私密）与 /api/settings/privacy PATCH（双向），均汇于 privacy.ts 的 revalidateUserVisibility。(4) 现状缺口与 PR B 取舍 11 记录一致：revalidateUserVisibility 只 revalidatePath("/leaderboard")，覆盖不到 /zh-CN/leaderboard、/ja/leaderboard 两个语言前缀副本。(5) 榜单查询经 publicUserCondition() 排除私密与封禁账号，清除后新渲染即不含该用户。
+- 2026-11-14 15:04:42 +08:00 主 agent（补记，按会话记录还原）：重开任务——状态 done→planned→in-progress，旧完成证据保留在状态事件表，completed_at 清空待第三轮验收后重记。第三轮开始：榜单转私密共享缓存窗口按方案甲落地（授权见「已确认范围与授权」第二条）。
+- 2026-11-14 15:10:44 +08:00 主 agent（补记，按会话记录还原）：完成第三轮 TDD。先写 cache.test.ts 5 条并实跑：3 条红在缺 /zh-CN/leaderboard、/ja/leaderboard 清除（统一标签清除断言本已成立），2 条绿（10 个参数变体条目全挂统一标签、helper 自身语义）；随后落地 lib/leaderboard/cache.ts 新建、privacy.ts 改走 revalidateLeaderboard()、getLeaderboard.ts 三处 tags 改引用常量，复跑 5 条全绿。
+- 2026-11-14 15:15:51 +08:00 主 agent（补记，按会话记录还原）：完成第三轮七条验证与冒烟，全部通过，数字见证据节。冒烟（next start 端口 3103）实测 /leaderboard、/zh-CN/leaderboard、/ja/leaderboard 及 period/sortBy/page/search 与 custom 日期查询变体均 200 且共享缓存头在位（即本轮清除所命名的副本形态）；本地无 DATABASE_URL，页面走空板兜底路径，清除行为由 cache.test.ts 覆盖；验毕 next 进程全部关闭。
+- 2026-11-14 15:42:07 +08:00 主 agent：第四轮只改记录：按 Reviewy 对 12d7cd89 的 NOT CLEAN 意见修订本文件——90 秒缓存窗三处表述统一为「2026-11-14 13:59–14:12 群成员投票（甲），Lord 记录」并直接写落地后现状；进度日志各条时间按会话文件逐条还原，事后补写的条目加标「补记，按会话记录还原」；created_at 改为第一轮实际建文时刻 13:08:12；模型表改为每轮一行最终计数并统一工具报错口径；取舍说明 10 补 npm 包名与 repository.url 现状。不改代码，不跑构建，不提交不推送。
 
 ## 上游提交去向（f114057..e39110d 中 PR B 表 C 类 20 个＋42e63c2 功能部分）
 
@@ -177,10 +180,10 @@ TDD：4c98999 先写失败测试再改实现；上游自带测试（解析器、
 4. **u 页元数据**：取 7b83ac0 的 ogImageUrl 全参数（avatar/rank/tokens/cost/days/clients/activity/locale）、canonical handle（卡与 og:url 跟随规范大小写）与 twitter description；shareTitle/shareDescription 保留本仓 profile.meta.* 键位（PR A 已修正上游 meta.* 指向错误），SITE_URL/localizeHref 保留。
 5. **publicProfileData 只取 7f30fd6 抛出段**：verified 暴露属 bfc87bb（PR B 归类不适用：本仓已移除 GitHub verified 徽章体系）；16724c8 的访问检查次序与 visibilityHeaders 写法保留本仓侧（PR B 取舍 1 已决）；`NOT u.is_private` 与 `u.is_private = false` 等价，保留本仓写法。
 6. **9ecae99 维持不适用**：publish-cli.yml 只取 33ee973/8cf8f8e/8415a71 三个 C 提交的 hunk；actions 主版本升级（checkout v7、cache v6、setup-node v7、node 24）不在 C 清单，本仓 ci.yml 同样未做该升级，保持一致。
-7. **榜单转私密 90 秒缓存窗口**：本 PR 不动（等 640 选择，PR B 取舍 11 挂起项）。（旧状态，见 2026-11-14T15:05 更正：方案甲投票过半后第三轮落地清除，取舍说明 12）
+7. **榜单转私密共享缓存清除（方案甲）**：2026-11-14 13:59–14:12 群成员投票（甲），Lord 记录；第三轮落地，PR B 取舍 11 挂起项就此关闭——统一标签 leaderboard＋revalidateTag { expire: 0 } 清数据层三处 unstable_cache，对 /leaderboard、/zh-CN/leaderboard、/ja/leaderboard 三个榜单地址逐个 revalidatePath，/api/me/private 与 /api/settings/privacy 两条转私密入口共用同一清除，页面层无 ISR 可清，cache.test.ts 5 条先红后绿；实现细节与残余边界见取舍说明 12。
 8. **cursor.rs 整取 e39110d**：本仓相对 cbf1ecd 的 4 处 delta 中——早退分支删除上游 33b1723 同款、注释措辞上游版更准（dedupe_cursor_event_snapshots 现已存在）、2 处 rustfmt 风格差异无关紧要——无本仓独有内容损失。sessions/codex.rs 同理整取（仅损失 21 行格式化细节）。
 9. **worker.ts 不适用**：4c98999 的 worker.ts hunk 属上游 Workers cron 入口；本仓 2fc41cd 已移除 worker 层，定时刷新走 api/cron 路由。
-10. **8cf8f8e 的部署前提**：npm trusted publishing 要求 npmjs.com 上每个包把本仓＋workflow 文件名登记为 trusted publisher，且 package.json repository.url 指本仓；未登记前该 workflow 的 publish 步会失败。此为本仓维护者的 npm 侧操作，不在本会话授权内，如实记录。
+10. **8cf8f8e 的部署前提**：npm trusted publishing 要求 npmjs.com 上每个包把本仓＋workflow 文件名登记为 trusted publisher，且 package.json repository.url 指本仓；packages 下 npm 包的 repository.url 和包名仍是上游的（missuo/tokens、tokens-cli*），trusted publishing 在本仓跑不通，登记前需改包名和仓库地址。未登记前该 workflow 的 publish 步会失败。此为本仓维护者的 npm 侧操作，不在本会话授权内，如实记录。
 11. **tokensw 与 Windows 段在非 Windows 平台**：tokensw.rs 全目标编译（非 Windows 为纯转发），autosubmit.rs 的迁移逻辑 cfg(windows) 门控、含 cfg_attr(not(windows), allow(dead_code)) 与跨平台单测；本仓 Linux 验证覆盖编译与单测，Windows 行为靠上游测试与代码审查保障。
 12. **第三轮：榜单转私密共享缓存清除（方案甲）**：新建 lib/leaderboard/cache.ts 集中统一标签 LEADERBOARD_CACHE_TAG（值仍为 "leaderboard"，submit、teams/service、settings 各既有 purge 点不受影响）与 revalidateLeaderboard()；getLeaderboard.ts 三处 unstable_cache 的 tags 改引用该常量。清除语义：revalidateTag(tag, { expire: 0 }) 立即过期全部数据层条目——缓存键不含语言（译文在渲染层产生），三语共用一份数据，一次标签清除覆盖三语数据；时间段/日期/排序/分页/搜索各变体条目同挂该标签一并失效；teamboard 三处聚合也只挂该标签，随同清除。页面层：leaderboard 页为动态渲染，无 ISR 可清；边缘共享缓存按完整 URL 存副本，逐个 revalidatePath 三个语言榜单地址（/leaderboard、/zh-CN/leaderboard、/ja/leaderboard，由 LOCALES 派生，新增语言自动纳入），每个地址的清除覆盖其全部查询变体。privacy.ts 的 revalidateUserVisibility 改走该 helper，/api/me/private 与 /api/settings/privacy 两条转私密路径共用同一清除。共享缓存头（s-maxage=30、stale-while-revalidate=60）本身不动：提交数字的短时延迟是 middleware 注释明记的既定设计，本轮只让转私密立即生效。账号删除与删数据路径沿用各自既有 "max" 档次 purge，语义不借本轮改变。残余边界：若部署在平台之外再架一层不理会 revalidatePath 的共享缓存，该层副本仍受其缓存头时限（最长 90 秒），仓库代码够不到该层；embed svg 路由的 private,no-store 注释已记录同类边界。
 
@@ -220,7 +223,7 @@ TDD：4c98999 先写失败测试再改实现；上游自带测试（解析器、
 | 2026-11-14T13:10:00.000000+08:00 | planned | in-progress | 开工：范围、验收与 Book Gate Plan 已确认，调查完成 | task.md 已确认范围与授权节；分支 sync/upstream-v27.2.1-pr-c，工作区开工前干净，与 origin/main(a856909) 一致；血缘核对结论见进度节 |
 | 2026-11-14T14:45:00.000000+08:00 | in-progress | checking | 第二轮完成全部移植与取舍回贴：18 个 C 提交落地＋2 个核对为已在仓、42e63c2 功能部分落地、4c98999 测试先红后绿、七条验证命令与生产/CLI 冒烟全绿，进入收尾核对 | task.md 进度节第二轮各条与证据节；web: tsc exit 0、lint 0 errors/1 warning（与 base a856909 实测相同，新增 0）、bun test 121 pass/0 fail、build exit 0；CLI: cargo test 2533 pass/0 fail/4 ignored、clippy -D warnings exit 0、release build exit 0；OG 三类卡与三语 help 冒烟通过，next start 已关闭 |
 | 2026-11-14T14:45:00.000000+08:00 | checking | done | 验收条件 1-9 全部满足：20 个 C 类提交逐条有去向、4c98999 回归测试落地、OG 三卡三语与缓存头正确、解析器行为随上游并测试通过、MCP 默认关闭且服务端门控生效、tokensw 与打包段落地且非 Windows 编译不变、七条验证命令真实执行通过、模型表两轮计数真实、本文件禁用词与本机路径扫描零命中、next start 等进程已关闭；不 commit、不 push | 证据节全部实跑记录；门禁结论节四项评审（release-readiness 记 blocked：CI、合并、部署与 npm trusted publisher 登记不在本会话授权内）；grep 禁用词与本机路径扫描零命中 |
-| 2026-11-14T15:05:00.000000+08:00 | done | planned | 重开：方案甲投票过半，Lord 14:47 下令榜单转私密共享缓存清除并进 PR C（第二轮完成证据保留于上行与证据节，本轮完成后另行记录） | 已确认范围与授权节第二条；2026-11-14 Tokens 群全自动模式下按方案甲投票（Researchy、Reviewy 投甲，过半），Lord 14:47 记录并下令并进 PR C |
-| 2026-11-14T15:05:00.000000+08:00 | planned | in-progress | 第三轮开工：缓存层调查完成，统一标签与三语路径清除方案确定 | 进度节 15:05 调查结论（1)-(5) |
-| 2026-11-14T15:24:28.000000+08:00 | in-progress | checking | 第三轮完成：lib/leaderboard/cache.ts 落地统一标签与 revalidateLeaderboard()、privacy.ts 两条转私密路径共用该 helper、getLeaderboard.ts 三处 tags 改引用常量、cache.test.ts 5 条先红后绿、七条验证命令与冒烟全绿，进入收尾核对 | 进度节 15:21 各条与证据节第三轮块；web: tsc exit 0、lint 0 errors/1 warning（与 base a856909 实测相同，新增 0）、bun test 126 pass/0 fail、build exit 0；CLI: cargo test 2533 pass/0 fail/4 ignored、clippy exit 0、release build exit 0；冒烟三语榜单与查询变体均 200 且共享缓存头在位，next 进程已关闭 |
+| 2026-11-14T15:05:00.000000+08:00 | done | planned | 重开：2026-11-14 13:59–14:12 群成员投票（甲），Lord 记录，榜单转私密共享缓存清除并进 PR C（第二轮完成证据保留于上行与证据节，本轮完成后另行记录） | 已确认范围与授权节第二条：2026-11-14 13:59–14:12 群成员投票（甲），Lord 记录 |
+| 2026-11-14T15:05:00.000000+08:00 | planned | in-progress | 第三轮开工：缓存层调查完成，统一标签与三语路径清除方案确定 | 进度节 15:03:57 调查结论（1)-(5) |
+| 2026-11-14T15:24:28.000000+08:00 | in-progress | checking | 第三轮完成：lib/leaderboard/cache.ts 落地统一标签与 revalidateLeaderboard()、privacy.ts 两条转私密路径共用该 helper、getLeaderboard.ts 三处 tags 改引用常量、cache.test.ts 5 条先红后绿、七条验证命令与冒烟全绿，进入收尾核对 | 进度节 15:10:44 与 15:15:51 各条、证据节第三轮块；web: tsc exit 0、lint 0 errors/1 warning（与 base a856909 实测相同，新增 0）、bun test 126 pass/0 fail、build exit 0；CLI: cargo test 2533 pass/0 fail/4 ignored、clippy exit 0、release build exit 0；冒烟三语榜单与查询变体均 200 且共享缓存头在位，next 进程已关闭 |
 | 2026-11-14T15:24:28.000000+08:00 | checking | done | 验收条件 1-10 全部满足：20 个 C 类提交去向与第三轮方案甲落地（统一标签立即过期＋三语榜单地址全路径清除，5 条测试先红后绿）、七条验证命令真实执行通过、模型表三轮计数真实、本文件禁用词与本机路径扫描零命中、next start 等进程已关闭；不 commit、不 push | 证据节第二轮与第三轮实跑记录；门禁结论节含第三轮补评（release-readiness 维持 blocked）；grep 禁用词与本机路径扫描零命中 |
