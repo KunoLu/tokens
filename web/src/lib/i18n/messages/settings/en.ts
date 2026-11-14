@@ -21,6 +21,13 @@ const messages = {
     // rather than being glued to a literal on either side.
     description: "A private account stays off public rankings. Visitors see the same page as a missing user. You can still submit usage, and only this browser session can make the account public again.",
   },
+  timezone: {
+    title: "Time zone",
+    label: "Day assignment",
+    autoDetect: "Auto-detect",
+    detected: "Detected: {zone}",
+    description: "Decides which calendar day usage lands on: the profile chart's last day and the Today/Yesterday cards. Every profile you open follows your zone — never the profile owner's.",
+  },
   readTokens: {
     label: "Read tokens",
     description: "A read token can open your private profile, badge, or embed. It cannot submit usage or turn private mode off. The plaintext is shown once.",
@@ -124,6 +131,7 @@ const messages = {
     renameDevice: "Failed to rename device",
     revokeReadToken: "Failed to revoke read token",
     updatePrivacy: "Failed to update privacy",
+    updateTimezone: "Failed to update time zone",
   },
   actions: {
     creating: "Creating…",

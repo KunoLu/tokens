@@ -69,6 +69,8 @@ TOKENS_API_URL=https://你的域名 tokens submit
 
 1. 云服务器装 Postgres 16，建库建号；不要用 Compose 的 `tokens/tokens` 口令。
 2. 跑本仓迁移到 0027：**生产库只执行 `DATABASE_URL=… bun run db:migrate`（`drizzle-kit migrate`）**。不要对云上库跑 `bun run test:migrations`——它会执行 `scripts/check-migrations.ts`（在事务里插入回放数据，虽 ROLLBACK，但会拿锁、跑断言，是验证工具不是迁移工具）。`test:migrations` 只对本地 Compose 或一次性隔离验证库执行。
+
+   已在跑旧版本的实例升级到含 `0028_add_user_timezone` 的版本：先手动执行 `DATABASE_URL=… bun run db:migrate`，再构建上线新 web 代码；迁移未跑时设置接口的时区读写返回 503。
 3. 反代 HTTPS；环境：`NODE_ENV=production`、`NEXT_PUBLIC_URL=https://你的域名`、`DATABASE_URL=…`、`DATABASE_SSL` 按 TLS 实配（无 TLS 用 `disable`）、`CRON_SECRET`（随机长串）。反代必须覆写 `X-Forwarded-For`。可选：`CONTACT_EMAIL`（法律页联系邮箱；未配置则法律页只显示站点链接，不渲染 mailto）、`RESEND_API_KEY`/`EMAIL_FROM`（验证与邀请邮件）。
 4. `next build && next start`，或用 `docs/deploy/docker/prod/` 的 compose 栈（`up -d --build` 后在 web 容器内 `bun run --cwd web db:migrate` 跑迁移，runbook 见该目录 README）。
 5. 系统 cron（同机 loopback）：`curl -fsS -X POST http://127.0.0.1:3000/api/cron/refresh-social-links -H "Authorization: Bearer $CRON_SECRET"`，非 2xx 时告警/重试。

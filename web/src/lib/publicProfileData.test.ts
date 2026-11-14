@@ -1,5 +1,5 @@
 /// <reference types="bun-types" />
-import { expect, mock, test } from "bun:test";
+import { afterEach, describe, expect, mock, test } from "bun:test";
 import * as schema from "./db/schema";
 
 // Every db.select() chain resolves to the next queued result, in the order
@@ -23,7 +23,17 @@ mock.module("@/lib/db", () => ({
   },
 }));
 
-const { getPublicProfileResponse } = await import("./publicProfileData");
+const {
+  getProfilePeriodDateRange,
+  getPublicProfileResponse,
+  getRollingProfileDateRange,
+} = await import("./publicProfileData");
+
+// Queued answers a test did not consume (a 400 never reaches the database)
+// must not leak into the next test when order shuffles under --randomize.
+afterEach(() => {
+  selectResults.length = 0;
+});
 
 const model = (tokens: number, speedUsage?: unknown[]) => ({
   tokens,
@@ -157,4 +167,122 @@ test("model speed totals merge clients and follow the same period boundaries as 
       ],
     }]);
   }
+});
+
+// issue #21: "today" on the profile follows the viewer's time zone, not the
+// server's UTC date. Pure range functions take fixed instants; the route
+// takes `tz` and answers ranges in that zone.
+describe("viewer time zone day assignment (issue #21)", () => {
+  // 2026-11-13 16:30 UTC = 2026-11-14 00:30 in UTC+8 — the issue's repro.
+  const shanghaiMorningUtc = new Date("2026-11-13T16:30:00.000Z");
+  // 2026-11-14 04:30 UTC = 2026-11-13 23:30 in UTC-5.
+  const newYorkLateEveningUtc = new Date("2026-11-14T04:30:00.000Z");
+
+  // Independent of lib/timezone's formatToParts assembly: en-CA renders
+  // YYYY-MM-DD directly, so agreement is a real cross-check.
+  const calendarDateIn = (now: Date, timeZone: string) =>
+    new Intl.DateTimeFormat("en-CA", { timeZone, dateStyle: "short" }).format(now);
+
+  test("rolling chart range ends on the viewer-zone today, defaulting to UTC", () => {
+    expect(getRollingProfileDateRange(shanghaiMorningUtc, "Asia/Shanghai")).toEqual({
+      start: "2025-11-14",
+      end: "2026-11-14",
+    });
+    expect(getRollingProfileDateRange(shanghaiMorningUtc, "UTC")).toEqual({
+      start: "2025-11-13",
+      end: "2026-11-13",
+    });
+    expect(getRollingProfileDateRange(shanghaiMorningUtc)).toEqual({
+      start: "2025-11-13",
+      end: "2026-11-13",
+    });
+    expect(getRollingProfileDateRange(newYorkLateEveningUtc, "America/New_York")).toEqual({
+      start: "2025-11-13",
+      end: "2026-11-13",
+    });
+  });
+
+  test("rolling range clamps February 29 to February 28 one year back", () => {
+    expect(getRollingProfileDateRange(new Date("2028-02-29T12:00:00.000Z"), "UTC")).toEqual({
+      start: "2027-02-28",
+      end: "2028-02-29",
+    });
+  });
+
+  test("week and month ranges follow the viewer zone", () => {
+    expect(getProfilePeriodDateRange("week", shanghaiMorningUtc, "Asia/Shanghai")).toEqual({
+      start: "2026-11-08",
+      end: "2026-11-14",
+    });
+    expect(getProfilePeriodDateRange("month", shanghaiMorningUtc, "Asia/Shanghai")).toEqual({
+      start: "2026-10-16",
+      end: "2026-11-14",
+    });
+    expect(getProfilePeriodDateRange("week", shanghaiMorningUtc, "UTC")).toEqual({
+      start: "2026-11-07",
+      end: "2026-11-13",
+    });
+    expect(getProfilePeriodDateRange("all", shanghaiMorningUtc, "Asia/Shanghai")).toBeNull();
+  });
+
+  const emptyProfileRows = () => {
+    selectResults.push(
+      [{ id: "u1", username: "alice", displayName: null, avatarUrl: null, createdAt: new Date("2026-01-01"), bannedAt: null, banReason: null, isPrivate: false }],
+      [{ totalTokens: 100, totalCost: 1 }],
+      [],
+      [],
+      [{ days: 0 }],
+    );
+  };
+
+  test("tz parameter drives the chart range end; no tz keeps the UTC date", async () => {
+    const now = new Date();
+    const utcToday = calendarDateIn(now, "UTC");
+    // One of these always disagrees with the UTC date: UTC+14 crosses the
+    // date line from 10:00 UTC on, UTC-12 lags a day until 12:00 UTC.
+    const probe = utcToday === calendarDateIn(now, "Pacific/Kiritimati")
+      ? "Etc/GMT+12"
+      : "Pacific/Kiritimati";
+    const probeToday = calendarDateIn(now, probe);
+
+    emptyProfileRows();
+    const zoned = await getPublicProfileResponse(
+      new Request(`http://tokens.internal/api/users/alice?tz=${encodeURIComponent(probe)}`),
+      { params: Promise.resolve({ username: "alice" }) },
+    );
+    expect(zoned.status).toBe(200);
+    const zonedBody = await zoned.json();
+    expect(zonedBody.chartRange.end).toBe(probeToday);
+    expect(probeToday).not.toBe(utcToday);
+
+    emptyProfileRows();
+    const plain = await getPublicProfileResponse(
+      new Request("http://tokens.internal/api/users/alice"),
+      { params: Promise.resolve({ username: "alice" }) },
+    );
+    expect(plain.status).toBe(200);
+    const plainBody = await plain.json();
+    expect(plainBody.chartRange.end).toBe(utcToday);
+  });
+
+  test("an invalid tz parameter is rejected", async () => {
+    emptyProfileRows();
+    const response = await getPublicProfileResponse(
+      new Request("http://tokens.internal/api/users/alice?tz=Not/AZone"),
+      { params: Promise.resolve({ username: "alice" }) },
+    );
+    expect(response.status).toBe(400);
+  });
+
+  test("the profile payload never exposes the owner's time zone setting", async () => {
+    emptyProfileRows();
+    const response = await getPublicProfileResponse(
+      new Request("http://tokens.internal/api/users/alice"),
+      { params: Promise.resolve({ username: "alice" }) },
+    );
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect("timezone" in body.user).toBe(false);
+    expect("timezone" in body).toBe(false);
+  });
 });

@@ -11,6 +11,7 @@
     "typecheck": "tsc --noEmit",
 
     "test:migrations": "drizzle-kit migrate && bun scripts/check-migrations.ts",
+    "test:node": "node --test scripts/test-timezone-node.mjs",
     "test:teams": "bun scripts/check-teams-invariants.ts",
     "test:private": "bun scripts/check-private-mode.ts",
 
@@ -52,6 +53,7 @@
     "zod": "^3.24.1"
   },
   "devDependencies": {
+    "@happy-dom/global-registrator": "^21.0.4",
     "@playwright/test": "^1.63.0",
     "@types/node": "^20",
     "@types/react": "^19",

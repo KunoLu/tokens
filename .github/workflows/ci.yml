@@ -168,6 +168,18 @@ jobs:
       - name: Typecheck
         run: cd web && bunx tsc --noEmit
 
+      # The test suite runs under Bun, but the API serves on Node in
+      # production — and the two runtimes canonicalize renamed IANA zones to
+      # different spellings. The time zone acceptance rule therefore also runs
+      # once under Node against the real module (no dependencies needed).
+      # Node 24 matches the production runtime version on Vercel.
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: Time zone validation under Node
+        run: cd web && bun run test:node
+
       # The build needs no secrets — verified by building with no .env present
       # and no DATABASE_URL set. Every page that touches the database is
       # server-rendered on demand, and the leaderboard explicitly tolerates a

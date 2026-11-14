@@ -19,6 +19,13 @@ const messages = {
     turnOff: "オフにする",
     description: "非公開アカウントは公開ランキングから外れます。訪問者には存在しないユーザーと同じページが見えます。送信は引き続き可能で、公開に戻せるのはこのブラウザセッションだけです。",
   },
+  timezone: {
+    title: "タイムゾーン",
+    label: "日付の割り当て",
+    autoDetect: "自動検出",
+    detected: "検出されたタイムゾーン：{zone}",
+    description: "使用量をどの暦日に割り当てるかを決めます。プロフィールのグラフの最終日と「今日/昨日」カードが対象です。開いたプロフィールはすべてあなたのタイムゾーンに従い、ページの持ち主のタイムゾーンは使われません。",
+  },
   readTokens: {
     label: "読み取り Token",
     description: "読み取り Token で非公開のプロフィール、バッジ、埋め込みを開けます。使用量の送信やプライベートモードの解除はできません。平文は一度だけ表示されます。",
@@ -119,6 +126,7 @@ const messages = {
     renameDevice: "デバイス名を変更できませんでした",
     revokeReadToken: "読み取り Token を取り消せませんでした",
     updatePrivacy: "プライバシー設定を更新できませんでした",
+    updateTimezone: "タイムゾーンを更新できませんでした",
   },
   actions: {
     creating: "作成中…",
