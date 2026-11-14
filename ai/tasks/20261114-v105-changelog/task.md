@@ -7,7 +7,7 @@ mode_note: 用户 2026-11-14 01:50 定下 Tokens 全自动顺序（A→B→C→D
 status: "done"
 branch: docs/v1.0.5-changelog
 created_at: '2026-11-14T21:18:02+08:00'
-updated_at: '2026-11-14T23:20:23+08:00'
+updated_at: '2026-11-15T00:08:06+08:00'
 completed_at: '2026-11-14T22:06:29+08:00'
 ---
 # v1.0.5 发布准备 — 双语 CHANGELOG 与版本推进
@@ -180,7 +180,7 @@ BDD: skipped（本轮不改变既有运行规则，仅改说明与版本常量�
 - #25 于 2026-11-14 由 Lord 合入 main，合并提交 674e9824751301bf606a3e3f81b4771c292d9e05（git log 实测，回填会话所在分支 docs/v1.0.5-backfill 即以它为起点）。
 - tag v1.0.5：tag 对象 15bb85a7221e5334dee6702b7b679a1deb340d73，指向 674e9824751301bf606a3e3f81b4771c292d9e05；只打 tag，不建 GitHub Release。已用 git ls-remote origin 只读核对（回填会话实跑）。
 - main CI run 43607807847：headSha 674e9824751301bf606a3e3f81b4771c292d9e05，status completed、conclusion success，Web／Linux／macOS／Windows 四个 job 均 success。已用 gh run view -R KunoLu/tokens 只读核对（回填会话实跑）。
-- Production 部署 dpl_GmPUbVMVfe3dBYTxroPNE8Tc96py：提交 674e982，2026-11-14 23:02:02 +08:00 READY，Lord 报告构建日志显示 drizzle-kit migrate 迁移成功。部署信息来源为 Lord 2026-11-14 23:05 群内报告；回填会话不访问生产，未独立核对。
+- Production 部署 dpl_GmPUbVMVfe3dBYTxroPNE8Tc96py：提交 674e982，2026-11-14 23:02:02 +08:00 READY，Lord 报告构建日志显示 drizzle-kit migrate 迁移成功。用户 2026-11-14 21:11 群内确认（授权线上数据库迁移并正式部署，在双语 CHANGELOG PR 合入后执行），Lord 记录。部署信息来源为 Lord 2026-11-14 23:05 群内报告；回填会话不访问生产，未独立核对。
 
 ## 状态事件
 
