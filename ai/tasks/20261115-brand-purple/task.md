@@ -7,7 +7,7 @@ mode_note: Lord 2026-11-15 按用户 2026-11-14 23:26 群内确认（选甲）�
 status: "done"
 branch: fix/brand-purple
 created_at: '2026-11-15T00:51:54+08:00'
-updated_at: "2026-11-15T02:01:14+08:00"
+updated_at: "2026-11-15T02:06:26+08:00"
 completed_at: "2026-11-15T01:03:49+08:00"
 ---
 # 品牌紫色统一（页头图标、应用图标、主题变量、对外品牌色）
@@ -68,7 +68,7 @@ TDD：本任务为字面色值替换，无逻辑缝可红绿；对比度以脚�
 - 顶部进度条（layout.tsx NextTopLoader）：#0073FF → #7C3AED。
 - 应用图标 PNG（四张）：原蓝色版（git show 9355a5e 取出）均为蓝底 #2F6FDB 满幅方块（四角不透明、无圆角留白）。
   - web/public/brand/tokens-app-icon-180.png（180×180）、web/public/brand/tokens-app-icon-1024.png（1024×1024）：改为铺满 #7C3AED 紫色方块，四角不透明，版式同原蓝色版。做法：用仓库既有依赖 sharp 读 git show 9355a5e 取出的原蓝色版，逐像素求其在 #2F6FDB→白 线段上的投影比例 t，按同比例取 #7C3AED→白 插值色——蓝色背景（含抗锯齿过渡）映射为紫色，白色字形（t=1）保持不变；输出原尺寸 RGBA PNG，alpha 全 255；一次性脚本未留在仓库。实测：尺寸不变（180×180／1024×1024）；四角像素均为不透明 #7C3AED，alpha 最小值 255；中心字形白 #FFFFFF。与原蓝色版逐像素比较：两边各按背景→白投影比例 t 分类（t≥0.5 为字形、否则为背景），字形掩膜逐像素零差异（180：字形 4117 像素两边一致；1024：134538 像素两边一致），字形外接框一致（180：[32,38]–[147,144]；1024：[184,216]–[839,823]），max|Δt| 为输出整数量化误差内（0.0026／0.0029），即非背景区域位置一致。
-  - web/public/android-chrome-192x192.png（192×192）、web/public/android-chrome-512x512.png（512×512）：仍按 favicon 重导，不变——由 web/public/brand/tokens-favicon.svg 按各自原像素尺寸重新栅格化的紫底（#7C3AED）白 T，RGBA PNG、尺寸不变；做法沿用提交 79e8f13 生成 favicon PNG 的方式：由 tokens-favicon.svg 直接栅格化导出（79e8f13 提交说明 favicon.ico 与 favicon-16/32.png 均由该 SVG 重新生成，安装/PWA 图标当时未动）；一次性 bun 脚本调用仓库既有依赖 sharp 完成导出，脚本未留在仓库。导出后实测：尺寸与导出前一致，图标主体像素 #7C3AED、中心白 T #FFFFFF。
+  - web/public/android-chrome-192x192.png（192×192）、web/public/android-chrome-512x512.png（512×512）：仍按 favicon 重导，不变——由 web/public/brand/tokens-favicon.svg 按各自原像素尺寸重新栅格化的紫底（#7C3AED）白 T，RGBA PNG、尺寸不变、圆角外四角透明；做法沿用提交 79e8f13 生成 favicon PNG 的方式：由 tokens-favicon.svg 直接栅格化导出（79e8f13 提交说明 favicon.ico 与 favicon-16/32.png 均由该 SVG 重新生成，安装/PWA 图标当时未动）；一次性 bun 脚本调用仓库既有依赖 sharp 完成导出，脚本未留在仓库。导出后实测：尺寸与导出前一致，图标主体像素 #7C3AED、中心白 T #FFFFFF。
 
 中性色说明：--foreground、--muted-foreground、--border、--input、--secondary 等 hue 264、chroma 不超过 0.0122 的变量为中性灰（chroma 过低不呈蓝色），保持不变。
 
@@ -115,10 +115,11 @@ TDD：本任务为字面色值替换，无逻辑缝可红绿；对比度以脚�
 | 主 agent（r4） | k3:max | 环境变量 KIMI_API_KEY | 回复 22／工具调用 45／工具报错 1（2026-11-15 01:20:53–01:34:15 +08:00） |
 | 主 agent（r5） | k3:max | 环境变量 KIMI_API_KEY | 回复 10／工具调用 18／工具报错 0（2026-11-15 01:36:10–01:44:05 +08:00） |
 | 主 agent（r6） | k3:max | 环境变量 KIMI_API_KEY | 回复 9／工具调用 18／工具报错 1（2026-11-15 01:45:11–01:57:26 +08:00） |
+| 主 agent（r7） | k3:max | 环境变量 KIMI_API_KEY | 回复 7／工具调用 9／工具报错 0（2026-11-15 01:58:52–02:01:46 +08:00） |
 
 工具报错 6 条明细（均为工具结果标记为报错，时间 +08:00）：2026-11-15 00:40:00 bash、00:50:34 bash、00:57:54 bash、00:58:48 write、01:02:32 bash、01:03:14 bash。
 
-注：本轮（r7）计数只写在 PR 正文。
+注：本轮（r8）计数只写在 PR 正文。
 
 ## 门禁结论
 
@@ -205,4 +206,4 @@ Lean already. Ship.——diff 逐文件过一遍：全部为字面色值一对�
 | 2026-11-15T00:51:56.654224+08:00 | planned | in-progress | 开工：范围、验收、Book Gate Plan 与色值推导已写入，调查完成，Refactoring Review 结论 proceed | task.md 已确认范围与授权节、色值推导节、进度节调查结论、门禁结论节 Refactoring Review；分支 fix/brand-purple，工作区开工前干净，HEAD 与 main(9355a5e) 一致 |
 | 2026-11-15T01:03:44.517944+08:00 | in-progress | checking | 实现与验证完成：七个生产文件改色、全站色相复扫零残留品牌蓝、tsc/lint/bun test/build 全绿、亮暗两主题冒烟截图确认、ponytail-review 与可读性复核通过、Release Readiness Review 结论 ready | task.md 进度节 00:51:56–01:00:43 条目与证据节第一轮块；tsc 00:56:12 exit 0、lint 00:56:38 与基线同条、bun test 00:56:45 167 pass/0 fail、build 00:57:08 exit 0；冒烟端口 3123 已关 |
 | 2026-11-15T01:03:49.598875+08:00 | checking | done | 验收条件 1-7 已核对：页标 fill #7C3AED 与 favicon 同色（1）；亮暗两套主题变量改紫且对比度 5.55:1/6.89:1 不低于 4.5:1（2）；按钮/链接/焦点框/标签页走主题变量、品牌蓝硬编码零残留（3）；保留清单与理由在位（4）；四条验证命令实跑全绿且 lint 对 main 基线新增 0（5）；禁用词与本机路径扫描零命中（6）；next 进程已关（7）；浏览器级全站 E2E 因本机无数据库环境记为未跑，不冒充已通过；不 commit、不 push、不开 PR | task.md 证据节全部实跑记录；门禁结论节 Refactoring/Release Readiness/ponytail-review/可读性复核；grep 禁用词与本机路径扫描零命中；git status 仅列本任务与七个生产文件 |
-| 2026-11-15T01:44:05+08:00 | done | done | r3–r5 修正：保留清单补行号与色值出处；OG 背景光晕 rgba(79,143,240,…) 改 rgba(124,58,237,…)；四张应用图标改紫（tokens-app-icon-180/1024 铺满紫色方块、android-chrome 192/512 按 favicon 重导）；记录修正（确认时间补到分钟、「达标」改「不低于 4.5:1」、insertions 按实测改 28、审查范围补 renderIsometric3DSvg.ts）；r4 后复验 tsc、lint（0 错 1 警告，同 main 基线）、bun test 167/0；web/src 与四张应用图标中品牌蓝零残留（保留清单所列除外） | 行号 rg -n 对当前工作树实测；色值出处对照存档 ai/tasks/archive/2026-Q3/t12-brand-purple/ 与提交 79e8f13；四张 PNG 经 sharp 脚本逐像素实测（尺寸不变、180/1024 四角不透明 #7C3AED、字形掩膜与原蓝色版逐像素一致）；web/src 全部 6 位 hex 色相复扫脚本命中均落保留清单；复验实跑 cd web && bunx tsc --noEmit、bun run lint、bun test（01:32:18–01:33:12：exit 0、0 errors/1 warning 同 main 基线、167 pass/0 fail）；git diff --stat 核对改动面 |
+| 2026-11-15T01:44:05+08:00 | done | done | r3–r5 修正：保留清单补行号与色值出处；OG 背景光晕 rgba(79,143,240,…) 改 rgba(124,58,237,…)；四张应用图标改紫（tokens-app-icon-180/1024 铺满紫色方块、android-chrome 192/512 按 favicon 重导）；记录修正（确认时间补到分钟、对比度措辞改为『不低于 4.5:1』、insertions 按实测改 28、审查范围补 renderIsometric3DSvg.ts）；r4 后复验 tsc、lint（0 错 1 警告，同 main 基线）、bun test 167/0；web/src 与四张应用图标中品牌蓝零残留（保留清单所列除外） | 行号 rg -n 对当前工作树实测；色值出处对照存档 ai/tasks/archive/2026-Q3/t12-brand-purple/ 与提交 79e8f13；四张 PNG 经 sharp 脚本逐像素实测（尺寸不变、180/1024 四角不透明 #7C3AED、字形掩膜与原蓝色版逐像素一致）；web/src 全部 6 位 hex 色相复扫脚本命中均落保留清单；复验实跑 cd web && bunx tsc --noEmit、bun run lint、bun test（01:32:18–01:33:12：exit 0、0 errors/1 warning 同 main 基线、167 pass/0 fail）；git diff --stat 核对改动面 |
