@@ -11,6 +11,26 @@ function timezoneFromBody(body: unknown): unknown {
 }
 
 /**
+ * The timezone column arrives with migration 0028; a database that has not
+ * run it yet makes every read/write fail with Postgres' 42703. That state is
+ * reported as an explicit 503 (run db:migrate) instead of a bare 500.
+ */
+function isMissingTimezoneColumnError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const { code, message } = error as { code?: unknown; message?: unknown };
+  if (code === "42703") return true;
+  return (
+    typeof message === "string" &&
+    /column .*timezone.* does not exist/i.test(message)
+  );
+}
+
+const MIGRATION_REQUIRED = {
+  error:
+    "Time zone setting is unavailable until migration 0028 is applied; run `bun run db:migrate` first",
+} as const;
+
+/**
  * GET   /api/settings/timezone  → { timezone: string | null }
  * PATCH /api/settings/timezone  { timezone: string | null } → { timezone: string | null }
  *
@@ -38,6 +58,9 @@ export async function GET(request: Request) {
       { headers: { "Cache-Control": PRIVATE_CACHE_CONTROL } }
     );
   } catch (error) {
+    if (isMissingTimezoneColumnError(error)) {
+      return NextResponse.json(MIGRATION_REQUIRED, { status: 503 });
+    }
     console.error("Timezone read error:", error);
     return NextResponse.json({ error: "Failed to load time zone setting" }, { status: 500 });
   }
@@ -67,6 +90,9 @@ export async function PATCH(request: Request) {
 
     return NextResponse.json({ timezone });
   } catch (error) {
+    if (isMissingTimezoneColumnError(error)) {
+      return NextResponse.json(MIGRATION_REQUIRED, { status: 503 });
+    }
     console.error("Timezone update error:", error);
     return NextResponse.json({ error: "Failed to update time zone setting" }, { status: 500 });
   }

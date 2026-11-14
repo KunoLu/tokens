@@ -21,6 +21,32 @@ describe("isValidIanaTimeZone", () => {
     expect(isValidIanaTimeZone("UTC+8")).toBe(false);
     expect(isValidIanaTimeZone("Asia")).toBe(false);
   });
+
+  // Only canonical names from Intl.supportedValuesOf("timeZone") plus "UTC"
+  // are accepted. The Intl constructor is more lenient than that: it takes
+  // offset forms, any casing, and alias (linked) names.
+  test("rejects offset forms the Intl constructor would accept", () => {
+    expect(isValidIanaTimeZone("GMT+8")).toBe(false);
+    expect(isValidIanaTimeZone("+08:00")).toBe(false);
+    expect(isValidIanaTimeZone("UTC+8")).toBe(false);
+  });
+
+  test("rejects non-canonical casing", () => {
+    expect(isValidIanaTimeZone("asia/shanghai")).toBe(false);
+    expect(isValidIanaTimeZone("AMERICA/NEW_YORK")).toBe(false);
+  });
+
+  test("rejects alias names in favor of their canonical targets", () => {
+    expect(isValidIanaTimeZone("Asia/Chungking")).toBe(false);
+    expect(isValidIanaTimeZone("Asia/Chongqing")).toBe(false);
+    expect(isValidIanaTimeZone("US/Eastern")).toBe(false);
+    expect(isValidIanaTimeZone("GMT")).toBe(false);
+  });
+
+  test("rejects empty and over-long strings", () => {
+    expect(isValidIanaTimeZone("")).toBe(false);
+    expect(isValidIanaTimeZone("A".repeat(200))).toBe(false);
+  });
 });
 
 describe("dateStringInTimeZone", () => {

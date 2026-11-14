@@ -9,14 +9,17 @@
  * effectively gets.
  */
 
-/** Spec-level check: V8/ICU accept only IANA names and "UTC". */
+/**
+ * Canonical acceptance list: exactly what Intl.supportedValuesOf("timeZone")
+ * reports, plus "UTC" (which a runtime may legitimately leave out of that
+ * list). The Intl constructor alone is too lenient — it also takes offset
+ * forms ("+08:00"), any casing, and alias names ("US/Eastern") — so the
+ * canonical set is checked instead of constructor success.
+ */
+const CANONICAL_TIME_ZONES = new Set(Intl.supportedValuesOf("timeZone"));
+
 export function isValidIanaTimeZone(value: string): boolean {
-  try {
-    new Intl.DateTimeFormat("en-US", { timeZone: value });
-    return true;
-  } catch {
-    return false;
-  }
+  return value === "UTC" || CANONICAL_TIME_ZONES.has(value);
 }
 
 /**

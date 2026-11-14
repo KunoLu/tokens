@@ -3,12 +3,12 @@ schema_version: 1
 id: 20261114-v2721-pr-d-timezone
 workflow_mode: strict
 mode_source: user
-mode_note: 用户 2026-11-14 01:50 在群内开启全自动模式直到 v1.0.5 按模板发布且文档补全；2026-11-14 08:01 用户就 issue #21 选定乙：时区存进账号设置（用户表加可为空的时区字段，为空表示自动检测），迁移随 PR D 一起审，生产环境执行迁移需用户另行批准，Lord 记录。本会话交付清单含 Book Gate Plan 与完整验证记录，按 strict 执行。
+mode_note: 用户 2026-11-14 01:50 在群内开启全自动模式直到 v1.0.5 按模板发布且文档补全；用户 2026-11-14 08:01 群内确认（乙：存账号设置，留空按浏览器自动检测），Lord 记录；迁移随 PR D 一起审，生产环境执行迁移需用户另行批准。本会话交付清单含 Book Gate Plan 与完整验证记录，按 strict 执行。
 status: "done"
 branch: fix/21-timezone-setting
 created_at: '2026-11-14T17:33:43.000000+08:00'
-updated_at: '2026-11-14T18:05:05.000000+08:00'
-completed_at: '2026-11-14T17:55:41.000000+08:00'
+updated_at: "2026-11-14T18:47:37.208102+08:00"
+completed_at: "2026-11-14T18:47:37.208102+08:00"
 ---
 # 修复 issue #21（PR D）— 个人页按看的人时区归日 + 账号设置时区选项
 
@@ -23,7 +23,7 @@ completed_at: '2026-11-14T17:55:41.000000+08:00'
 
 ## 已确认范围与授权
 
-- 用户 2026-11-14 01:50 在群内开启全自动模式直到 v1.0.5 按模板发布且文档补全；2026-11-14 08:01 用户就 issue #21 选定乙：时区存进账号设置（用户表加可为空的时区字段，为空表示自动检测），迁移随 PR D 一起审，生产环境执行迁移需用户另行批准，Lord 记录。
+- 用户 2026-11-14 01:50 在群内开启全自动模式直到 v1.0.5 按模板发布且文档补全；用户 2026-11-14 08:01 群内确认（乙：存账号设置，留空按浏览器自动检测），Lord 记录；迁移随 PR D 一起审，生产环境执行迁移需用户另行批准。
 - 本会话按 strict 执行。不 commit、不 push、不开 PR，只改工作区文件。
 - 起点：`main` 8715c0e6f0464801f1ebc1a3144e8028ff06c9d3（已含 PR A #20、PR B #22、PR C #23）；分支 `fix/21-timezone-setting`，开工前 `git status` 实测干净。
 - 迁移文件只生成并放进仓库，不对任何真实数据库（生产、预览）执行；本机无 DATABASE_URL、无本地 postgres 实例，本仓验证不实跑迁移；不改 vercel.json、不碰部署。
@@ -83,7 +83,21 @@ TDD seam 清单（沿用本仓既有测试位置与 mock 惯例，均为公开�
   8. 验证实跑（数字见证据节）：tsc exit 0；bun test 150 pass；lint 0 errors/1 warning，与 base 8715c0e 临时 worktree 实测相同（新增 0，对比后已移除）；build exit 0；冒烟（next start，端口 3121）：未登录 GET 设置接口 401、非法 tz 400、docs 三语 time-zone 小节均在；冒烟后 next 进程已关闭。
   9. ponytail-review：diff 逐文件过一遍——五个纯函数全部被引用、无新依赖、无投机抽象，期间修掉一处真实简化（空贡献列表跳过重取的守卫会在 week 视图留下误空窗，删守卫；随后补一次性重取闸防时钟偏斜循环）。结论：Lean already. Ship.
   10. 可读性复核：手写改动（timezone.ts、路由、TimezoneSection、ProfilePageClient 三个 effect、两处 range 函数）逐段复读，注释说明归日规则与防循环闸；vendor/generated（迁移快照）未动。
+- 2026-11-14 18:44:00 +08:00 主 agent：第一轮 TDD 各组红绿时间明细（补记，按会话记录还原；会话时间为 UTC，已加 8 小时换算；以下为命令发出时刻，结果在随后一秒内返回）：
+  1. 切片一 `timezone.test.ts`：红 17:37:56（0 pass / 1 fail / 1 error，被测模块不存在）→ 绿 17:38:16（12 pass）。
+  2. 切片二 `publicProfileData.test.ts`：用例写入 17:40:24；17:40:36 的首次运行因 web/node_modules 缺失报包找不到（记为环境故障，不算有效红）→ 依赖恢复（bun install 658 包，17:40:51）→ 有效红 17:40:57（5 fail：range 函数未导出、tz 参数被忽略、非法 tz 得 200；3 条保护性断言先绿）→ 实现编辑 17:41:12–17:41:49 → 绿 17:41:55（与切片一合计 20 pass）。
+  3. 切片三 `api/settings/timezone/route.test.ts`：红 17:43:12（0 pass / 1 fail / 1 error，路由不存在）→ 绿 17:43:40（6 pass）。
+  4. 迁移文件生成 17:44:12；收尾验证：tsc 17:49:51 exit 0、bun test 17:50:15 全量 150 pass、lint 17:50:38（0 errors/1 warning）、base 对照 lint 17:51:19 同警告、build 17:52:12 exit 0、冒烟 17:52:32 通过、next 进程 17:52:48 关闭、合并复跑 17:54:55 全绿。
 - 2026-11-14 18:05:05 +08:00 主 agent：第二轮（文档补充，仅改本文件）。第一轮已提交为 f0778bad0a2b61b87a1a9d538cc11d59d38267ac 并开启 PR #24；Reviewy 复核后要求写清迁移执行时机。本轮按 web/vercel.json 原文核对后落地：授权节新增迁移执行时机条目、取舍说明 8 补充前提与预览验收限制、DDIA 评审 Schema/migration 行与 Release Readiness 评审 Rollout 行补部署次序与预览限制，四处口径一致；模型表补第一轮一行（回复 118、工具调用 150、工具报错 5，2026-11-14 17:20:02–18:00:15 +08:00，逐条核对会话记录原始计数），注脚口径改为按轮取最终计数；frontmatter updated_at 同步。不提交、不推送；状态无迁移，状态事件表不新增行。
+- 2026-11-14 18:10:44–18:47:37 +08:00 主 agent：第三轮（Reviewy 18:10 审出 3 条阻塞，一次改完，测试先行；另含三条可选项）。事实与步骤：
+  1. 18:25:43 任务重开（done→planned，保留旧完成事件）、18:25:47 进入 in-progress；Legacy/Refactoring 两门禁按本轮范围复核：characterized / proceed（结论见门禁结论节）。
+  2. 阻塞①时区校验收紧：先红 18:28:37（timezone.test.ts 新增 4 条用例，3 fail——"+08:00"、非规范大小写、别名 Asia/Chungking/US/Eastern 被构造器校验放行；"GMT+8"、"UTC+8"、空串、超长串此前已被拒）→ `isValidIanaTimeZone` 改为查 `Intl.supportedValuesOf('timeZone')` 规范名集合加显式 "UTC" → 转绿 18:29:55。PATCH 与 `?tz` 本就共用这一个函数，收紧后两处同时生效。
+  3. 阻塞②getSession：先红 18:28:44（session.test.ts 新建，4 fail——timezone 来自整行 select 而非单独查询、缺列/出错/无行未降级 null）→ 主查询收窄为只取消费列（id/username/displayName/avatarUrl/bannedAt，与 main 8715c0e 实际消费的列一致），timezone 单独查询、失败降级 null → 转绿。设置接口 PATCH/GET 缺列时返回 503 明确错误（指明先跑 db:migrate）而非笼统 500：先红 18:28:49（route.test.ts 2 fail，得 500）→ 转绿。三文件合计转绿 18:29:55（30 pass）。
+  4. 可选项一（授权记录统一）：mode_note 与授权节的乙方案记录统一为「用户 2026-11-14 08:01 群内确认（乙：存账号设置，留空按浏览器自动检测），Lord 记录」，迁移批准事实保留为独立分句。
+  5. 可选项二（组件层测试）：新增 `ProfilePageClient.test.tsx`——看别人页面时按看的人时区归日：设置优先（Asia/Shanghai 设置胜过 America/New_York 检测，today 落 2026-11-14 并带 tz 重取一次）、否则浏览器检测（落 2026-11-13 且不重取）。固定时钟 2026-11-13T16:30Z（issue 复现窗口）；归日辅助函数用生产实现，仅壳组件打桩；新增 devDep `@happy-dom/global-registrator` 提供 DOM。18:35:44 两例通过（既有行为钉扎，无红阶段）。
+  6. 可选项三（自部署文档）：`docs/deploy/self-host-production.md` 与 `.en.md`（该文档仅中英双语）上线步骤第 2 条后各加一句：升级到含 0028 的版本前先手动跑 db:migrate，未迁移时设置接口时区读写返回 503。
+  7. 依赖卫生：`bun add` 夹带的无关改动已还原——package.json 空行格式恢复（只新增一行 devDep）、bun.lock 中 tokens-cli 1.0.2→1.0.4 的无关升级回退（只留 happy-dom 及其 7 个传递依赖条目）；`bun install --frozen-lockfile` 实测 no changes，全量复跑 164 pass。
+  8. 验证实跑（数字见证据节）：tsc 18:36:58 exit 0；lint 18:37:18（0 errors/1 warning，与 base 8715c0e 第一轮实测基线同一条 docs/page.tsx no-img-element 警告，新增 0）；bun test 18:37:26（164 pass/0 fail/20 文件，较第二轮 150 净增 14）；build 18:37:51 exit 0。ponytail-review 第三轮：Lean already. Ship.（唯一发现是 bun add 夹带，已当场还原）；可读性复核通过。
 
 ## 取舍说明
 
@@ -92,9 +106,9 @@ TDD seam 清单（沿用本仓既有测试位置与 mock 惯例，均为公开�
 3. **UTC 用户零变化**：看的人时区的今日与服务器响应的 `chartRange.end` 一致时客户端不发重取请求；UTC 看的人两值恒等，渲染路径与现状逐帧一致。
 4. **徽章与 embed SVG 不动**：它们是服务器渲染的静态图片，没有看的人浏览器可言，issue 三条改动与四条验收均未涉及。
 5. **榜单「today」期间不动**：同属服务器 UTC 口径，但 issue 范围是个人页图表与今天/昨天卡片；改榜单属于另一处行为变更，留待单独提出。
-6. **timezone 用 text 列、应用层校验**：IANA 时区库随系统更新，数据库枚举会把合法值挡在库外；校验集中在 `isValidIanaTimeZone`（`Intl.DateTimeFormat` 构造试抛 RangeError），服务端写入与客户端选项同源。
+6. **timezone 用 text 列、应用层校验**：IANA 时区库随系统更新，数据库枚举会把合法值挡在库外；校验集中在 `isValidIanaTimeZone`（第三轮起收紧为 `Intl.supportedValuesOf('timeZone')` 规范名集合加显式 "UTC"，offset 形式、非规范大小写与别名一律拒绝），服务端写入与个人页 `tz` 参数同源。
 7. **会话响应携带 timezone 而非新拉取**：个人页本就在挂载后请求 `/api/auth/session`（设备列表用），在其中带上看的人 timezone 避免第二次往返；未登录时 `user` 为 null，自然落到浏览器检测值。
-8. **迁移只进仓库不执行**：本机无数据库实例，授权边界亦如此；迁移正确性由 drizzle-kit 生成器、meta 快照与代码评审承担，生产执行需用户另行批准。这个取舍成立的前提是部署管道本身控住时机：合入不触发自动部署，预览构建不跑迁移，生产构建内迁移先于新 web 代码生效，所以「先生成的迁移文件」不会在未获批准时落到任何数据库。代价是预览环境不能用于本 PR 的登录相关验收——预览库没有 timezone 新列时，读用户整行的会话查询会因缺列报错。
+8. **迁移只进仓库不执行**：本机无数据库实例，授权边界亦如此；迁移正确性由 drizzle-kit 生成器、meta 快照与代码评审承担，生产执行需用户另行批准。这个取舍成立的前提是部署管道本身控住时机：合入不触发自动部署，预览构建不跑迁移，生产构建内迁移先于新 web 代码生效，所以「先生成的迁移文件」不会在未获批准时落到任何数据库。代价是预览环境不能用于本 PR 时区设置的验收——预览库没有 timezone 新列时，设置接口读写返回 503（第三轮起会话查询已改为缺列降级 null，登录本身不受影响）。
 
 ## 模型与调用
 
@@ -103,8 +117,9 @@ TDD seam 清单（沿用本仓既有测试位置与 mock 惯例，均为公开�
 | 角色 | 模型 | 密钥来源 | 调用次数 |
 |---|---|---|---|
 | 第一轮主 agent | k3:max（kimi-code/k3） | 环境变量 KIMI_API_KEY | 回复 118、工具调用 150、工具报错 5（2026-11-14 17:20:02–18:00:15 +08:00） |
+| 第二轮主 agent | k3:max（kimi-code/k3） | 环境变量 KIMI_API_KEY | 回复 16、工具调用 17、工具报错 0（2026-11-14 18:01:52–18:07:00 +08:00） |
 
-统计口径：工具报错 = 会话文件中标记为报错的工具结果条数（含命令非零退出）。每轮一行取该轮会话文件的最终计数；本轮（第二轮）计数要等本轮结束才有，不写进表。
+统计口径：工具报错 = 会话文件中标记为报错的工具结果条数（含命令非零退出）。每轮一行取该轮会话文件的最终计数；本轮（第三轮）计数要等本轮结束才有，不写进表。第二轮起止按该轮会话文件首条用户消息与末条消息核对。
 
 未启动子代理；密钥不写入本文件与任何产物。
 
@@ -120,6 +135,7 @@ TDD seam 清单（沿用本仓既有测试位置与 mock 惯例，均为公开�
 - Schema / migration / backfill / rollback / replay：`0028_add_user_timezone.sql` 为 `ALTER TABLE users ADD COLUMN timezone text`，可空无默认，存量行天然为 null（自动检测），无需 backfill；回滚即删列，无数据转换；迁移不在本仓验证环境执行，生产执行需用户另行批准。执行时机由部署构建控住：仅 production 构建内先迁移后构建，预览构建不迁移，合入 PR 本身不动线上数据库（vercel.json 原文核对结论见授权节与 Release Readiness 评审）。
 - Observability and repair：无派生数据，无修复路径；非法值在写入侧已被 400 挡住。
 - Required tests：路由测试覆盖 401/400/写入/清空/读取；`isValidIanaTimeZone` 边界用例。
+- 第三轮修订（2026-11-14）：读路径与失败模式收紧——getSession 主查询只取消费列（id/username/displayName/avatarUrl/bannedAt），timezone 由一条单独查询读取；列不存在（未跑 0028）、查询出错、查无行三种情况一律降级 null（自动检测），登录不报错（session.test.ts 四条用例钉住）。设置接口 GET/PATCH 在列不存在时返回 503 并指明先跑 db:migrate（Postgres 42703 或缺列报文匹配），其余写失败仍为 500、不产生半更新。校验收紧只改应用层接受集，Schema/迁移不变。Status 维持 confirmed。
 
 ### Legacy Change Safety Review
 
@@ -131,6 +147,7 @@ TDD seam 清单（沿用本仓既有测试位置与 mock 惯例，均为公开�
 - Hidden dependencies / seam：`loadPublicProfileForPage` 的 `unstable_cache` 不传 `tz`，缓存键不变、共享缓存仍全看的人通用；`getViewerAccess` 读会话判 owner 的路径不受影响；无新 seam。
 - Validation plan：先红后绿，再跑项目四条 web 验证（结果见证据节）。
 - Review mode: normal
+- 第三轮复核（2026-11-14）：Status: characterized（normal）。Behavior to change：`isValidIanaTimeZone` 接受集收窄为规范名集合＋UTC（offset 形式 "+08:00"/"GMT+8"、非规范大小写、别名 Asia/Chungking/US/Eastern 由通过转 400，PATCH 与 `?tz` 同源生效）；getSession 不再整行查 users（主查询收窄至消费列），timezone 单独查询、缺列/出错/无行降级 null；设置接口缺列时由笼统 500 转为 503 明确错误。Behavior to preserve：规范名与 UTC 照旧通过、UTC 用户不变、SessionUser 既有字段与封禁判断不变、submit token 路径不变、设置接口 401/400/成功响应不变。Current reproduction evidence：bun 实测构造器校验对 "+08:00"/"asia/shanghai"/Asia/Chungking/US/Eastern 返回 true；diff 8715c0e..HEAD 显示整行 select 经 schema 卷入 timezone 列；第二轮已记录未迁移库会话查询必崩模式。Safety net：既有 150 条＋本轮新增 14 条（校验 4、session 6、路由缺列 2、组件层 2），全量 164 pass。Validation plan：先红后绿（红 18:28:37/18:28:44/18:28:49 → 绿 18:29:55）＋四条 web 命令全绿（证据节）。
 
 ### Refactoring Review
 
@@ -142,21 +159,24 @@ TDD seam 清单（沿用本仓既有测试位置与 mock 惯例，均为公开�
 - Decision and smallest safe step：no refactor needed；不夹带清理。
 - Safety net and validation：同 Legacy 节。
 - Deferred refactors：无。
+- 第三轮复核（2026-11-14）：Status: proceed（normal）。范围：`timezone.ts`（校验实现替换）、`session.ts`（select 形状收窄＋一条兜底查询）、设置路由（缺列判定函数＋两个 catch 分支）、三个测试文件与一个组件测试文件。no refactor needed；无延期项。
 
 ### Release Readiness Review
 
 - Status: blocked
 - Production path and affected users / systems：`/api/users/[username]`（公共读，新增 tz 参数）、`/api/settings/timezone`（新，仅浏览器会话写）、`/api/auth/session`（响应多一个字段）、users 表新列（迁移未执行）、u 页挂载后可能多发一次带 tz 的重取。
-- Failure modes and safeguards：非法 tz → 400（写设置）/400（读个人页），不静默落回 UTC；重取失败保留 ISR 首屏数据；看的人时钟偏斜由一次性重取闸挡住循环；访客无会话落到浏览器检测值；`PRIVATE_CACHE_CONTROL` 挡住设置接口响应进共享缓存。
+- Failure modes and safeguards：非法 tz → 400（写设置）/400（读个人页），不静默落回 UTC；重取失败保留 ISR 首屏数据；看的人时钟偏斜由一次性重取闸挡住循环；访客无会话落到浏览器检测值；`PRIVATE_CACHE_CONTROL` 挡住设置接口响应进共享缓存；未迁移库上 getSession 的 timezone 读取降级 null（console.warn 留痕），设置接口读写返回 503 明确错误。
 - Capacity / backpressure / limits：非 UTC 看的人在跨日期窗口每个个人页最多多发一次 API 请求；u 页 ISR 缓存键不变，无缓存分裂；设置接口单行单字段更新。
 - Observability / alerts / runbook：设置读写失败走既有 console.error 通道；无新指标。
-- Rollout / migration / rollback / cleanup：**部署次序是硬前提——`getSession` 走整行 users 查询，web 上线前必须先执行 0028 迁移，否则所有会话查询因缺列报错；迁移本身是纯加列，旧代码对新列无感，回滚 web 即可。** 迁移执行需用户另行批准，不在本会话授权内。时机与次序按 web/vercel.json 原文核对：buildCommand 为「`if [ "$VERCEL_ENV" = "production" ]; then ... bun run db:migrate; fi && bun run build`」，即仅正式环境构建才先跑迁移再编译，同一次构建内迁移先于新 web 代码生效；`git.deploymentEnabled.main` 为 false，main 分支不自动部署，合入本 PR 本身不动线上数据库；真正执行迁移的是之后那次手动正式部署。预览部署不跑迁移，预览库缺 timezone 列时整行会话查询报错，预览环境的登录相关功能不能作为验收依据。
-- Required validation and result：tsc、lint（对 base 无新增）、bun test 150、build 全绿；未登录 401、非法 tz 400、docs 三语小节冒烟通过；结果见证据节。
+- Rollout / migration / rollback / cleanup：**第三轮起部署次序由登录硬前提放宽为特性前提——getSession 不再整行查 users：主查询只取消费列，timezone 单独查询且失败（含缺列）降级 null，未跑 0028 的库上登录与会话解析不再报错；未迁移时只是设置接口的时区读写返回 503（明确提示先跑 db:migrate），时区特性本身不可用。** 自部署文档（docs/deploy/self-host-production 中英双语）上线步骤已注明：升级到含 0028_add_user_timezone 的版本前先手动跑 db:migrate。迁移本身是纯加列，旧代码对新列无感，回滚 web 即可。迁移执行需用户另行批准，不在本会话授权内。时机与次序按 web/vercel.json 原文核对：buildCommand 为「`if [ "$VERCEL_ENV" = "production" ]; then ... bun run db:migrate; fi && bun run build`」，即仅正式环境构建才先跑迁移再编译，同一次构建内迁移先于新 web 代码生效；`git.deploymentEnabled.main` 为 false，main 分支不自动部署，合入本 PR 本身不动线上数据库；真正执行迁移的是之后那次手动正式部署。预览部署不跑迁移，预览库缺 timezone 列时设置接口返回 503，预览环境的时区设置功能不能作为验收依据（登录不受影响）。
+- Required validation and result：第一轮 tsc、lint（对 base 无新增）、bun test 150、build 全绿，未登录 401、非法 tz 400、docs 三语小节冒烟通过；第三轮 tsc、lint（对 base 无新增）、bun test 164、build 全绿，别名/offset tz 400 与规范名放行冒烟通过；结果见证据节。
 - Optional checks, accountable owner acceptance, and residual risk：带真实数据库的浏览器级 E2E（UTC+8 00:30 实景）本机无 postgres 服务与 docker，无法运行，由路由级测试与区间函数固定时刻测试覆盖归日逻辑；CI、合并、部署与生产迁移执行不在本会话授权内。
 
 ### ponytail-review 结论
 
 Lean already. Ship. 五个纯函数全部被引用、无新依赖、无投机抽象；过程中删掉一处会导致 week 视图误空窗的守卫（见进度节第 9 条）。
+
+第三轮（2026-11-14）：Lean already. Ship. 校验函数由构造器试抛改为集合查找（更短）；session 拆分查询为评审要求的必需兜底；唯一发现是 `bun add` 夹带的无关改动（package.json 空行格式、tokens-cli 1.0.2→1.0.4），已当场还原，锁文件净增仅 happy-dom 及其传递依赖（组件测试必需的 DOM 环境，devDep）。
 
 ## 证据
 
@@ -171,6 +191,23 @@ Lean already. Ship. 五个纯函数全部被引用、无新依赖、无投机抽
 - 未跑且原因：带真实数据库的浏览器级 E2E——本机无 postgres 服务（仅客户端）、无 docker，无法起库；归日逻辑改由路由级 mock 测试与固定时刻纯函数测试覆盖。Rust CLI 未改动，cargo test/clippy 不跑。迁移文件只生成未执行（无本机库，生产执行需用户另行批准）。`test:migrations`（需 DATABASE_URL）同理未跑。
 - 冒烟与验证结束后：无本会话遗留 next 进程；lint 对比用临时 worktree 已移除。
 
+第三轮（2026-11-14 18:25–18:47，分支 fix/21-timezone-setting 工作区，基于 HEAD ba9c8d9 的未提交改动）：
+
+- 红：`bun test src/lib/timezone.test.ts` 18:28:37——3 fail/13 pass（"+08:00"、非规范大小写、别名 Asia/Chungking/US/Eastern 被构造器校验放行；"GMT+8"、"UTC+8"、空串、超长串此前已被拒）；`bun test src/lib/auth/session.test.ts` 18:28:44——4 fail/2 pass（timezone 未走单独查询，缺列/出错/无行未降级 null）；`bun test src/app/api/settings/timezone/route.test.ts` 18:28:49——2 fail/6 pass（缺列得笼统 500 而非 503 明确错误）。
+- 绿：18:29:55，三文件合计 30 pass/0 fail。
+- 组件层测试：`bun test src/app/u/[username]/ProfilePageClient.test.tsx` 18:35:44——2 pass（看别人页面：设置优先于检测、无设置落检测值且不重取；既有行为钉扎，无红阶段）。
+- `cd web && bunx tsc --noEmit`：18:36:58 exit 0，无输出。
+- `cd web && bun run lint`：18:37:18 exit 0，0 errors/1 warning（docs/page.tsx 354 行 no-img-element）。base 对比：main 未移动（仍为 8715c0e），沿用第一轮临时 worktree 实测基线 0 errors/1 warning（同文件同规则，base 340 行；行号差为本 PR 新增 docs 小节所致）。新增 errors/warnings：0。
+- `cd web && bun test`：18:37:26——164 pass/0 fail/5563 expect()/20 文件（第二轮 150 pass/18 文件；净增 14：校验收紧 4、session 6、路由缺列 2、组件层 2）。
+- `cd web && bun run build`：18:37:51 exit 0。
+- 冒烟（next start 端口 3122，18:43:59 已关闭并删日志）：`?tz=Asia/Chungking` → 400、`?tz=%2B08:00` → 400（收紧生效）；`?tz=Asia/Shanghai`、`?tz=UTC` → 500（通过校验后死于无 DATABASE_URL 的查询，证明规范名仍被接受）；`GET /api/settings/timezone` 未登录 → 401。
+- 依赖卫生：`bun install --frozen-lockfile` 实测 no changes（锁文件相对 HEAD 净增仅 happy-dom 及其 7 个传递依赖条目；tokens-cli 无关升级已回退）。
+- rtk：not-needed——四条命令均为终端事实型输出，第一、二轮证据均为 native，保持同口径可比。
+- BDD：skipped——无 .feature 变更，行为变化由上述测试钉住（本仓 no-.feature 例外）。Cross-repo context：not-needed。API Contract：not-needed（项目无独立 API 规格文件，路由行为由测试钉住）。Mock Strategy：contract-backed（mock 形状来自真实 drizzle 查询结果与 Postgres 42703 错误码）。
+- E2E Mode：mock-backed（路由/会话/组件测试）＋ smoke-only（curl 冒烟）。Final Test Report：not-needed（bun test 无持久报告配置，结果即本记录）；Run Summary MD：not-needed；Targeted Rerun：passed；Final Full Rerun：passed（164 pass）。Evidence Source：developer-local；Source Revision：dirty（任务授权不提交）；Environment Alignment：not-needed；Evidence Publication：local-only。
+- Playwright CLI：blocked（本机无 postgres/docker，同第一轮）；Chrome DevTools MCP：not-needed（curl 冒烟已覆盖本轮服务端行为面，登录态页面需真实库）。
+- 未跑且原因：同第一轮——真实库浏览器级 E2E 与 `test:migrations` 需 DATABASE_URL/本地 postgres，本机皆无；迁移未执行（生产执行需用户另行批准）；Rust CLI 未改动，cargo 未跑。冒烟与验证结束后无本会话遗留 next 进程。
+
 ## 状态事件
 
 | at | from | to | reason | evidence |
@@ -178,3 +215,7 @@ Lean already. Ship. 五个纯函数全部被引用、无新依赖、无投机抽
 | 2026-11-14T17:33:43.000000+08:00 | planned | in-progress | 开工：范围、验收与 Book Gate Plan 已确认，调查完成，DDIA/Legacy/Refactoring 三门禁结论已出 | task.md 已确认范围与授权节、进度节调查结论、门禁结论节；分支 fix/21-timezone-setting，工作区开工前干净，与 main(8715c0e) 一致 |
 | 2026-11-14T17:55:41.000000+08:00 | in-progress | checking | 实现与验证完成：TDD 三切片先红后绿、迁移文件生成、设置页与 docs 三语落地、四条 web 验证命令全绿、冒烟通过、ponytail-review 与可读性复核完成 | task.md 进度节 17:33:43–17:55:41 各条、证据节 |
 | 2026-11-14T17:55:41.000000+08:00 | checking | done | 验收条件 1-9 已核对：归日与设置读写由路由级与纯函数测试钉住（1-4），三语齐备且覆盖测试通过（5），红绿时间记入进度（6），tsc/lint/bun test/build 实跑通过且 lint 对 base 无新增（7），模型表计数口径注脚在位（8），next 进程已关（9）；浏览器级实景验证因本机无数据库环境记为未跑，不冒充已通过；release-readiness 记 blocked，迁移执行与部署需用户另行批准；不 commit、不 push、不开 PR | 证据节全部实跑记录；门禁结论节五项评审；grep 禁用词与本机路径扫描零命中 |
+| 2026-11-14T18:25:43.854022+08:00 | done | planned | Reviewy 第三轮复核（PR #24，head ba9c8d9）提出 3 条阻塞：时区校验未收查到规范名、getSession 整行查询在未迁移库上必崩、task.md 进度时间与模型表未按会话记录对齐；重开任务一次改完 | 工作区 fix/21-timezone-setting HEAD ba9c8d9049e291562b90fa24b57f4d37a7847994；第三轮 Reviewy 结论 2026-11-14 18:10 到达；会话记录三轮齐全 |
+| 2026-11-14T18:25:47.647829+08:00 | planned | in-progress | 进入第三轮实现：Legacy/Refactoring 两门禁已就本轮范围复核（characterized / proceed），按 TDD 先红后绿改三条阻塞 | task.md 门禁结论节第三轮复核记录；分支 fix/21-timezone-setting 工作区干净 |
+| 2026-11-14T18:47:33.351779+08:00 | in-progress | checking | 第三轮三条阻塞与三条可选项均已实现并验证：TDD 红绿齐全、组件层测试与自部署文档落地、授权措辞统一、进度节与模型表按会话记录对齐、四条 web 验证命令全绿、冒烟通过 | task.md 进度节第三轮条目与证据节第三轮块；红 18:28:37/18:28:44/18:28:49，绿 18:29:55；tsc 18:36:58、lint 18:37:18（0e/1w 与 base 同条）、bun test 18:37:26（164 pass）、build 18:37:51；冒烟端口 3122 已关 |
+| 2026-11-14T18:47:37.208102+08:00 | checking | done | 第三轮验收核对：①校验只认规范名集合与 UTC 且两接口同源、拒绝/通过用例齐全；②getSession 主查询收窄回消费列、timezone 单独查询缺列/出错/无行降级 null，设置接口缺列 503 明确错误，均有测试；③进度节每条真实时间、第一轮红绿补记按会话记录还原、模型表第二轮一行与第三轮注脚在位；三条可选项完成；禁用词与本机路径扫描零命中；不提交、不推送；release-readiness 维持 blocked（迁移执行与部署需用户另行批准） | task.md 证据节第三轮块与门禁结论节第三轮修订；grep 禁用词/路径/密钥扫描零命中；git status 仅列本轮改动文件，无提交 |

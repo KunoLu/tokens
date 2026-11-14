@@ -36,8 +36,16 @@ export async function getSession(): Promise<SessionUser | null> {
 
   const result = await db
     .select({
-      session: sessions,
-      user: users,
+      // Only the columns this function consumes. A whole-row select would
+      // silently pick up every new schema column — including timezone, which
+      // does not exist on a database that has not run migration 0028 yet.
+      user: {
+        id: users.id,
+        username: users.username,
+        displayName: users.displayName,
+        avatarUrl: users.avatarUrl,
+        bannedAt: users.bannedAt,
+      },
     })
     .from(sessions)
     .innerJoin(users, eq(sessions.userId, users.id))
@@ -58,12 +66,27 @@ export async function getSession(): Promise<SessionUser | null> {
     return null;
   }
 
+  // Read the day-assignment override separately so its failure modes —
+  // column missing (migration 0028 not run), connection error, row gone —
+  // degrade to auto-detect instead of breaking every sign-in.
+  let timezone: string | null = null;
+  try {
+    const [row] = await db
+      .select({ timezone: users.timezone })
+      .from(users)
+      .where(eq(users.id, user.id))
+      .limit(1);
+    timezone = row?.timezone ?? null;
+  } catch (error) {
+    console.warn("Session time zone read failed; falling back to auto-detect:", error);
+  }
+
   return {
     id: user.id,
     username: user.username,
     displayName: user.displayName,
     avatarUrl: user.avatarUrl,
-    timezone: user.timezone,
+    timezone,
   };
 }
 

@@ -69,6 +69,8 @@ TOKENS_API_URL=https://your-domain tokens submit
 
 1. Install Postgres 16 on the server, create the database and role. Do not reuse the Compose `tokens/tokens` password.
 2. Migrate this repo's schema to 0027. **On the production database run only `DATABASE_URL=… bun run db:migrate` (`drizzle-kit migrate`).** Do not run `bun run test:migrations` against the cloud database. That runs `scripts/check-migrations.ts`, which inserts replay rows inside a transaction. It rolls back, but it takes locks and runs assertions. It is a checker, not a migrator. Run `test:migrations` only against local Compose or a throwaway database.
+
+   An instance already running an older version and upgrading to one containing `0028_add_user_timezone`: run `DATABASE_URL=… bun run db:migrate` by hand first, then build and start the new web code. Until the migration runs, the time zone endpoints of the settings API answer 503.
 3. Put HTTPS in front. Set `NODE_ENV=production`, `NEXT_PUBLIC_URL=https://your-domain`, `DATABASE_URL=…`, `DATABASE_SSL` to match the real TLS setup (`disable` if there is no TLS), and `CRON_SECRET` (a long random string). The proxy must overwrite `X-Forwarded-For`. Optional: `CONTACT_EMAIL` (legal-page contact; if unset, legal pages show the site link and do not render a mailto), and `RESEND_API_KEY` / `EMAIL_FROM` (verification and invite mail).
 4. `next build && next start`, or the compose stack in `docs/deploy/docker/prod/` (`up -d --build`, then `bun run --cwd web db:migrate` inside the web container). The runbook in that directory is Chinese.
 5. System cron on the same host, loopback only: `curl -fsS -X POST http://127.0.0.1:3000/api/cron/refresh-social-links -H "Authorization: Bearer $CRON_SECRET"`. Alert or retry on non-2xx.

@@ -7,15 +7,23 @@ mock.module("@/lib/auth/requestSession", () => ({
   getSessionFromRequest: async () => session,
 }));
 
-const selectResults: unknown[][] = [];
+// Queued answers, one per db.select() call: an array resolves, an Error
+// rejects — that is how an unmigrated database (no timezone column) shows up.
+const selectResults: Array<unknown[] | Error> = [];
 const updateValues: unknown[] = [];
-function chain(result: unknown[]) {
+let updateError: unknown = null;
+function chain(result: unknown[] | Error) {
   const builder: Record<string, unknown> = {};
   for (const method of ["from", "where", "limit"]) {
     builder[method] = () => builder;
   }
-  builder.then = (resolve: (value: unknown) => unknown, reject: (e: unknown) => unknown) =>
-    Promise.resolve(result).then(resolve, reject);
+  builder.then = (
+    resolve: (value: unknown) => unknown,
+    reject: (error: unknown) => unknown,
+  ) =>
+    result instanceof Error
+      ? Promise.reject(result).then(resolve, reject)
+      : Promise.resolve(result).then(resolve, reject);
   return builder;
 }
 mock.module("@/lib/db", () => ({
@@ -25,7 +33,12 @@ mock.module("@/lib/db", () => ({
     update: () => ({
       set: (values: unknown) => {
         updateValues.push(values);
-        return { where: async () => [] };
+        return {
+          where: async () => {
+            if (updateError) throw updateError;
+            return [];
+          },
+        };
       },
     }),
   },
@@ -43,10 +56,19 @@ function patch(body: unknown): Promise<Response> {
   );
 }
 
+/** Postgres reports a missing column as 42703. */
+function missingColumnError() {
+  return Object.assign(
+    new Error('column "timezone" of relation "users" does not exist'),
+    { code: "42703" },
+  );
+}
+
 afterEach(() => {
   // The mock outlives this file in the shared module registry; leave it
   // answering "no session", which is what an unauthenticated request sees.
   session = null;
+  updateError = null;
 });
 
 describe("GET /api/settings/timezone", () => {
@@ -66,6 +88,14 @@ describe("GET /api/settings/timezone", () => {
     selectResults.push([{ timezone: null }]);
     const withoutZone = await GET(new Request("http://localhost/api/settings/timezone"));
     expect(await withoutZone.json()).toEqual({ timezone: null });
+  });
+
+  test("answers 503 with a migrate-first message when the column is missing", async () => {
+    session = { id: "u1", username: "alice" };
+    selectResults.push(missingColumnError());
+    const response = await GET(new Request("http://localhost/api/settings/timezone"));
+    expect(response.status).toBe(503);
+    expect((await response.json()).error).toContain("db:migrate");
   });
 });
 
@@ -100,5 +130,13 @@ describe("PATCH /api/settings/timezone", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ timezone: null });
     expect(updateValues.at(-1)).toMatchObject({ timezone: null });
+  });
+
+  test("answers 503 with a migrate-first message when the column is missing, not a bare 500", async () => {
+    session = { id: "u1", username: "alice" };
+    updateError = missingColumnError();
+    const response = await patch({ timezone: "Asia/Shanghai" });
+    expect(response.status).toBe(503);
+    expect((await response.json()).error).toContain("db:migrate");
   });
 });
