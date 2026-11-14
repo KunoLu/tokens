@@ -7,7 +7,7 @@ mode_note: 用户 2026-11-14 01:50 在群内开启全自动模式直到 v1.0.5 �
 status: "done"
 branch: fix/21-timezone-setting
 created_at: '2026-11-14T17:33:43.000000+08:00'
-updated_at: '2026-11-14T17:55:41.000000+08:00'
+updated_at: '2026-11-14T18:05:05.000000+08:00'
 completed_at: '2026-11-14T17:55:41.000000+08:00'
 ---
 # 修复 issue #21（PR D）— 个人页按看的人时区归日 + 账号设置时区选项
@@ -27,6 +27,7 @@ completed_at: '2026-11-14T17:55:41.000000+08:00'
 - 本会话按 strict 执行。不 commit、不 push、不开 PR，只改工作区文件。
 - 起点：`main` 8715c0e6f0464801f1ebc1a3144e8028ff06c9d3（已含 PR A #20、PR B #22、PR C #23）；分支 `fix/21-timezone-setting`，开工前 `git status` 实测干净。
 - 迁移文件只生成并放进仓库，不对任何真实数据库（生产、预览）执行；本机无 DATABASE_URL、无本地 postgres 实例，本仓验证不实跑迁移；不改 vercel.json、不碰部署。
+- 迁移执行时机（按 web/vercel.json 原文核对）：buildCommand 仅当 VERCEL_ENV 为 production 时先跑 db:migrate 再执行构建，预览部署不跑迁移；git.deploymentEnabled.main 为 false，main 分支不自动部署，合入本 PR 本身不动线上数据库；真正执行迁移的是之后那次手动正式部署，需用户另行批准（次序与预览限制的完整论述见 Release Readiness 评审）。
 - 未完整调用 grill-with-docs：issue #21 的三条改动请求与四条验收条件逐条写明，方案（乙）与授权边界已选定，需求无歧义，不重复访谈。
 
 ## 验收条件
@@ -82,6 +83,7 @@ TDD seam 清单（沿用本仓既有测试位置与 mock 惯例，均为公开�
   8. 验证实跑（数字见证据节）：tsc exit 0；bun test 150 pass；lint 0 errors/1 warning，与 base 8715c0e 临时 worktree 实测相同（新增 0，对比后已移除）；build exit 0；冒烟（next start，端口 3121）：未登录 GET 设置接口 401、非法 tz 400、docs 三语 time-zone 小节均在；冒烟后 next 进程已关闭。
   9. ponytail-review：diff 逐文件过一遍——五个纯函数全部被引用、无新依赖、无投机抽象，期间修掉一处真实简化（空贡献列表跳过重取的守卫会在 week 视图留下误空窗，删守卫；随后补一次性重取闸防时钟偏斜循环）。结论：Lean already. Ship.
   10. 可读性复核：手写改动（timezone.ts、路由、TimezoneSection、ProfilePageClient 三个 effect、两处 range 函数）逐段复读，注释说明归日规则与防循环闸；vendor/generated（迁移快照）未动。
+- 2026-11-14 18:05:05 +08:00 主 agent：第二轮（文档补充，仅改本文件）。第一轮已提交为 f0778bad0a2b61b87a1a9d538cc11d59d38267ac 并开启 PR #24；Reviewy 复核后要求写清迁移执行时机。本轮按 web/vercel.json 原文核对后落地：授权节新增迁移执行时机条目、取舍说明 8 补充前提与预览验收限制、DDIA 评审 Schema/migration 行与 Release Readiness 评审 Rollout 行补部署次序与预览限制，四处口径一致；模型表补第一轮一行（回复 118、工具调用 150、工具报错 5，2026-11-14 17:20:02–18:00:15 +08:00，逐条核对会话记录原始计数），注脚口径改为按轮取最终计数；frontmatter updated_at 同步。不提交、不推送；状态无迁移，状态事件表不新增行。
 
 ## 取舍说明
 
@@ -92,7 +94,7 @@ TDD seam 清单（沿用本仓既有测试位置与 mock 惯例，均为公开�
 5. **榜单「today」期间不动**：同属服务器 UTC 口径，但 issue 范围是个人页图表与今天/昨天卡片；改榜单属于另一处行为变更，留待单独提出。
 6. **timezone 用 text 列、应用层校验**：IANA 时区库随系统更新，数据库枚举会把合法值挡在库外；校验集中在 `isValidIanaTimeZone`（`Intl.DateTimeFormat` 构造试抛 RangeError），服务端写入与客户端选项同源。
 7. **会话响应携带 timezone 而非新拉取**：个人页本就在挂载后请求 `/api/auth/session`（设备列表用），在其中带上看的人 timezone 避免第二次往返；未登录时 `user` 为 null，自然落到浏览器检测值。
-8. **迁移只进仓库不执行**：本机无数据库实例，授权边界亦如此；迁移正确性由 drizzle-kit 生成器、meta 快照与代码评审承担，生产执行需用户另行批准。
+8. **迁移只进仓库不执行**：本机无数据库实例，授权边界亦如此；迁移正确性由 drizzle-kit 生成器、meta 快照与代码评审承担，生产执行需用户另行批准。这个取舍成立的前提是部署管道本身控住时机：合入不触发自动部署，预览构建不跑迁移，生产构建内迁移先于新 web 代码生效，所以「先生成的迁移文件」不会在未获批准时落到任何数据库。代价是预览环境不能用于本 PR 的登录相关验收——预览库没有 timezone 新列时，读用户整行的会话查询会因缺列报错。
 
 ## 模型与调用
 
@@ -100,8 +102,9 @@ TDD seam 清单（沿用本仓既有测试位置与 mock 惯例，均为公开�
 
 | 角色 | 模型 | 密钥来源 | 调用次数 |
 |---|---|---|---|
+| 第一轮主 agent | k3:max（kimi-code/k3） | 环境变量 KIMI_API_KEY | 回复 118、工具调用 150、工具报错 5（2026-11-14 17:20:02–18:00:15 +08:00） |
 
-统计口径：工具报错 = 会话文件中标记为报错的工具结果条数（含命令非零退出）。每轮一行，取该轮会话文件的最终计数；本轮（第一轮）计数要等本轮结束才有，本轮不写进表。
+统计口径：工具报错 = 会话文件中标记为报错的工具结果条数（含命令非零退出）。每轮一行取该轮会话文件的最终计数；本轮（第二轮）计数要等本轮结束才有，不写进表。
 
 未启动子代理；密钥不写入本文件与任何产物。
 
@@ -114,7 +117,7 @@ TDD seam 清单（沿用本仓既有测试位置与 mock 惯例，均为公开�
 - Write / read / async / failure paths：写——`/api/settings/timezone` PATCH（仅浏览器会话＋CSRF Origin 门），合法 IANA 才写库，非法 400 不写；读——设置页 GET 同一路由，个人页经 `/api/auth/session` 顺带读出；无异步路径；写失败返回 500 且设置页显示错误文案，不产生半更新。
 - Consistency model：单行单字段更新，读己之写（PATCH 响应即新值）；个人页 ISR 缓存不含该字段，无时滞一致性问题。
 - Idempotency / ordering / retry / deduplication：PUT 语义整字段覆盖，重复 PATCH 幂等；无并发写竞态（单用户单字段）。
-- Schema / migration / backfill / rollback / replay：`0028_add_user_timezone.sql` 为 `ALTER TABLE users ADD COLUMN timezone text`，可空无默认，存量行天然为 null（自动检测），无需 backfill；回滚即删列，无数据转换；迁移不在本仓验证环境执行，生产执行需用户另行批准。
+- Schema / migration / backfill / rollback / replay：`0028_add_user_timezone.sql` 为 `ALTER TABLE users ADD COLUMN timezone text`，可空无默认，存量行天然为 null（自动检测），无需 backfill；回滚即删列，无数据转换；迁移不在本仓验证环境执行，生产执行需用户另行批准。执行时机由部署构建控住：仅 production 构建内先迁移后构建，预览构建不迁移，合入 PR 本身不动线上数据库（vercel.json 原文核对结论见授权节与 Release Readiness 评审）。
 - Observability and repair：无派生数据，无修复路径；非法值在写入侧已被 400 挡住。
 - Required tests：路由测试覆盖 401/400/写入/清空/读取；`isValidIanaTimeZone` 边界用例。
 
@@ -147,7 +150,7 @@ TDD seam 清单（沿用本仓既有测试位置与 mock 惯例，均为公开�
 - Failure modes and safeguards：非法 tz → 400（写设置）/400（读个人页），不静默落回 UTC；重取失败保留 ISR 首屏数据；看的人时钟偏斜由一次性重取闸挡住循环；访客无会话落到浏览器检测值；`PRIVATE_CACHE_CONTROL` 挡住设置接口响应进共享缓存。
 - Capacity / backpressure / limits：非 UTC 看的人在跨日期窗口每个个人页最多多发一次 API 请求；u 页 ISR 缓存键不变，无缓存分裂；设置接口单行单字段更新。
 - Observability / alerts / runbook：设置读写失败走既有 console.error 通道；无新指标。
-- Rollout / migration / rollback / cleanup：**部署次序是硬前提——`getSession` 走整行 users 查询，web 上线前必须先执行 0028 迁移，否则所有会话查询因缺列报错；迁移本身是纯加列，旧代码对新列无感，回滚 web 即可。** 迁移执行需用户另行批准，不在本会话授权内。
+- Rollout / migration / rollback / cleanup：**部署次序是硬前提——`getSession` 走整行 users 查询，web 上线前必须先执行 0028 迁移，否则所有会话查询因缺列报错；迁移本身是纯加列，旧代码对新列无感，回滚 web 即可。** 迁移执行需用户另行批准，不在本会话授权内。时机与次序按 web/vercel.json 原文核对：buildCommand 为「`if [ "$VERCEL_ENV" = "production" ]; then ... bun run db:migrate; fi && bun run build`」，即仅正式环境构建才先跑迁移再编译，同一次构建内迁移先于新 web 代码生效；`git.deploymentEnabled.main` 为 false，main 分支不自动部署，合入本 PR 本身不动线上数据库；真正执行迁移的是之后那次手动正式部署。预览部署不跑迁移，预览库缺 timezone 列时整行会话查询报错，预览环境的登录相关功能不能作为验收依据。
 - Required validation and result：tsc、lint（对 base 无新增）、bun test 150、build 全绿；未登录 401、非法 tz 400、docs 三语小节冒烟通过；结果见证据节。
 - Optional checks, accountable owner acceptance, and residual risk：带真实数据库的浏览器级 E2E（UTC+8 00:30 实景）本机无 postgres 服务与 docker，无法运行，由路由级测试与区间函数固定时刻测试覆盖归日逻辑；CI、合并、部署与生产迁移执行不在本会话授权内。
 
