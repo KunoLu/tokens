@@ -9,13 +9,13 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { SUPPORTED_CLIENT_TYPES } from "../types";
+import { isReservedCloudDeviceKey, parseCloudDeviceKey } from "../devices/cloud";
 import {
   INFERENCE_SPEEDS,
   MAX_SPEED_USAGE_ENTRIES,
   SPEED_SOURCES,
   mergeSpeedUsage,
 } from "../speedUsage";
-import { isReservedCloudDeviceKey, parseCloudDeviceKey } from "../devices/cloud";
 
 // ============================================================================
 // SCHEMAS
@@ -39,7 +39,28 @@ const TOKEN_ABSOLUTE_TOLERANCE = 100;
 // Codex revision 4: a `codex exec --json` capture no longer counts on top of
 // the run's own rollout, nor once per copy of the capture.
 const MAX_SUPPORTED_CODEX_PROVENANCE_SCHEMA_VERSION = 4;
-const MAX_SUPPORTED_NON_CODEX_PROVENANCE_SCHEMA_VERSION = 1;
+// Devin CLI revision 2: one API response that Devin stored in several
+// `message_nodes` rows of sessions.db is counted once (deduped by
+// request_id instead of row id). The higher revision lets that lower,
+// corrected total replace days stored at revision 1, which the same-revision
+// regression guard would otherwise keep (missuo/tokens#109).
+const MAX_SUPPORTED_DEVIN_CLI_PROVENANCE_SCHEMA_VERSION = 2;
+const MAX_SUPPORTED_DEFAULT_PROVENANCE_SCHEMA_VERSION = 1;
+const MAX_SUPPORTED_PROVENANCE_SCHEMA_VERSION_BY_CLIENT: Readonly<Record<string, number>> = {
+  codex: MAX_SUPPORTED_CODEX_PROVENANCE_SCHEMA_VERSION,
+  "devin-cli": MAX_SUPPORTED_DEVIN_CLI_PROVENANCE_SCHEMA_VERSION,
+};
+const MAX_SUPPORTED_ANY_PROVENANCE_SCHEMA_VERSION = Math.max(
+  MAX_SUPPORTED_DEFAULT_PROVENANCE_SCHEMA_VERSION,
+  ...Object.values(MAX_SUPPORTED_PROVENANCE_SCHEMA_VERSION_BY_CLIENT)
+);
+
+/** Highest parser revision the server accepts for `client`. */
+export function maxSupportedParserRevision(client: string): number {
+  return Object.hasOwn(MAX_SUPPORTED_PROVENANCE_SCHEMA_VERSION_BY_CLIENT, client)
+    ? MAX_SUPPORTED_PROVENANCE_SCHEMA_VERSION_BY_CLIENT[client]
+    : MAX_SUPPORTED_DEFAULT_PROVENANCE_SCHEMA_VERSION;
+}
 
 const NonNegativeIntegerSchema = z.number().finite().int().min(0).max(Number.MAX_SAFE_INTEGER);
 const NonNegativeNumberSchema = z.number().finite().min(0);
@@ -54,7 +75,7 @@ const TokenBreakdownSchema = z.object({
 
 const ClientContributionProvenanceSchema = z.object({
   schemaVersion: NonNegativeIntegerSchema.min(1).max(
-    MAX_SUPPORTED_CODEX_PROVENANCE_SCHEMA_VERSION
+    MAX_SUPPORTED_ANY_PROVENANCE_SCHEMA_VERSION
   ),
   messageCount: NonNegativeIntegerSchema,
   modelCount: NonNegativeIntegerSchema,
@@ -89,9 +110,7 @@ const ClientContributionSchema = z.object({
   provenance: ClientContributionProvenanceSchema.optional(),
   speedUsage: z.array(SpeedUsageSchema).max(MAX_SPEED_USAGE_ENTRIES).optional(),
 }).superRefine((contribution, ctx) => {
-  const maxRevision = contribution.client === "codex"
-    ? MAX_SUPPORTED_CODEX_PROVENANCE_SCHEMA_VERSION
-    : MAX_SUPPORTED_NON_CODEX_PROVENANCE_SCHEMA_VERSION;
+  const maxRevision = maxSupportedParserRevision(contribution.client);
 
   if ((contribution.provenance?.schemaVersion ?? 1) > maxRevision) {
     ctx.addIssue({
@@ -204,13 +223,11 @@ const ClientManifestCoverageSchema = z.object({
 const ClientManifestEntrySchema = z.object({
   client: SourceSchema,
   parserRevision: NonNegativeIntegerSchema.min(1).max(
-    MAX_SUPPORTED_CODEX_PROVENANCE_SCHEMA_VERSION
+    MAX_SUPPORTED_ANY_PROVENANCE_SCHEMA_VERSION
   ),
   coverage: ClientManifestCoverageSchema.optional(),
 }).superRefine((entry, ctx) => {
-  const maxRevision = entry.client === "codex"
-    ? MAX_SUPPORTED_CODEX_PROVENANCE_SCHEMA_VERSION
-    : MAX_SUPPORTED_NON_CODEX_PROVENANCE_SCHEMA_VERSION;
+  const maxRevision = maxSupportedParserRevision(entry.client);
 
   if (entry.parserRevision > maxRevision) {
     ctx.addIssue({
@@ -412,6 +429,9 @@ const SubmissionDataSchema = z.preprocess(
     timeMetrics: TimeMetricsSchema.optional(),
     clientManifest: ClientManifestSchema.optional(),
     provenance: SubmissionProvenanceSchema.optional(),
+    // Set only by CLIs that ask before sharing MCP server names (#121). The
+    // names themselves are read leniently by `optedInMcpServers`.
+    mcpServersOptIn: z.boolean().optional(),
   }).superRefine((submission, ctx) => {
     validateCloudDeviceSubmission(submission, ctx);
 
@@ -588,6 +608,28 @@ function describeTokenlessOffenders(clients: ClientLike[]): string {
       return `${c.client}/${c.modelId}${provider} cost=${formatCost(c.cost)}`;
     })
     .join("; ");
+}
+
+/**
+ * The MCP server names a submission may store, or `null` to store none.
+ *
+ * Names count only when the payload carries `mcpServersOptIn: true`, which the
+ * CLI sends only after the user opted in (`tokens mcp-names enable` or
+ * `--include-mcp`). CLIs from before that opt-in existed uploaded every
+ * configured name by default and never send the signal, so their names are
+ * dropped here — and since a local submit replaces the stored list, the next
+ * submit from one of them clears whatever was stored. See #121.
+ */
+export function optedInMcpServers(rawData: unknown): string[] | null {
+  if (rawData == null || typeof rawData !== "object") return null;
+  const raw = rawData as Record<string, unknown>;
+  if (raw.mcpServersOptIn !== true || !Array.isArray(raw.mcpServers)) {
+    return null;
+  }
+  const names = raw.mcpServers.filter(
+    (s): s is string => typeof s === "string" && s.length > 0,
+  );
+  return names.length > 0 ? names : null;
 }
 
 /**

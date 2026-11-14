@@ -11,7 +11,7 @@
 //! Note: This parser has stateful logic to track model and delta calculations.
 
 use super::utils::{
-    extract_i64, extract_string, file_modified_timestamp_ms, parse_timestamp_value,
+    extract_i64, extract_string, file_modified_timestamp_ms, is_zst_path, parse_timestamp_value,
     session_id_from_path,
 };
 use super::{normalize_workspace_key, workspace_label_from_key, UnifiedMessage};
@@ -20,7 +20,8 @@ use crate::speed::InferenceSpeed;
 use crate::TokenBreakdown;
 use serde::Deserialize;
 use serde_json::Value;
-use std::io::{BufRead, BufReader, Seek, SeekFrom};
+use std::borrow::Cow;
+use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::Path;
 
 /// Agents-tab bucket for a regular interactive Codex thread. Codex stamps each
@@ -93,6 +94,8 @@ pub struct CodexPayload {
     /// Settings snapshots identify their owner, including in copied fork history.
     pub thread_id: Option<String>,
     pub thread_settings: Option<Value>,
+    pub response_id: Option<String>,
+    pub usage: Option<CodexTokenUsage>,
 }
 
 /// Lenient `Option<i64>` deserializer for `CodexPayload::started_at`. Coerces
@@ -346,6 +349,9 @@ pub(crate) struct CodexParseState {
     /// makes each one's dedup key unique within the thread.
     #[serde(default)]
     pub headless_turn_ordinal: u32,
+    /// A response immediately followed by `compacted`, awaiting its snapshot.
+    #[serde(default)]
+    pub pending_compaction: Option<(CodexTotals, String, bool)>,
 }
 
 /// Dedup-key prefix of usage read from a `codex exec --json` capture.
@@ -417,12 +423,14 @@ impl CodexTurnCoverage {
 /// Client id the `codex` parser tags rollouts OpenClaw drove with.
 pub(crate) const OPENCLAW_CLIENT_ID: &str = "openclaw";
 
-/// Codex thread id from a rollout filename, `rollout-<timestamp>-<uuid>.jsonl`.
+/// Codex thread id from a rollout filename, `rollout-<timestamp>-<uuid>.jsonl`
+/// (or its compressed form, `rollout-<timestamp>-<uuid>.jsonl.zst`).
 ///
 /// Used where a rollout's ownership comes from its location rather than its
 /// `session_meta.originator`, so the parser did not already put the thread id
 /// on its messages. Returns `None` for any other spelling rather than guessing.
 pub(crate) fn thread_id_from_rollout_path(path: &Path) -> Option<String> {
+    let path = uncompressed_rollout_path(path);
     let stem = path.file_stem()?.to_str()?;
     let stem = stem.strip_prefix("rollout-")?;
     // `2026-08-30T10-00-00-` is 20 chars; everything after is the thread id.
@@ -539,6 +547,11 @@ fn parse_codex_reader<R: BufRead>(
                     None
                 };
                 let event_model = payload_model.clone().or(info_model.clone());
+                let same_compaction_context = entry.entry_type == "turn_context"
+                    && payload.turn_id.is_some()
+                    && payload.turn_id == state.current_turn_id
+                    && payload_model.is_some()
+                    && payload_model == state.current_model;
 
                 // The turn the following token_count rows belong to. Both
                 // `task_started` and `turn_context` start a turn, so each
@@ -569,12 +582,10 @@ fn parse_codex_reader<R: BufRead>(
                         .as_deref()
                         .or(state.session_id_from_meta.as_deref())
                         .unwrap_or(session_id);
-                    let owns_snapshot = payload
-                        .thread_id
-                        .as_deref()
-                        .map_or(!state.forked_child_waiting_for_turn_context, |id| {
-                            id == owner
-                        });
+                    let owns_snapshot = payload.thread_id.as_deref().map_or(
+                        !state.forked_child_waiting_for_turn_context,
+                        |id| id == owner,
+                    );
                     if owns_snapshot {
                         // A snapshot replaces the preference, including unset/unsupported
                         // tiers. Never carry Fast through a switch back to auto/defaults.
@@ -652,6 +663,49 @@ fn parse_codex_reader<R: BufRead>(
                             }
                         }
                         continue;
+                    }
+                }
+
+                if entry.entry_type == "token_usage_record" {
+                    let owner = state
+                        .forked_child_session_id
+                        .as_deref()
+                        .or(state.session_id_from_meta.as_deref())
+                        .unwrap_or(session_id);
+                    state.pending_compaction = if payload
+                        .thread_id
+                        .as_deref()
+                        .is_none_or(|id| id == owner)
+                    {
+                        payload
+                            .usage
+                            .as_ref()
+                            .zip(payload.response_id.as_ref())
+                            .map(|(usage, id)| (CodexTotals::from_usage(usage), id.clone(), false))
+                    } else {
+                        None
+                    };
+                } else if entry.entry_type == "compacted" {
+                    if let Some((_, _, compacted)) = &mut state.pending_compaction {
+                        *compacted = true;
+                    }
+                } else if !is_token_count {
+                    let owner = state
+                        .forked_child_session_id
+                        .as_deref()
+                        .or(state.session_id_from_meta.as_deref())
+                        .unwrap_or(session_id);
+                    let compaction_metadata = entry.entry_type == "world_state"
+                        || same_compaction_context
+                        || (entry.entry_type == "event_msg"
+                            && payload.payload_type.as_deref() == Some("thread_settings_applied")
+                            && payload.thread_id.as_deref() == Some(owner));
+                    if !state
+                        .pending_compaction
+                        .as_ref()
+                        .is_some_and(|(_, _, compacted)| *compacted && compaction_metadata)
+                    {
+                        state.pending_compaction = None;
                     }
                 }
 
@@ -818,6 +872,12 @@ fn parse_codex_reader<R: BufRead>(
                     // dedup and monotonicity checks — never as a direct delta source.
                     let total_usage = info.total_token_usage.as_ref().map(CodexTotals::from_usage);
                     let last_usage = info.last_token_usage.as_ref().map(CodexTotals::from_usage);
+                    let compaction = state.pending_compaction.take().filter(|(_, _, compacted)| {
+                        *compacted
+                            && total_usage.is_some()
+                            && total_usage == Some(state.previous_totals.unwrap_or_default())
+                            && last_usage == Some(CodexTotals::default())
+                    });
 
                     // Forked child logs can replay more than one parent
                     // token_count row after the first child turn_context,
@@ -833,7 +893,9 @@ fn parse_codex_reader<R: BufRead>(
                     state.forked_child_inherited_baseline = None;
                     state.forked_child_inherited_reported_total = None;
 
-                    let (tokens, next_totals) =
+                    let (tokens, next_totals) = if let Some((usage, _, _)) = &compaction {
+                        (usage.into_tokens(), total_usage)
+                    } else {
                         match (total_usage, last_usage, state.previous_totals) {
                             // Both present with previous baseline (standard path)
                             (Some(total), Some(last), Some(previous)) => {
@@ -873,7 +935,8 @@ fn parse_codex_reader<R: BufRead>(
                             (None, Some(last), None) => (last.into_tokens(), None),
                             // Neither
                             (None, None, _) => continue,
-                        };
+                        }
+                    };
 
                     // Skip zero-token snapshots without advancing the baseline so
                     // that post-compaction zero totals don't inflate later deltas.
@@ -930,6 +993,9 @@ fn parse_codex_reader<R: BufRead>(
                         0.0,
                         agent,
                     );
+                    if let Some((_, response_id, _)) = compaction {
+                        message.dedup_key = Some(format!("codex:response:{response_id}"));
+                    }
                     message.duration_ms = duration_ms;
                     state.turn_coverage.record(state.current_turn_id.as_deref());
                     // The announced turn has produced usage, so it is under
@@ -1349,24 +1415,97 @@ fn flush_pending_model_messages_as_unknown(
     );
 }
 
-/// Parse a Codex JSONL file with stateful tracking
+/// Parse a Codex `.jsonl` (or compressed `.jsonl.zst`) rollout with stateful
+/// tracking.
 pub fn parse_codex_file(path: &Path) -> Vec<UnifiedMessage> {
-    let file = match std::fs::File::open(path) {
-        Ok(f) => f,
-        Err(_) => return Vec::new(),
-    };
+    parse_codex_file_incremental(path, 0, CodexParseState::default()).messages
+}
 
-    let session_id = session_id_from_path(path);
-    let fallback_timestamp = file_modified_timestamp_ms(path);
-    let reader = BufReader::new(file);
-    let parsed = parse_codex_reader(
-        reader,
-        &session_id,
-        fallback_timestamp,
-        0,
-        CodexParseState::default(),
-    );
-    parsed.messages
+/// Upper bound on the decoded size of one compressed rollout. The archive is
+/// decoded as a stream, so this does not bound memory; it stops a corrupt or
+/// hostile archive from expanding without end. Real rollouts stay far below it.
+const MAX_CODEX_ARCHIVE_BYTES: u64 = 1024 * 1024 * 1024;
+
+/// The name a compressed rollout had before Codex compressed it in place:
+/// `rollout-….jsonl.zst` -> `rollout-….jsonl`. Identities derived from the
+/// file name (the fallback session id, the rollout thread id) then agree
+/// between the plain and compressed copies of one session, so the dedup keys
+/// built from them collapse the copies instead of counting both.
+fn uncompressed_rollout_path(path: &Path) -> Cow<'_, Path> {
+    if is_zst_path(path) {
+        Cow::Owned(path.with_extension(""))
+    } else {
+        Cow::Borrowed(path)
+    }
+}
+
+/// Reader that remembers whether the stream beneath it ever failed. The
+/// rollout parser treats an I/O error and a malformed line alike, but for an
+/// archive they differ: a zstd decode error means the archive is corrupt or
+/// truncated, and none of its usage can be trusted.
+struct FailureTrackingReader<R> {
+    inner: R,
+    failed: bool,
+}
+
+impl<R: Read> Read for FailureTrackingReader<R> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let result = self.inner.read(buf);
+        if let Err(error) = &result {
+            if error.kind() != std::io::ErrorKind::Interrupted {
+                self.failed = true;
+            }
+        }
+        result
+    }
+}
+
+/// Parse a zstd-compressed Codex rollout (`.jsonl.zst`). An archive is
+/// immutable and decoded whole, so there is no byte offset to resume from: a
+/// non-zero `start_offset` is refused and the caller reparses from the start.
+/// A corrupt, truncated or oversized archive contributes no usage at all
+/// rather than whatever prefix decoded before the failure.
+fn parse_codex_archive(
+    path: &Path,
+    session_id: &str,
+    fallback_timestamp: i64,
+    start_offset: u64,
+    state: CodexParseState,
+) -> ParsedCodexFile {
+    let unusable = |state: CodexParseState| ParsedCodexFile {
+        messages: Vec::new(),
+        fallback_timestamp_indices: Vec::new(),
+        consumed_offset: start_offset,
+        parse_succeeded: false,
+        unresolved_model_events: false,
+        state,
+    };
+    if start_offset != 0 {
+        return unusable(state);
+    }
+
+    let decoder = match std::fs::File::open(path).and_then(zstd::stream::read::Decoder::new) {
+        Ok(decoder) => decoder,
+        Err(error) => {
+            tracing::warn!(path = %path.display(), %error, "Skipping Codex archive");
+            return unusable(state);
+        }
+    };
+    let initial_state = state.clone();
+    let mut reader = BufReader::new(FailureTrackingReader {
+        inner: decoder.take(MAX_CODEX_ARCHIVE_BYTES + 1),
+        failed: false,
+    });
+    let parsed = parse_codex_reader(&mut reader, session_id, fallback_timestamp, 0, state);
+    if reader.get_ref().failed {
+        tracing::warn!(path = %path.display(), "Skipping corrupt or truncated Codex archive");
+        return unusable(initial_state);
+    }
+    if parsed.consumed_offset > MAX_CODEX_ARCHIVE_BYTES {
+        tracing::warn!(path = %path.display(), "Skipping Codex archive over the decoded size limit");
+        return unusable(initial_state);
+    }
+    parsed
 }
 
 fn reported_total_tokens(usage: &CodexTokenUsage) -> Option<i64> {
@@ -1409,6 +1548,12 @@ pub(crate) fn parse_codex_file_incremental(
     start_offset: u64,
     state: CodexParseState,
 ) -> ParsedCodexFile {
+    let session_id = session_id_from_path(&uncompressed_rollout_path(path));
+    let fallback_timestamp = file_modified_timestamp_ms(path);
+    if is_zst_path(path) {
+        return parse_codex_archive(path, &session_id, fallback_timestamp, start_offset, state);
+    }
+
     let mut file = match std::fs::File::open(path) {
         Ok(file) => file,
         Err(_) => {
@@ -1434,8 +1579,6 @@ pub(crate) fn parse_codex_file_incremental(
         };
     }
 
-    let session_id = session_id_from_path(path);
-    let fallback_timestamp = file_modified_timestamp_ms(path);
     let reader = BufReader::new(file);
     parse_codex_reader(reader, &session_id, fallback_timestamp, start_offset, state)
 }
@@ -1651,6 +1794,123 @@ mod tests {
         file.write_all(content.as_bytes()).unwrap();
         file.flush().unwrap();
         file
+    }
+
+    const CODEX_COMPACTION_FIXTURE: &str = concat!(
+        r#"{"type":"session_meta","payload":{"id":"session"}}"#,
+        "\n",
+        r#"{"type":"turn_context","payload":{"turn_id":"turn-1","model":"gpt-5.5"}}"#,
+        "\n",
+        r#"{"timestamp":"2026-10-01T00:01:05Z","type":"token_usage_record","payload":{"thread_id":"session","turn_id":"turn-1","response_id":"resp-1","usage":{"input_tokens":100,"cached_input_tokens":80,"output_tokens":10}}}"#,
+        "\n",
+        r#"{"timestamp":"2026-10-01T00:01:06Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"cached_input_tokens":80,"output_tokens":10},"last_token_usage":{"input_tokens":100,"cached_input_tokens":80,"output_tokens":10}}}}"#,
+        "\n",
+        r#"{"type":"turn_context","payload":{"turn_id":"turn-2","model":"gpt-5.5"}}"#,
+        "\n",
+        r#"{"timestamp":"2026-10-01T00:02:05Z","type":"token_usage_record","payload":{"thread_id":"session","turn_id":"turn-2","response_id":"resp-2","usage":{"input_tokens":500,"cached_input_tokens":200,"output_tokens":40}}}"#,
+        "\n",
+        r#"{"type":"compacted","payload":{"message":"","replacement_history":[]}}"#,
+        "\n",
+        r#"{"type":"world_state","payload":{}}"#,
+        "\n",
+        r#"{"type":"turn_context","payload":{"turn_id":"turn-2","model":"gpt-5.5"}}"#,
+        "\n",
+        r#"{"type":"event_msg","payload":{"type":"thread_settings_applied","thread_id":"session"}}"#,
+        "\n",
+        r#"{"timestamp":"2026-10-01T00:02:07Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"cached_input_tokens":80,"output_tokens":10},"last_token_usage":{"input_tokens":0,"cached_input_tokens":0,"output_tokens":0}}}}"#,
+        "\n",
+        r#"{"timestamp":"2026-10-01T00:02:08Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"cached_input_tokens":80,"output_tokens":10},"last_token_usage":{"input_tokens":0,"cached_input_tokens":0,"output_tokens":0}}}}"#,
+        "\n",
+        r#"{"type":"turn_context","payload":{"turn_id":"turn-3","model":"gpt-5.5"}}"#,
+        "\n",
+        r#"{"timestamp":"2026-10-01T00:03:05Z","type":"token_usage_record","payload":{"thread_id":"session","turn_id":"turn-3","response_id":"resp-3","usage":{"input_tokens":50,"cached_input_tokens":0,"output_tokens":5}}}"#,
+        "\n",
+        r#"{"timestamp":"2026-10-01T00:03:06Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":150,"cached_input_tokens":80,"output_tokens":15},"last_token_usage":{"input_tokens":50,"cached_input_tokens":0,"output_tokens":5}}}}"#,
+        "\n"
+    );
+
+    #[test]
+    fn compaction_usage_is_counted_once_when_totals_do_not_advance() {
+        let file = create_test_file(CODEX_COMPACTION_FIXTURE);
+
+        let messages = parse_codex_file(file.path());
+        assert_eq!(messages.iter().map(|m| m.tokens.total()).sum::<i64>(), 705);
+        assert_eq!(
+            messages.iter().map(|m| m.tokens.cache_read).sum::<i64>(),
+            280
+        );
+        assert_eq!(messages.len(), 3);
+        assert_ne!(messages[0].dedup_key, messages[1].dedup_key);
+    }
+
+    #[test]
+    fn compaction_does_not_cross_a_different_context_or_thread() {
+        let original = concat!(
+            r#"{"type":"world_state","payload":{}}"#,
+            "\n",
+            r#"{"type":"turn_context","payload":{"turn_id":"turn-2","model":"gpt-5.5"}}"#
+        );
+        for replacement in [
+            original.replace("turn-2", "turn-other"),
+            original.replace("gpt-5.5", "other-model"),
+        ] {
+            let fixture = CODEX_COMPACTION_FIXTURE.replacen(original, &replacement, 1);
+            let file = create_test_file(&fixture);
+            let messages = parse_codex_file(file.path());
+            assert_eq!(messages.iter().map(|m| m.tokens.total()).sum::<i64>(), 165);
+        }
+
+        let fixture = CODEX_COMPACTION_FIXTURE.replace(
+            r#"{"type":"event_msg","payload":{"type":"thread_settings_applied","thread_id":"session"}}"#,
+            r#"{"type":"event_msg","payload":{"type":"thread_settings_applied","thread_id":"other"}}"#,
+        );
+        let file = create_test_file(&fixture);
+        let messages = parse_codex_file(file.path());
+        assert_eq!(messages.iter().map(|m| m.tokens.total()).sum::<i64>(), 165);
+
+        let fixture = CODEX_COMPACTION_FIXTURE.replace(
+            r#""thread_id":"session","turn_id":"turn-2","response_id":"resp-2""#,
+            r#""thread_id":"other","turn_id":"turn-2","response_id":"resp-2""#,
+        );
+        let file = create_test_file(&fixture);
+        let messages = parse_codex_file(file.path());
+        assert_eq!(messages.iter().map(|m| m.tokens.total()).sum::<i64>(), 165);
+    }
+
+    #[test]
+    fn compaction_incremental_parse_matches_full_parse_at_every_line() {
+        let full = parse_codex_reader(
+            Cursor::new(CODEX_COMPACTION_FIXTURE),
+            "session",
+            0,
+            0,
+            CodexParseState::default(),
+        );
+        let mut state = CodexParseState::default();
+        let mut messages = Vec::new();
+        for line in CODEX_COMPACTION_FIXTURE.split_inclusive('\n') {
+            let parsed = parse_codex_reader(Cursor::new(line), "session", 0, 0, state);
+            messages.extend(parsed.messages);
+            state = bincode::deserialize(&bincode::serialize(&parsed.state).unwrap()).unwrap();
+        }
+        assert_eq!(messages, full.messages);
+        assert_eq!(messages.iter().map(|m| m.tokens.total()).sum::<i64>(), 705);
+    }
+
+    #[test]
+    fn compaction_already_in_snapshot_is_not_counted_twice() {
+        let fixture = CODEX_COMPACTION_FIXTURE
+            .replace(
+                r#"{"input_tokens":100,"cached_input_tokens":80,"output_tokens":10},"last_token_usage":{"input_tokens":0,"cached_input_tokens":0,"output_tokens":0}"#,
+                r#"{"input_tokens":600,"cached_input_tokens":280,"output_tokens":50},"last_token_usage":{"input_tokens":500,"cached_input_tokens":200,"output_tokens":40}"#,
+            )
+            .replace(
+                r#"{"input_tokens":150,"cached_input_tokens":80,"output_tokens":15}"#,
+                r#"{"input_tokens":650,"cached_input_tokens":280,"output_tokens":55}"#,
+            );
+        let messages = parse_codex_file(create_test_file(&fixture).path());
+        assert_eq!(messages.len(), 3);
+        assert_eq!(messages.iter().map(|m| m.tokens.total()).sum::<i64>(), 705);
     }
 
     struct FailAfterFirstLine {
@@ -3743,5 +4003,85 @@ mod tests {
             messages[1].is_turn_start,
             "the deferred turn-start marker must still apply"
         );
+    }
+
+    const COMPRESSED_FIXTURE: &str = concat!(
+        r#"{"timestamp":"2026-10-01T00:00:00Z","type":"turn_context","payload":{"model":"gpt-5"}}"#,
+        "\n",
+        r#"{"timestamp":"2026-10-01T00:00:01Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":140,"cached_input_tokens":30,"output_tokens":20,"reasoning_output_tokens":10,"total_tokens":160},"last_token_usage":{"input_tokens":140,"cached_input_tokens":30,"output_tokens":20,"reasoning_output_tokens":10,"total_tokens":160}}}}"#,
+        "\n"
+    );
+
+    #[test]
+    fn test_thread_id_from_rollout_path_handles_plain_and_compressed() {
+        let plain =
+            Path::new("/x/rollout-2026-08-30T10-00-00-550e8400-e29b-41d4-a716-446655440000.jsonl");
+        let compressed = Path::new(
+            "/x/rollout-2026-08-30T10-00-00-550e8400-e29b-41d4-a716-446655440000.jsonl.zst",
+        );
+        let expected = Some("550e8400-e29b-41d4-a716-446655440000".to_string());
+        assert_eq!(thread_id_from_rollout_path(plain), expected);
+        assert_eq!(thread_id_from_rollout_path(compressed), expected);
+    }
+
+    #[test]
+    fn test_compressed_rollout_matches_plain_rollout() {
+        // missuo/tokens#109: a `.jsonl.zst` rollout yields exactly what its
+        // plain form does, including the name-derived session id and dedup
+        // keys, so a session present in both forms collapses downstream.
+        let dir = tempfile::TempDir::new().unwrap();
+        let plain_path = dir.path().join("fixture.jsonl");
+        std::fs::write(&plain_path, COMPRESSED_FIXTURE).unwrap();
+        let expected = parse_codex_file(&plain_path);
+        assert_eq!(expected.len(), 1);
+        assert_eq!(expected[0].session_id, "fixture");
+        assert_eq!(expected[0].tokens.input, 110);
+        assert_eq!(expected[0].tokens.cache_read, 30);
+        assert_eq!(expected[0].tokens.output, 10);
+        assert_eq!(expected[0].tokens.reasoning, 10);
+        assert!(expected[0].dedup_key.is_some());
+
+        let zst_path = dir.path().join("fixture.jsonl.zst");
+        std::fs::write(
+            &zst_path,
+            zstd::encode_all(COMPRESSED_FIXTURE.as_bytes(), 3).unwrap(),
+        )
+        .unwrap();
+        // Same mtime so the fallback timestamp cannot differ either.
+        let mtime = std::fs::metadata(&plain_path).unwrap().modified().unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(&zst_path)
+            .unwrap()
+            .set_modified(mtime)
+            .unwrap();
+
+        assert_eq!(parse_codex_file(&zst_path), expected);
+        let full = parse_codex_file_incremental(&zst_path, 0, CodexParseState::default());
+        assert!(full.parse_succeeded);
+        assert_eq!(full.messages, expected);
+        assert_eq!(full.consumed_offset, COMPRESSED_FIXTURE.len() as u64);
+
+        // An archive cannot be resumed at a byte offset.
+        let resumed = parse_codex_file_incremental(&zst_path, 10, CodexParseState::default());
+        assert!(!resumed.parse_succeeded);
+        assert!(resumed.messages.is_empty());
+    }
+
+    #[test]
+    fn test_corrupt_or_truncated_compressed_rollout_emits_no_usage() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("rollout.jsonl.zst");
+        let mut bytes = zstd::encode_all(COMPRESSED_FIXTURE.as_bytes(), 3).unwrap();
+        bytes.truncate(bytes.len() - 4);
+        std::fs::write(&path, &bytes).unwrap();
+        let truncated = parse_codex_file_incremental(&path, 0, CodexParseState::default());
+        assert!(!truncated.parse_succeeded);
+        assert!(truncated.messages.is_empty());
+
+        std::fs::write(&path, b"not a zstd stream").unwrap();
+        let garbage = parse_codex_file_incremental(&path, 0, CodexParseState::default());
+        assert!(!garbage.parse_succeeded);
+        assert!(garbage.messages.is_empty());
     }
 }

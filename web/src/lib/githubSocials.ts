@@ -183,14 +183,21 @@ export async function syncGitHubSocialLinksStrict(
 /**
  * Fetch the user's current social links from GitHub and persist the snapshot
  * on their users row (rendered by the profile page). Never throws.
+ *
+ * The persist is gated on a *complete* read: a partial or failed fetch leaves
+ * the stored snapshot alone, because writing half a picture would drop
+ * whichever half failed — one rate-limited cron run over every user otherwise
+ * overwrites each row with an empty list and takes the badge with it.
  */
 export async function syncGitHubSocialLinks(
   username: string,
 ): Promise<ProfileSocialLink[]> {
   try {
-    const { links } = await fetchGitHubSocialLinks(username);
+    const { links, complete } = await fetchGitHubSocialLinks(username);
 
-    await persistSocialLinks(username, links);
+    if (complete) {
+      await persistSocialLinks(username, links);
+    }
     return links;
   } catch {
     return [];

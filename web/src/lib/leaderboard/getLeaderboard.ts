@@ -8,6 +8,7 @@ import {
 } from "@/lib/db/usernameLookup";
 import { eq, desc, sql, and, or, gte, lte } from "drizzle-orm";
 import { publicUserCondition } from "@/lib/privacy";
+import { LEADERBOARD_CACHE_TAG } from "@/lib/leaderboard/cache";
 import type {
   LeaderboardData,
   LeaderboardGroupRef,
@@ -715,7 +716,7 @@ function getPeriodRanking(
       ),
     [`period-ranking:${periodCacheKey(period, customFrom, customTo)}:${sortBy}`],
     {
-      tags: ["leaderboard", `leaderboard:${period}`, "user-rank"],
+      tags: [LEADERBOARD_CACHE_TAG, `leaderboard:${period}`, "user-rank"],
       revalidate: 60,
     }
   )();
@@ -755,7 +756,7 @@ export function getLeaderboardData(
     () => fetchLeaderboardData(period, page, limit, sortBy, search, customFrom, customTo),
     [cacheKey],
     {
-      tags: ["leaderboard", `leaderboard:${period}`],
+      tags: [LEADERBOARD_CACHE_TAG, `leaderboard:${period}`],
       revalidate: 60,
     }
   )();
@@ -894,7 +895,7 @@ export function getUserRank(
     () => fetchAllTimeUserRank(username, sortBy),
     [`user-rank:${usernameCacheKey}:all:${sortBy}`],
     {
-      tags: ["leaderboard", "user-rank", `user-rank:${usernameCacheKey}`],
+      tags: [LEADERBOARD_CACHE_TAG, "user-rank", `user-rank:${usernameCacheKey}`],
       revalidate: 60,
     }
   )();

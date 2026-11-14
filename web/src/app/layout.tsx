@@ -9,6 +9,7 @@ import "./globals.css";
 import "react-toastify/dist/ReactToastify.css";
 import { cn } from "@/lib/utils";
 import { SITE_URL } from "@/lib/site";
+import { ogImageUrl } from "@/lib/og/ogImage";
 import { getTranslator } from "@/lib/i18n/server";
 import { LOCALE_TAGS } from "@/lib/i18n/config";
 import { resolveMessages } from "@/lib/i18n/messages";
@@ -33,9 +34,8 @@ const jetbrainsMono = JetBrains_Mono({
  * and description are now translated, and a constant cannot call `headers()`.
  *
  * `metadataBase` and the icons stay literal: a URL and a PNG do not vary by
- * language. The OG image URL keeps its English title/subtitle: this fork's OG
- * renderer ships no CJK font, so translated text would render as tofu until
- * the upstream OG rework lands in a later sync PR.
+ * language. The OG image URL carries the locale: the reworked renderer inlines
+ * a CJK face, so translated card copy no longer renders as tofu.
  *
  * `alternates` is deliberately *not* set here. Every route has its own address,
  * so a canonical declared at the layout would claim the docs page canonically
@@ -43,7 +43,7 @@ const jetbrainsMono = JetBrains_Mono({
  * linked to from outside.
  */
 export async function generateMetadata(): Promise<Metadata> {
-  const { t } = await getTranslator();
+  const { locale, t } = await getTranslator();
   const title = t("meta.title");
   const description = t("meta.description");
 
@@ -75,7 +75,7 @@ export async function generateMetadata(): Promise<Metadata> {
       // the share card cannot drift from the brand the way a checked-in PNG did.
       images: [
         {
-          url: "/api/og?title=Tokens&subtitle=The%20leaderboard%20for%20AI%20coding%20usage",
+          url: ogImageUrl({ locale }),
           width: 1200,
           height: 630,
           alt: t("meta.ogAlt"),
@@ -86,7 +86,7 @@ export async function generateMetadata(): Promise<Metadata> {
       card: "summary_large_image",
       title,
       description,
-      images: ["/api/og?title=Tokens&subtitle=The%20leaderboard%20for%20AI%20coding%20usage"],
+      images: [ogImageUrl({ locale })],
     },
   };
 }

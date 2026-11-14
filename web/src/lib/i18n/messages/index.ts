@@ -13,6 +13,7 @@ import legalEn from "./legal/en";
 import authEn from "./auth/en";
 import teamsEn from "./teams/en";
 import teamboardEn from "./teamboard/en";
+import ogEn from "./og/en";
 
 import commonZh from "./common/zh-CN";
 import navZh from "./nav/zh-CN";
@@ -27,6 +28,7 @@ import legalZh from "./legal/zh-CN";
 import authZh from "./auth/zh-CN";
 import teamsZh from "./teams/zh-CN";
 import teamboardZh from "./teamboard/zh-CN";
+import ogZh from "./og/zh-CN";
 
 import commonJa from "./common/ja";
 import navJa from "./nav/ja";
@@ -41,6 +43,7 @@ import legalJa from "./legal/ja";
 import authJa from "./auth/ja";
 import teamsJa from "./teams/ja";
 import teamboardJa from "./teamboard/ja";
+import ogJa from "./og/ja";
 
 /**
  * English is the source catalogue. Every other locale is typed as a deep
@@ -67,6 +70,7 @@ export type Messages = {
   auth: typeof authEn;
   teams: typeof teamsEn;
   teamboard: typeof teamboardEn;
+  og: typeof ogEn;
 };
 
 export type DeepPartial<T> = {
@@ -87,6 +91,7 @@ const EN: Messages = {
   auth: authEn,
   teams: teamsEn,
   teamboard: teamboardEn,
+  og: ogEn,
 };
 
 /**
@@ -110,6 +115,7 @@ const PARTIALS: Record<Locale, DeepPartial<Messages>> = {
     auth: authZh,
     teams: teamsZh,
     teamboard: teamboardZh,
+    og: ogZh,
   },
   ja: {
     common: commonJa,
@@ -125,6 +131,7 @@ const PARTIALS: Record<Locale, DeepPartial<Messages>> = {
     auth: authJa,
     teams: teamsJa,
     teamboard: teamboardJa,
+    og: ogJa,
   },
 };
 

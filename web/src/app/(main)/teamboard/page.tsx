@@ -16,6 +16,7 @@ import {
 import { isValidDateString, parseCustomDateRange } from "@/lib/leaderboard/dateRange";
 import type { Period, SortBy } from "@/lib/leaderboard/types";
 import { SITE_URL } from "@/lib/site";
+import { ogImageUrl } from "@/lib/og/ogImage";
 import { TeamboardClient } from "@/components/teamboard/Teamboard";
 
 // Reads searchParams on every request; `revalidate` + searchParams flaps on
@@ -32,7 +33,7 @@ export const metadata: Metadata = {
     siteName: "Tokens",
     images: [
       {
-        url: "/api/og?title=Teamboard&subtitle=Token+usage+ranked+within+a+team.",
+        url: ogImageUrl({ title: "Teamboard", subtitle: "Token usage ranked within a team." }),
         width: 1200,
         height: 630,
       },

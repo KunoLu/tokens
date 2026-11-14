@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { notFound, permanentRedirect } from 'next/navigation';
 import type { ProfileDevice } from '@/components/profile';
 import { getGitHubSocialLinks } from '@/lib/githubSocials';
+import { encodeOgActivity, ogImageUrl, topOgClients } from '@/lib/og/ogImage';
 import { loadPublicProfileDevicesForPage } from '@/lib/publicProfileDevices';
 import { loadPublicProfileForPage } from '@/lib/publicProfileData';
 import { loadProfileMembershipForPage } from '@/lib/teams/profileMembership';
@@ -40,6 +41,21 @@ async function getProfileData(
         return getProfileData(canonicalUsername, period);
       }
     }
+  }
+
+  // "We could not find out" is not "this person does not exist", and collapsing
+  // both into null made every failure a 404. That was survivable while this
+  // page was `no-store` and a bad render reached one reader. It is not now: a
+  // 404 carrying `s-maxage` is stored by the edge and handed to everyone in
+  // that colo for the life of the entry, so a few seconds of database trouble
+  // would delete a real person's profile for a minute and a half.
+  //
+  // Throwing puts a 5xx on the wire instead, which Caddy strips the shareable
+  // cache-control from — the failure stays a failure and nothing keeps it.
+  if (result.kind === "error" && result.status >= 500) {
+    throw new Error(
+      `Profile lookup for ${username} failed upstream with ${result.status}`,
+    );
   }
 
   if (result.kind !== "data") {
@@ -96,24 +112,31 @@ export async function generateMetadata({ params }: { params: Promise<{ username:
   // The card draws `title` large with `@handle` beneath it. Passing the
   // username as both printed the same word twice and never showed the person's
   // name; fall back to the username only when there is no display name.
+  const profile = data && !isBannedProfile(data) ? data : null;
   const displayName = data?.user?.displayName?.trim();
-  const og = new URLSearchParams({
-    title: displayName || username,
-    handle: username,
+  // Canonical casing, so the card and og:url match the page the link lands on.
+  const handle = data?.user?.username || username;
+  const image = ogImageUrl({
+    title: displayName || handle,
+    handle,
+    avatar: data?.user?.avatarUrl,
+    rank,
+    tokens: stats?.totalTokens || null,
+    cost: stats?.totalCost || null,
+    days: stats?.activeDays || null,
+    // More than the card shows: the renderer drops clients it has no logo for.
+    clients: profile ? topOgClients(profile.contributions, 8).join(",") : null,
+    activity: profile ? encodeOgActivity(profile.contributions) : null,
+    locale,
   });
-  if (data?.user?.avatarUrl) og.set("avatar", data.user.avatarUrl);
-  if (rank != null) og.set("rank", String(rank));
-  if (stats?.totalTokens) og.set("tokens", String(stats.totalTokens));
-  if (stats?.totalCost) og.set("cost", String(stats.totalCost));
-  const image = `/api/og?${og.toString()}`;
 
   // Upstream's i18n changeset points these four lookups at `meta.*`, where
   // they miss (or worse, hit the site-wide title); the keys live under
   // `profile.meta.*` and are used from there here.
   const shareTitle =
-    displayName && displayName !== username
-      ? t("profile.meta.shareTitleNamed", { displayName, handle: username })
-      : t("profile.meta.shareTitlePlain", { handle: username });
+    displayName && displayName !== handle
+      ? t("profile.meta.shareTitleNamed", { displayName, handle })
+      : t("profile.meta.shareTitlePlain", { handle });
   // The figures are formatted for the reader's locale here rather than inside
   // the catalogue: `formatNumber` needs the number, not a slot it would have to
   // re-parse.
@@ -123,22 +146,23 @@ export async function generateMetadata({ params }: { params: Promise<{ username:
         cost: formatCurrency(stats.totalCost, true, locale),
         rank: rank ?? 0,
       })
-    : t("profile.meta.description", { handle: username });
+    : t("profile.meta.description", { handle });
 
   return {
-    title: t("profile.meta.title", { handle: username }),
+    title: t("profile.meta.title", { handle }),
     description: shareDescription,
     openGraph: {
       title: shareTitle,
       description: shareDescription,
       type: "profile",
-      url: `${SITE_URL}${localizeHref(`/u/${username}`, locale)}`,
+      url: `${SITE_URL}${localizeHref(`/u/${handle}`, locale)}`,
       siteName: "Tokens",
       images: [{ url: image, width: 1200, height: 630, alt: shareTitle }],
     },
     twitter: {
       card: "summary_large_image",
       title: shareTitle,
+      description: shareDescription,
       images: [image],
     },
   };
