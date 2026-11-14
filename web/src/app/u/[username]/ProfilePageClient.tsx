@@ -244,6 +244,40 @@ export default function ProfilePageClient({
     setViewerLocalDate(toLocalDateString(new Date()));
   }, []);
 
+  /**
+   * The card at the top is about today and nothing else.
+   *
+   * It used to render `selectedContributionDay` — the same day the graph's
+   * breakdown renders — so clicking a cell updated two cards with the same
+   * three figures, one of them scrolled far out of view above the graph. Total
+   * tokens, cost and message count appeared twice on the page for the same day.
+   *
+   * `viewerLocalDate` is only known after mount, so the server render falls
+   * back to the range's end. For the default range that *is* today, which keeps
+   * the first paint from showing zeros and then filling in.
+   */
+  const todayContributionDate = viewerLocalDate ?? defaultContributionDate;
+  const todayContributionDay = useMemo(
+    () =>
+      getContributionDayForDate(data.contributions, todayContributionDate),
+    [data.contributions, todayContributionDate],
+  );
+  // The calendar day before, whatever "today" resolved to. Built in UTC so
+  // that subtracting a day is plain arithmetic on the date, with no DST hour
+  // to land on the wrong side of midnight.
+  const yesterdayContributionDate = useMemo(() => {
+    if (!todayContributionDate || !/^\d{4}-\d{2}-\d{2}$/.test(todayContributionDate)) {
+      return null;
+    }
+    const [year, month, day] = todayContributionDate.split("-").map(Number);
+    return new Date(Date.UTC(year, month - 1, day - 1)).toISOString().slice(0, 10);
+  }, [todayContributionDate]);
+  const yesterdayContributionDay = useMemo(
+    () =>
+      getContributionDayForDate(data.contributions, yesterdayContributionDate),
+    [data.contributions, yesterdayContributionDate],
+  );
+
   const user: ProfileUser = useMemo(
     () => ({
       username: data.user.username,
@@ -358,12 +392,8 @@ export default function ProfilePageClient({
         }
         today={
           <ProfileToday
-            day={selectedContributionDay}
-            // Compared against the viewer's actual current date, not against
-            // the default selection. "Nothing was picked" is not the same as
-            // "today": inside a historical range the default is that range's
-            // last day, and heading a 2024-12-31 card "Today" is simply wrong.
-            isToday={selectedContributionDate === viewerLocalDate}
+            day={todayContributionDay}
+            yesterday={yesterdayContributionDay}
           />
         }
         usageChart={

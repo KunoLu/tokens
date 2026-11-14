@@ -25,6 +25,7 @@ const messages = {
     label: "Read tokens",
     description: "A read token can open your private profile, badge, or embed. It cannot submit usage or turn private mode off. The plaintext is shown once.",
     create: "Create read token",
+    revokeConsequence: "Anything reading your private profile with it — a badge or an embed — will see “not found” until it is given a new token.",
     empty: "No read tokens yet.",
   },
   tokens: {

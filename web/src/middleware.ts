@@ -41,13 +41,16 @@ function rememberedLocale(request: NextRequest): Locale | null {
  * general and wrong here: it costs a full render and several queries on every
  * view of pages nobody needs a private copy of.
  *
- * This list is shorter than upstream's on purpose: their `/leaderboard` entry
- * rests on a perf change (the board ships whole, the client finds the viewer)
- * that this tree has not synced — our board still reads the session and a
- * sort cookie server-side, so it stays private. `/u/...` qualifies here
- * because a private profile renders the same "not found" for everyone and the
- * owner upgrades it in the browser, so the server HTML never depends on the
- * reader.
+ * `/leaderboard` earned its place rather than being relabelled into it. It
+ * used to render "Your position" from the session and order by a sort cookie,
+ * which genuinely made its HTML differ per reader. It now ships the whole
+ * ranking and the client finds the viewer's own row in it, which removes the
+ * personalisation instead of hiding it, and has the better property besides:
+ * the card and the table are read from one array, so they cannot disagree.
+ * This tree has no `/shame`, so upstream's entry for it is absent here.
+ * `/u/...` qualifies because a private profile renders the same "not found"
+ * for everyone and the owner upgrades it in the browser, so the server HTML
+ * never depends on the reader.
  *
  * Patterns are tested against the path with its locale prefix stripped, so
  * `/zh-CN/docs` and `/ja/u/x` get exactly the English page's cache header and
@@ -63,6 +66,19 @@ const SHARED_CACHE_ROUTES: ReadonlyArray<{
   { pattern: /^\/terms$/, query: new Set() },
   { pattern: /^\/privacy$/, query: new Set() },
   { pattern: /^\/u\/[^/]+$/, query: new Set(["period"]) },
+  // The board no longer reads a cookie or a session: it ships the whole
+  // ranking and the client finds the viewer's own row in it, so the document
+  // is the same for everyone. Of the parameters kept here only `period`,
+  // `from`/`to` and a `client:`/`model:` search change what the server
+  // computes — `sortBy`, `page` and plain text are applied to rows the client
+  // already holds. They stay in the allowlist anyway because these links get
+  // shared, and they cost nothing: the client writes them with `replaceState`,
+  // which is not a navigation, so ordinary use never mints a cache entry for
+  // them. Only somebody opening a shared link does.
+  {
+    pattern: /^\/leaderboard$/,
+    query: new Set(["period", "from", "to", "sortBy", "page", "search"]),
+  },
 ];
 
 /**
@@ -276,6 +292,7 @@ export const config = {
     "/docs",
     "/terms",
     "/privacy",
+    "/leaderboard",
     "/u/:username",
   ],
 };

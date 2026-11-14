@@ -7,17 +7,23 @@
  * candidates to move into `common` once a second page needs them translated.
  */
 const messages = {
+  "title": "Leaderboard",
+  "userHandle": "@{username}",
   "description": "AI coding token usage, reported by the Tokens CLI.",
   "totals": "Totals",
   "yourPosition": "Your position",
   "stats": {
+    "tokens": "Tokens",
+    "cost": "Cost",
     "developers": "Developers",
     "yourRank": "Your rank",
+    "yourRankValue": "#{rank}"
   },
   "period": {
     "label": "Period",
     "allTime": "All time",
     "today": "Today",
+    "yesterday": "Yesterday",
     "week": "Week",
     "month": "Month",
     "lastMonth": "Last month"
@@ -36,6 +42,7 @@ const messages = {
     "abbreviate": "Abbreviate numbers",
   },
   "table": {
+    "rank": "#",
     "developer": "Developer",
     "team": "Team",
     "group": "Group",

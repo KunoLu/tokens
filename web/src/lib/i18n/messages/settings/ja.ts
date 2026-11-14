@@ -23,6 +23,7 @@ const messages = {
     label: "読み取り Token",
     description: "読み取り Token で非公開のプロフィール、バッジ、埋め込みを開けます。使用量の送信やプライベートモードの解除はできません。平文は一度だけ表示されます。",
     create: "読み取り Token を作成",
+    revokeConsequence: "それを使って非公開プロフィールを読んでいたもの——バッジや埋め込み——は、新しい Token が渡されるまで「見つかりません」になります。",
     empty: "読み取り Token はまだありません。",
   },
   tokens: {

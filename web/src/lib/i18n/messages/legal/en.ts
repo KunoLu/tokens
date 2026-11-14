@@ -123,8 +123,12 @@ const messages = {
       revokeLabel: "Revoke API tokens",
       stop: "— stop the background service; nothing is sent unless the CLI sends it.",
       stopLabel: "Stop submitting",
+      stopMcp: "— run {command}. Your next submission sends no names and clears the list stored on your profile.",
+      stopMcpLabel: "Stop sharing MCP server names",
     },
     collect: {
+      mcp: "This is off by default. If you run {enable}, or pass {flag} to a single submit, each submission includes the names of the MCP servers configured for the clients that submission covers: Claude Code ({claudePath}), Cursor ({cursorPath}), Kiro ({kiroPath}) and OpenCode skills ({opencodePath}). Only the names are read, never the commands, arguments, URLs, credentials or environment values beside them, and no other client's configuration is opened. We use the names only to show the tools you use on your profile; counting usage does not need them.",
+      mcpLabel: "Your MCP server names, only if you opt in.",
       banned: "The time of the ban and the reason for it.",
       bannedLabel: "If an account is banned.",
       fromCli: "Daily totals of tokens and estimated cost, broken down by AI coding client and by model, with the dates they belong to. Each submission is attributed to a device you name, so the same day reported from a laptop and a desktop is not double-counted.",
@@ -168,11 +172,13 @@ const messages = {
       "2": "Source code, file contents, file paths, repository names or directory names.",
       "3": "Your GitHub repositories, issues, or any private GitHub data.",
       "4": "Payment details. Tokens is free and takes no payments.",
+      "5": "MCP server names, unless you opt in — and never the commands, URLs, credentials or settings configured for them.",
     },
     public: {
       p1: "Tokens is a public leaderboard, so this matters more here than on most sites. Your username, display name, avatar, usage totals, per-client and per-model breakdown, daily history, device names and rank are visible to anyone, including people who are not signed in, and are served through our public API, embeddable cards and share images.",
       p2: "Your email address is never shown publicly and is not part of any API response.",
       p3: "Because profiles are public, anyone can view them without signing in.",
+      p4: "MCP server names you opt in to sharing are shown in full on your profile and in its API responses. Private mode hides them from other people along with the rest of the profile, but they are still sent to and stored by Tokens. To stop sending them at all, leave the option off.",
     },
     security: {
       p1: "Session tokens are stored hashed, never in plaintext. Traffic is served over HTTPS. The session cookie is HTTP-only, so page scripts cannot read it. No system is perfectly secure, and we cannot guarantee absolute security, but if we discover a breach affecting your personal information we will notify affected users and any regulator the law requires.",
@@ -188,7 +194,7 @@ const messages = {
     },
     short: {
       p1: "Tokens counts how many tokens you spend on AI coding tools and ranks that publicly. To do it we need an account — your email address and a password — and the usage totals our CLI computes on your machine.",
-      p2: "The CLI reads the session files your AI coding tools already write to disk and adds them up locally. Only the totals are uploaded — token counts, cost figures, model names, client names and timestamps. The contents of those sessions never leave your machine: not your prompts, not the model's replies, not your code, not your file paths, not your repository or directory names.",
+      p2: "The CLI reads the session files your AI coding tools already write to disk and adds them up locally. Only the totals are uploaded — token counts, cost figures, model names, client names and timestamps. The contents of those sessions never leave your machine: not your prompts, not the model's replies, not your code, not your file paths, not your repository or directory names. The one optional extra is the names of your configured MCP servers, which are sent only if you opt in.",
       p3a: "You can verify this rather than trust it. The CLI is open source, one parser per client, and",
       p3b: "prints the exact payload without uploading anything.",
     },

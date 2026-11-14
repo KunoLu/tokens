@@ -117,10 +117,12 @@ const messages = {
 
   today: {
     heading: "Today",
-    dayFallback: "Day",
+    yesterdayHeading: "Yesterday",
+    dayAria: "Day",
     usageAria: "{heading} usage",
     messages: "Messages",
     empty: "Nothing recorded for this day yet.",
+    emptyYesterday: "Nothing recorded for this day.",
     clientMessages: "{count, plural, one {# msg} other {# msg}}",
   },
 

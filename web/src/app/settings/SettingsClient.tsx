@@ -237,8 +237,8 @@ const ModalCard = tw(
   "max-h-[calc(100dvh-2rem)] w-[calc(100%-32px)] max-w-[480px] overflow-y-auto rounded-2xl border bg-background p-6 shadow-[0_16px_48px_rgba(0,0,0,0.35)] outline-none"
 );
 
-const ModalTitle = tw("h3", "mb-3 text-base font-semibold text-[var(--danger)]");
-const ModalBody = tw("p", "mb-5 text-sm leading-normal text-muted-foreground");
+export const ModalTitle = tw("h3", "mb-3 text-base font-semibold text-[var(--danger)]");
+export const ModalBody = tw("p", "mb-5 text-sm leading-normal text-muted-foreground");
 
 const ModalBulletList = tw(
   "ul",
@@ -250,14 +250,14 @@ const ModalInput = tw(
   "mb-4 box-border w-full rounded-md border bg-muted px-3 py-2 text-sm text-foreground outline-none focus:border-[var(--danger)] focus:shadow-[0_0_0_2px_color-mix(in_srgb,var(--danger)_20%,transparent)]"
 );
 
-const ModalActions = tw("div", "flex justify-end gap-2");
+export const ModalActions = tw("div", "flex justify-end gap-2");
 
-const CancelButton = tw(
+export const CancelButton = tw(
   "button",
   "cursor-pointer rounded-md border bg-transparent px-4 py-1.5 text-[13px] font-medium text-foreground transition-all duration-150 hover:bg-muted"
 );
 
-const ConfirmDangerButton = ({
+export const ConfirmDangerButton = ({
   $disabled,
   className,
   ...props
@@ -294,7 +294,7 @@ const StepDot = ({ $active }: { $active: boolean }) => (
  * most destructive controls in the product, so a keyboard or screen-reader
  * user has to be able to tell the dialog is there and get back out of it.
  */
-function ModalShell({
+export function ModalShell({
   labelledBy,
   dismissable,
   onClose,

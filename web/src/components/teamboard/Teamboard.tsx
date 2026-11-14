@@ -313,7 +313,11 @@ export function TeamboardClient({ teams, board, currentUserId, period: periodPro
             aria-label={t("teamboard.periodFilter")}
             className="[&>*]:h-10 [&>*]:px-3.5 sm:[&>*]:h-8 sm:[&>*]:px-3"
           >
-            {PERIODS.map((p) => (
+            {/* Yesterday is a leaderboard period; the teamboard API has no
+                yesterday lane (an unknown period silently falls back to
+                "all"), so the shared PERIODS list is filtered here rather than
+                offering a switch that would mislabel the data. */}
+            {PERIODS.filter((p) => p.value !== "yesterday").map((p) => (
               <ToggleGroupItem key={p.value} value={p.value}>
                 {t(PERIOD_LABEL_KEYS[p.value])}
               </ToggleGroupItem>
