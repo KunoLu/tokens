@@ -8,7 +8,10 @@ import type { ProfileData } from "./ProfilePageClient";
 // DOM globals must exist before react-dom or the component module load, so
 // everything below that touches them is a deliberate dynamic import (module
 // loading boundary — static imports would hoist above the registration).
-GlobalRegistrator.register();
+// All happy-dom test files share one bun process; register exactly once.
+if (!GlobalRegistrator.isRegistered) {
+  GlobalRegistrator.register();
+}
 (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
 
 // Viewer identity and zone arrive over fetch; the router, locale and settings
@@ -210,6 +213,10 @@ afterEach(() => {
 afterAll(() => {
   globalThis.fetch = REAL_FETCH;
   (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = false;
+  // happy-dom's globals (Request/Response/window/…) must not leak into the
+  // other test files that share this bun process; under --randomize any
+  // file can run after this one.
+  GlobalRegistrator.unregister();
 });
 
 describe("ProfilePageClient viewer-zone day assignment (issue #21, rule 3)", () => {

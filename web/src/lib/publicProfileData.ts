@@ -16,7 +16,7 @@ import { mergeSpeedUsage } from "@/lib/speedUsage";
 import {
   addDaysToDateString,
   dateStringInTimeZone,
-  isValidIanaTimeZone,
+  normalizeIanaTimeZone,
 } from "@/lib/timezone";
 
 const LEGACY_CLIENT_ALIASES: Record<string, string> = { kilocode: "kilo" };
@@ -108,10 +108,12 @@ export async function getPublicProfileResponse(
     // than a silent fall back to UTC, which would mis-assign days while
     // looking healthy.
     const timeZoneParam = searchParams.get("tz");
-    if (timeZoneParam !== null && !isValidIanaTimeZone(timeZoneParam)) {
+    const viewerTimeZone =
+      timeZoneParam === null ? null : normalizeIanaTimeZone(timeZoneParam);
+    if (timeZoneParam !== null && viewerTimeZone === null) {
       return NextResponse.json({ error: "Invalid time zone" }, { status: 400 });
     }
-    const timeZone = timeZoneParam ?? "UTC";
+    const timeZone = viewerTimeZone ?? "UTC";
     const periodRange = getProfilePeriodDateRange(period, new Date(), timeZone);
     const chartRange = periodRange ?? getRollingProfileDateRange(new Date(), timeZone);
 

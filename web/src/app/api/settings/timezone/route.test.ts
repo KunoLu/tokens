@@ -67,8 +67,12 @@ function missingColumnError() {
 afterEach(() => {
   // The mock outlives this file in the shared module registry; leave it
   // answering "no session", which is what an unauthenticated request sees.
+  // Queued answers and recorded writes are drained too, so shuffled test
+  // order (--randomize) cannot leak one test's leftovers into another.
   session = null;
   updateError = null;
+  selectResults.length = 0;
+  updateValues.length = 0;
 });
 
 describe("GET /api/settings/timezone", () => {
@@ -122,6 +126,19 @@ describe("PATCH /api/settings/timezone", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ timezone: "America/New_York" });
     expect(updateValues.at(-1)).toMatchObject({ timezone: "America/New_York" });
+  });
+
+  test("stores the runtime's own spelling, not the submitted one", async () => {
+    session = { id: "u1", username: "alice" };
+    // "asia/shanghai" constructs only via case-insensitive lookup; what lands
+    // in the database is this runtime's resolvedOptions spelling.
+    const stored = new Intl.DateTimeFormat("en-US", {
+      timeZone: "asia/shanghai",
+    }).resolvedOptions().timeZone;
+    const response = await patch({ timezone: "asia/shanghai" });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ timezone: stored });
+    expect(updateValues.at(-1)).toMatchObject({ timezone: stored });
   });
 
   test("null clears the override back to auto-detect", async () => {

@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import { getSessionFromRequest } from "@/lib/auth/requestSession";
 import { db, users } from "@/lib/db";
 import { PRIVATE_CACHE_CONTROL } from "@/lib/privacy";
-import { isValidIanaTimeZone } from "@/lib/timezone";
+import { normalizeIanaTimeZone } from "@/lib/timezone";
 
 function timezoneFromBody(body: unknown): unknown {
   if (!body || typeof body !== "object" || !("timezone" in body)) return undefined;
@@ -76,7 +76,11 @@ export async function PATCH(request: Request) {
     }
 
     const timezone = timezoneFromBody(await request.json().catch(() => null));
-    if (timezone !== null && (typeof timezone !== "string" || !isValidIanaTimeZone(timezone))) {
+    // What gets stored is the runtime's resolvedOptions spelling, not the
+    // submitted one ("asia/shanghai" lands as "Asia/Shanghai").
+    const normalized =
+      typeof timezone === "string" ? normalizeIanaTimeZone(timezone) : null;
+    if (timezone !== null && normalized === null) {
       return NextResponse.json(
         { error: "`timezone` must be a valid IANA time zone name or null" },
         { status: 400 }
@@ -85,10 +89,10 @@ export async function PATCH(request: Request) {
 
     await db
       .update(users)
-      .set({ timezone, updatedAt: new Date() })
+      .set({ timezone: normalized, updatedAt: new Date() })
       .where(eq(users.id, session.id));
 
-    return NextResponse.json({ timezone });
+    return NextResponse.json({ timezone: normalized });
   } catch (error) {
     if (isMissingTimezoneColumnError(error)) {
       return NextResponse.json(MIGRATION_REQUIRED, { status: 503 });

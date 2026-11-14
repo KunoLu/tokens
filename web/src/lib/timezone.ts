@@ -10,16 +10,37 @@
  */
 
 /**
- * Canonical acceptance list: exactly what Intl.supportedValuesOf("timeZone")
- * reports, plus "UTC" (which a runtime may legitimately leave out of that
- * list). The Intl constructor alone is too lenient — it also takes offset
- * forms ("+08:00"), any casing, and alias names ("US/Eastern") — so the
- * canonical set is checked instead of constructor success.
+ * Acceptance and normalization in one rule; PATCH and the `?tz` parameter
+ * share it. Three checks, all required:
+ *  1. not an offset spelling — no leading "+"/"-", and no "UTC±…"/"GMT±…"
+ *     form ("UTC+8", "GMT+8");
+ *  2. either literally "UTC" or a name containing "/" — so slash-less
+ *     abbreviations like "EST" (and "GMT") are out even when the constructor
+ *     would take them;
+ *  3. `new Intl.DateTimeFormat("en-US", { timeZone })` must construct.
+ * What comes back is the runtime's own resolvedOptions().timeZone spelling,
+ * and that is what gets stored — "asia/shanghai" as "Asia/Shanghai", and on
+ * Node "Asia/Kolkata" as "Asia/Calcutta" (Bun keeps "Asia/Kolkata").
+ *
+ * The constructor, not Intl.supportedValuesOf("timeZone"), is the source of
+ * truth because that list is runtime-specific: Node 22 lists only the old
+ * names (Asia/Calcutta, Europe/Kiev, Asia/Saigon) and omits "UTC", Bun the
+ * reverse, so either list rejects users the other runtime accepts.
  */
-const CANONICAL_TIME_ZONES = new Set(Intl.supportedValuesOf("timeZone"));
-
-export function isValidIanaTimeZone(value: string): boolean {
-  return value === "UTC" || CANONICAL_TIME_ZONES.has(value);
+export function normalizeIanaTimeZone(value: string): string | null {
+  // No IANA name starts with a sign; offset forms like "+08:00" do
+  // construct, so they are rejected explicitly, as are "UTC+8"/"GMT+8" style
+  // spellings (which mostly fail to construct anyway).
+  if (value.startsWith("+") || value.startsWith("-")) return null;
+  if (/^(?:utc|gmt)[+-]/i.test(value)) return null;
+  if (value !== "UTC" && !value.includes("/")) return null;
+  try {
+    return new Intl.DateTimeFormat("en-US", { timeZone: value })
+      .resolvedOptions().timeZone;
+  } catch {
+    // Empty, over-long, and simply unknown names all land here.
+    return null;
+  }
 }
 
 /**
@@ -62,7 +83,7 @@ export function addDaysToDateString(dateString: string, days: number): string {
 /** The browser's detected zone, or null when detection yields nothing valid. */
 export function detectBrowserTimeZone(): string | null {
   const detected = Intl.DateTimeFormat().resolvedOptions().timeZone;
-  return typeof detected === "string" && isValidIanaTimeZone(detected)
+  return typeof detected === "string" && normalizeIanaTimeZone(detected) !== null
     ? detected
     : null;
 }
@@ -70,12 +91,14 @@ export function detectBrowserTimeZone(): string | null {
 /**
  * The viewer's effective zone: their saved account setting when present and
  * valid, otherwise their browser's detection. Never the profile owner's —
- * day assignment follows whoever is looking (issue #21, rule 3).
+ * day assignment follows whoever is looking (issue #21, rule 3). The saved
+ * value comes back as stored (the server already normalized it on write);
+ * validation only decides whether it wins.
  */
 export function resolveViewerTimeZone(
   saved: string | null | undefined,
   detected: string | null,
 ): string | null {
-  if (saved && isValidIanaTimeZone(saved)) return saved;
+  if (saved && normalizeIanaTimeZone(saved) !== null) return saved;
   return detected;
 }

@@ -11,6 +11,7 @@
     "typecheck": "tsc --noEmit",
 
     "test:migrations": "drizzle-kit migrate && bun scripts/check-migrations.ts",
+    "test:node": "node --test scripts/test-timezone-node.mjs",
     "test:teams": "bun scripts/check-teams-invariants.ts",
     "test:private": "bun scripts/check-private-mode.ts",
 

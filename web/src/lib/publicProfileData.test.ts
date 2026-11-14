@@ -1,5 +1,5 @@
 /// <reference types="bun-types" />
-import { describe, expect, mock, test } from "bun:test";
+import { afterEach, describe, expect, mock, test } from "bun:test";
 import * as schema from "./db/schema";
 
 // Every db.select() chain resolves to the next queued result, in the order
@@ -28,6 +28,12 @@ const {
   getPublicProfileResponse,
   getRollingProfileDateRange,
 } = await import("./publicProfileData");
+
+// Queued answers a test did not consume (a 400 never reaches the database)
+// must not leak into the next test when order shuffles under --randomize.
+afterEach(() => {
+  selectResults.length = 0;
+});
 
 const model = (tokens: number, speedUsage?: unknown[]) => ({
   tokens,

@@ -8,6 +8,21 @@ const Section = "mb-6 rounded-xl border bg-card p-6";
 const SectionTitle = "mb-4 text-lg font-semibold text-foreground";
 
 /**
+ * One spelling to compare by: both the saved value and every list entry go
+ * through this runtime's resolvedOptions canonicalization, so an old IANA
+ * spelling stored by the server (Node resolves Asia/Kolkata to
+ * Asia/Calcutta) still matches a browser list that only carries the new one.
+ */
+function canonicalTimeZoneName(zone: string): string {
+  try {
+    return new Intl.DateTimeFormat("en-US", { timeZone: zone })
+      .resolvedOptions().timeZone;
+  } catch {
+    return zone;
+  }
+}
+
+/**
  * Account time zone override (issue #21): empty means auto-detect from the
  * browser. The saved value wins everywhere the viewer looks at a profile —
  * their own or anyone else's.
@@ -28,11 +43,32 @@ export default function TimezoneSection() {
   }, []);
 
   const zones = useMemo<string[]>(() => {
-    if (typeof Intl.supportedValuesOf === "function") {
-      return Intl.supportedValuesOf("timeZone");
-    }
-    return detected ? [detected] : [];
+    const listed =
+      typeof Intl.supportedValuesOf === "function"
+        ? Intl.supportedValuesOf("timeZone")
+        : [];
+    return listed.length > 0 ? listed : detected ? [detected] : [];
   }, [detected]);
+
+  // The option matching the saved value once both sides share one spelling.
+  // A saved value no option matches even then (a zone this browser's list
+  // does not carry at all) is appended raw, so the select can still show it
+  // instead of silently displaying the auto-detect entry.
+  const selectedZone = useMemo<string>(() => {
+    if (timeZone === null) return "";
+    const target = canonicalTimeZoneName(timeZone);
+    return (
+      zones.find((zone) => canonicalTimeZoneName(zone) === target) ?? timeZone
+    );
+  }, [timeZone, zones]);
+
+  const options = useMemo<string[]>(
+    () =>
+      selectedZone !== "" && !zones.includes(selectedZone)
+        ? [...zones, selectedZone]
+        : zones,
+    [selectedZone, zones],
+  );
 
   const load = useCallback(async () => {
     setLoadFailed(false);
@@ -97,7 +133,7 @@ export default function TimezoneSection() {
           </label>
           <select
             id={selectId}
-            value={loaded ? (timeZone ?? "") : ""}
+            value={loaded ? selectedZone : ""}
             disabled={!loaded || isSaving}
             onChange={(event) => void onChange(event)}
             aria-invalid={error ? true : undefined}
@@ -107,7 +143,7 @@ export default function TimezoneSection() {
             <option value="" className="bg-card">
               {t("settings.timezone.autoDetect")}
             </option>
-            {zones.map((zone) => (
+            {options.map((zone) => (
               <option key={zone} value={zone} className="bg-card">
                 {zone}
               </option>

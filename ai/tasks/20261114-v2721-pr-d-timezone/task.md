@@ -6,9 +6,9 @@ mode_source: user
 mode_note: 用户 2026-11-14 01:50 在群内开启全自动模式直到 v1.0.5 按模板发布且文档补全；用户 2026-11-14 08:01 群内确认（乙：存账号设置，留空按浏览器自动检测），Lord 记录；迁移随 PR D 一起审，生产环境执行迁移需用户另行批准。本会话交付清单含 Book Gate Plan 与完整验证记录，按 strict 执行。
 status: "done"
 branch: fix/21-timezone-setting
-created_at: '2026-11-14T17:33:43.000000+08:00'
-updated_at: "2026-11-14T18:47:37.208102+08:00"
-completed_at: "2026-11-14T18:47:37.208102+08:00"
+created_at: '2026-11-14T17:36:18.000000+08:00'
+updated_at: "2026-11-14T19:52:54.196756+08:00"
+completed_at: "2026-11-14T19:52:54.196756+08:00"
 ---
 # 修复 issue #21（PR D）— 个人页按看的人时区归日 + 账号设置时区选项
 
@@ -54,13 +54,13 @@ completed_at: "2026-11-14T18:47:37.208102+08:00"
 
 TDD seam 清单（沿用本仓既有测试位置与 mock 惯例，均为公开接口）：
 
-- `web/src/lib/timezone.ts`（新）：纯函数 `isValidIanaTimeZone`、`dateStringInTimeZone`、`addDaysToDateString`、`resolveViewerTimeZone`，bun test 直测。
+- `web/src/lib/timezone.ts`（新）：纯函数 `normalizeIanaTimeZone`（第五轮前名 `isValidIanaTimeZone`）、`dateStringInTimeZone`、`addDaysToDateString`、`resolveViewerTimeZone`，bun test 直测；同一校验规则另有 node --test 用例（web/scripts/test-timezone-node.mjs，直引生产文件）。
 - `web/src/lib/publicProfileData.ts`：`getProfilePeriodDateRange` / `getRollingProfileDateRange` 导出后按固定时刻直测；路由层 `tz` 查询参数经 mock 的 db 测响应区间与 400。
 - `web/src/app/api/settings/timezone/route.ts`（新）：mock db 与 getSessionFromRequest，测未登录 401、非法时区 400、写入与清空、读取。
 
 ## 进度
 
-- 2026-11-14 17:29:10 +08:00 主 agent：调查完成（首个实测时间戳；调查本身在此之前进行）。结论：
+- 2026-11-14 17:20:02 +08:00 主 agent：第一轮开始（会话首条消息时间）；调查完成于 17:29:10（首个实测时间戳；调查本身在此之前进行）。结论：
   1. 图表结束日来自 `web/src/lib/publicProfileData.ts` 的 `getRollingProfileDateRange`（all 期间，滚动一年）与 `getProfilePeriodDateRange`（week/month），两者用 `toISOString().slice(0, 10)` 取 UTC 日期，`chartRange.end` 即服务器 UTC「今天」，与 issue 实测一致。
   2. period=week/month 时服务器按 periodRange 过滤 daily_breakdown，范围外的行不进响应；UTC+8 看的人的「今天」行（提交者本地日期）在 UTC 午夜前落在范围外，纯前端改区间拿不回该行，故 API 需要 `tz` 查询参数。
   3. 「今天/昨天」卡片（ProfilePageClient）已在挂载后用浏览器本地日期（`toLocalDateString(new Date())`），但不支持设置覆盖；注释明确首屏用区间末日兜底是「安全方向」。
@@ -71,8 +71,8 @@ TDD seam 清单（沿用本仓既有测试位置与 mock 惯例，均为公开�
   8. u 页是 ISR（`revalidate = 60`）且经 `unstable_cache` 按 username/period/locale 缓存，服务器渲染不能按看的人会话分叉；看的人时区只能在客户端挂载后解析，首屏维持服务器区间作兜底（取舍说明 2）。
   9. `/api/auth/session` 走 `getSession()`（cookie），已联表查出整行 users；加 timezone 字段为零额外查询。
   10. 文档位置：站内 docs 页 `web/src/app/(main)/docs/page.tsx` 按 Section 组织，文案在 messages/docs 三语；时区规则作为新 Section 写入。
-- 2026-11-14 17:33:43 +08:00 主 agent：创建本文件与 index 行；Book Gate Plan 登记；DDIA、Legacy、Refactoring 三项门禁评审结论写入门禁结论节。
-- 2026-11-14 17:33:43–17:55:41 +08:00 主 agent：TDD 三切片与收尾，全部实测（各步时钟时间在会话内顺序推进，逐条命令输出留存于会话记录）：
+- 2026-11-14 17:36:18 +08:00 主 agent：创建本文件（index 行 17:36:37 写入）；Book Gate Plan 登记；DDIA、Legacy、Refactoring 三项门禁评审结论写入门禁结论节。
+- 2026-11-14 17:36:18–17:55:41 +08:00 主 agent：TDD 三切片与收尾，全部实测（各步时钟时间在会话内顺序推进，逐条命令输出留存于会话记录）：
   1. 切片一：`web/src/lib/timezone.test.ts` 先红（模块不存在，1 error）→ 新建 `web/src/lib/timezone.ts`（isValidIanaTimeZone / dateStringInTimeZone / addDaysToDateString / detectBrowserTimeZone / resolveViewerTimeZone）→ 转绿 12 pass。
   2. 依赖恢复：`bun install --frozen-lockfile`（658 包；此前 web/node_modules 缺失，曾致一次 route 测试加载失败）。
   3. 切片二：`publicProfileData.test.ts` 追加 5 条（range 固定时刻三语边界、闰年 2/29 收拢、tz 参数驱动与非法 400、payload 不带 timezone）先红 5 fail（另 3 条保护性断言先绿）→ publicProfileData 两个 range 函数改按 timeZone 归日并导出、路由解析 `tz`（非法 400）→ 与切片一合计 20 pass。路由测试的期望值用 en-CA 直出独立算法，与实现的 formatToParts 组装互为交叉验证。
@@ -99,6 +99,26 @@ TDD seam 清单（沿用本仓既有测试位置与 mock 惯例，均为公开�
   7. 依赖卫生：`bun add` 夹带的无关改动已还原——package.json 空行格式恢复（只新增一行 devDep）、bun.lock 中 tokens-cli 1.0.2→1.0.4 的无关升级回退（只留 happy-dom 及其 7 个传递依赖条目）；`bun install --frozen-lockfile` 实测 no changes，全量复跑 164 pass。
   8. 验证实跑（数字见证据节）：tsc 18:36:58 exit 0；lint 18:37:18（0 errors/1 warning，与 base 8715c0e 第一轮实测基线同一条 docs/page.tsx no-img-element 警告，新增 0）；bun test 18:37:26（164 pass/0 fail/20 文件，较第二轮 150 净增 14）；build 18:37:51 exit 0。ponytail-review 第三轮：Lean already. Ship.（唯一发现是 bun add 夹带，已当场还原）；可读性复核通过。
 
+- 2026-11-14 19:04:31–19:14:10 +08:00 主 agent：第四轮（Researchy 18:56 指出的阻塞：isValidIanaTimeZone 依赖 supportedValuesOf 列表，Node 22 列表只有旧名且无 "UTC"，Bun 恰好相反；主 agent 已在 Node 22.20.0 复现）。事实与步骤：
+  1. 19:04:31 任务重开（done→planned，保留旧完成事件）、19:04:32 进入 in-progress；Legacy/Refactoring 两门禁按本轮范围复核：characterized / proceed（结论见门禁结论节）。
+  2. 双运行时探针（实现前，为测试期望值取独立事实源）：Node 22.20.0 构造器把 Asia/Kolkata→Asia/Calcutta、Europe/Kyiv→Europe/Kiev、Asia/Ho_Chi_Minh→Asia/Saigon 解析为旧名且两种写法都接受；Bun 1.4.4 两种写法原样保留；两运行时对 GMT+8/UTC+8/GMT+08:00/UTC-5/空串/超长串均抛 RangeError，对 "+08:00"/"-05:00" 构造成功，对错误大小写经大小写不敏感查找构造成功。supportedValuesOf 实测：Node 缺 Asia/Kolkata、Europe/Kyiv、UTC；Bun 缺 Asia/Calcutta、Europe/Kiev。
+  3. 测试先行：先红 19:06:46（15 pass/2 fail——timezone.test.ts 新「新旧写法均接受」用例在 Bun 下 Asia/Calcutta 被列表法拒绝；TimezoneSection.test.tsx 新建用例中已存 Asia/Kolkata 不在打桩列表时 select.value 为 ""，即显示为自动检测）→ isValidIanaTimeZone 改构造器判定（+/- 开头偏移写法显式拒绝；构造抛错即拒；解析名与输入仅大小写不同即拒，新旧写法名差异放行）、TimezoneSection 在已存值缺席列表时向选项追加该值 → 转绿 19:07:21（两文件 17 pass/0 fail）。
+  4. 全量首跑暴露 happy-dom 重复注册（两个组件测试文件同进程各 register 一次，ProfilePageClient.test.tsx 报 already registered）：两文件统一改 isRegistered 守卫后全量转绿。
+  5. 双运行时复验（转绿后执行）：同一份探针脚本直接 import 生产文件 web/src/lib/timezone.ts，Node v22.20.0 与 Bun 1.4.4 各跑一遍，27 个值判定逐行一致（明细见证据节）；探针脚本验毕即删。
+  6. 验证实跑（数字见证据节）：tsc 19:08:00 exit 0；lint 19:08:17（0 errors/1 warning，与 origin/main 8715c0e 第一轮实测基线同一条 docs/page.tsx no-img-element 警告，新增 0）；bun test 19:10:12 全量 165 pass/0 fail；build 19:10:25 exit 0。本轮未启动 next 冒烟：改动仅限校验纯函数与设置页下拉框选项列表，路由行为由既有路由测试与双运行时探针钉住，无新请求面；无遗留进程。
+  7. 接受集变化记录：第三轮拒绝的别名（US/Eastern、Asia/Chungking、Asia/Chongqing、GMT）本轮起接受——新旧写法必须同接受，而无列表时无法区分「改名对」与「历史别名」；落库存提交写法原文、显示侧有下拉框补齐，别名值在归日计算上与目标名等效。PATCH 与 ?tz 仍共用同一函数，接受集变化两处同时生效。
+- 2026-11-14 19:28:10 +08:00 主 agent：开始第五轮（Reviewy 19:00 对 1485fc4 判 NOT CLEAN，三条阻塞：A 时区校验改为三规则＋通过后存运行时 resolvedOptions 规范化写法、加 node --test 用例与 package.json 脚本、下拉框两侧先换算同写法再匹配；B ProfilePageClient.test.tsx afterAll 补 GlobalRegistrator.unregister() 并以 bun test --randomize --seed=3475213529 复验零挂；C task.md 时间戳与「未迁移库登录」措辞更正、模型表补第三/四轮）。可选项：route.test.ts 两条 PATCH 测试的顺序依赖顺手修。Legacy/Refactoring 两门禁按本轮范围复核：characterized / proceed（结论见门禁结论节）。
+- 2026-11-14 19:28:10–19:44:10 +08:00 主 agent：第五轮实现与验证，全部实测（各步时钟时间为命令发出时刻，逐条输出留存于会话记录）：
+  1. 基线复现：`bun test --randomize --seed=3475213529` 在改动前实跑 159 pass/6 fail——middleware 3 条与 publicProfileData 1 条系 happy-dom 全局泄漏，route.test.ts 2 条 PATCH 系 updateValues 队列未清空。
+  2. 先红（实现前首跑）：timezone.test.ts 校验块改写后报 normalizeIanaTimeZone 未导出（1 error）；route.test.ts 新「存规范化写法」用例得 400（1 fail）；TimezoneSection.test.tsx 新「旧名匹配新名选项」用例下 select 仍追加原文（1 fail）；node 用例 import 失败。19:43:38 以暂存实现文件复证红（1 error），恢复后同刻转绿（timezone.test.ts 16 pass、node 用例 2 pass）。
+  3. 阻塞 A 实现：`isValidIanaTimeZone` 更名重写为 `normalizeIanaTimeZone`——三规则全满足（不以 +/- 开头且非 UTC±/GMT± 写法；为 "UTC" 或带 "/"；Intl 构造器能构造）才返回 resolvedOptions().timeZone 的写法，否则 null。PATCH 存规范化写法并原样返回；?tz 共用同一函数（规范化结果只用于归日计算，等价）。EST/GMT 由通过转拒绝（无 "/" 且非 "UTC"），asia/shanghai 由拒绝转接受并存 Asia/Shanghai；Etc/GMT+8 带 "/" 仍接受。
+  4. 下拉框：TimezoneSection 新增 canonicalTimeZoneName 辅助，已存值与每个选项先经本运行时 resolvedOptions 换算成同一写法再比；换算后仍无匹配才追加原值 option 兜底。组件测试用打桩的 resolvedOptions 模拟会规范化别名的浏览器（Bun 1.4.4 实测不规范化改名对，见证据节），旧名 Asia/Calcutta 匹配上新名选项 Asia/Kolkata，不再显示为自动检测。
+  5. node 用例：web/scripts/test-timezone-node.mjs 直接 import 生产文件 src/lib/timezone.ts（Node 22.20.0 类型剥离实测可用，无需新包），node --test 跑同一接受/拒绝集；web/package.json 加 test:node 脚本；CI Web job 加 setup-node@22 与「Time zone validation under Node」一步。
+  6. 阻塞 B 与可选项：ProfilePageClient.test.tsx afterAll 加 GlobalRegistrator.unregister()；route.test.ts afterEach 加队列与 updateValues 清空、publicProfileData.test.ts 加 afterEach 队列清空（400 用例入队不消费的遗留会串扰下一条）。首轮修复后扫 20 个 seed 发现 11/13/29 仍挂（21/11/11 fail）——bun 按文件逐个加载执行，TimezoneSection.test.tsx 在 ProfilePageClient 之后跑时其模块守卫会重新注册且无人注销，后续文件被污染；给 TimezoneSection.test.tsx afterAll 加带 isRegistered 守卫的 unregister 后 20 个 seed 全绿。
+  7. resolveViewerTimeZone/detectBrowserTimeZone 保持返回原值（校验只决定是否采纳）：服务器落库时已规范化，客户端不再改写；ProfilePageClient 钉扎的「设置胜过检测」用例在冻结 resolvedOptions 的时钟打桩下仍通过。
+  8. 验证实跑（数字见证据节）：tsc 19:40:34 exit 0；lint 19:40:38（0 errors/1 warning，与 origin/main 8715c0e 基线同一条 docs/page.tsx no-img-element，新增 0）；bun test 19:41:35 全量 167 pass/0 fail；randomize 指定 seed 19:41:35 167 pass/0 fail，另 19 个 seed 全绿；node 用例 2 pass/0 fail；build 19:40:53 exit 0。本轮未启动 next 冒烟：接受集变化由路由测试与 Node 实跑钉住，无新请求面；无遗留进程。
+  9. ponytail-review 第五轮：diff 逐文件过一遍——normalizeIanaTimeZone 三个调用方全用到返回值、canonicalTimeZoneName 唯一消费方是下拉框匹配、无新依赖（node 用例用 node:test/node:assert 与既有生产文件）、无投机抽象。结论：Lean already. Ship. 可读性复核：手写改动逐段复读，注释说明三规则与双运行时差异；vendor/generated 未动。
+
 ## 取舍说明
 
 1. **API 增加 `tz` 查询参数**：week/month 的行过滤发生在服务器，看的人「今天」的行在 UTC 口径范围外时客户端无从补回，只能让服务器按看的人时区算 periodRange 与滚动区间；`tz` 非法时返回 400（显式失败好过静默落回 UTC 的误归日）。all 期间本可纯前端重算（响应含全部贡献行），但三档期间统一走「挂载后按看的人时区重取一次」的单一路径，比分两套逻辑更可读。
@@ -106,9 +126,9 @@ TDD seam 清单（沿用本仓既有测试位置与 mock 惯例，均为公开�
 3. **UTC 用户零变化**：看的人时区的今日与服务器响应的 `chartRange.end` 一致时客户端不发重取请求；UTC 看的人两值恒等，渲染路径与现状逐帧一致。
 4. **徽章与 embed SVG 不动**：它们是服务器渲染的静态图片，没有看的人浏览器可言，issue 三条改动与四条验收均未涉及。
 5. **榜单「today」期间不动**：同属服务器 UTC 口径，但 issue 范围是个人页图表与今天/昨天卡片；改榜单属于另一处行为变更，留待单独提出。
-6. **timezone 用 text 列、应用层校验**：IANA 时区库随系统更新，数据库枚举会把合法值挡在库外；校验集中在 `isValidIanaTimeZone`（第三轮起收紧为 `Intl.supportedValuesOf('timeZone')` 规范名集合加显式 "UTC"，offset 形式、非规范大小写与别名一律拒绝），服务端写入与个人页 `tz` 参数同源。
+6. **timezone 用 text 列、应用层校验**：IANA 时区库随系统更新，数据库枚举会把合法值挡在库外；校验集中在 `normalizeIanaTimeZone`（第五轮起三条规则同时满足才接受：不以 +/- 开头且非 UTC±/GMT± 这类偏移写法；为 "UTC" 或名字里带 "/"——EST、GMT 这类无斜杠缩写因此拒绝；`Intl.DateTimeFormat` 能构造。通过则返回并存本运行时 resolvedOptions().timeZone 给出的写法——Node 上 Asia/Kolkata 与 Asia/Calcutta 都存 Asia/Calcutta，asia/shanghai 存 Asia/Shanghai；不再用 `Intl.supportedValuesOf('timeZone')` 列表——Node 22 列表只有旧名且无 "UTC"，Bun 恰好相反，任何单边列表都会拒绝另一运行时接受的用户）。服务端写入与个人页 `tz` 参数同源。
 7. **会话响应携带 timezone 而非新拉取**：个人页本就在挂载后请求 `/api/auth/session`（设备列表用），在其中带上看的人 timezone 避免第二次往返；未登录时 `user` 为 null，自然落到浏览器检测值。
-8. **迁移只进仓库不执行**：本机无数据库实例，授权边界亦如此；迁移正确性由 drizzle-kit 生成器、meta 快照与代码评审承担，生产执行需用户另行批准。这个取舍成立的前提是部署管道本身控住时机：合入不触发自动部署，预览构建不跑迁移，生产构建内迁移先于新 web 代码生效，所以「先生成的迁移文件」不会在未获批准时落到任何数据库。代价是预览环境不能用于本 PR 时区设置的验收——预览库没有 timezone 新列时，设置接口读写返回 503（第三轮起会话查询已改为缺列降级 null，登录本身不受影响）。
+8. **迁移只进仓库不执行**：本机无数据库实例，授权边界亦如此；迁移正确性由 drizzle-kit 生成器、meta 快照与代码评审承担，生产执行需用户另行批准。这个取舍成立的前提是部署管道本身控住时机：合入不触发自动部署，预览构建不跑迁移，生产构建内迁移先于新 web 代码生效，所以「先生成的迁移文件」不会在未获批准时落到任何数据库。代价是预览环境不能用于本 PR 时区设置的验收——预览库没有 timezone 新列时，设置接口读写返回 503；第三轮起会话解析（getSession）缺列降级 null 不报错，但密码登录、设备轮询、团队相关查询仍整行查 users，未迁移的库上仍会出错，其余接口仍需先迁移再上线。
 
 ## 模型与调用
 
@@ -118,8 +138,10 @@ TDD seam 清单（沿用本仓既有测试位置与 mock 惯例，均为公开�
 |---|---|---|---|
 | 第一轮主 agent | k3:max（kimi-code/k3） | 环境变量 KIMI_API_KEY | 回复 118、工具调用 150、工具报错 5（2026-11-14 17:20:02–18:00:15 +08:00） |
 | 第二轮主 agent | k3:max（kimi-code/k3） | 环境变量 KIMI_API_KEY | 回复 16、工具调用 17、工具报错 0（2026-11-14 18:01:52–18:07:00 +08:00） |
+| 第三轮主 agent | k3:max（kimi-code/k3） | 环境变量 KIMI_API_KEY | 回复 91、工具调用 131、工具报错 7（2026-11-14 18:10:44–18:48:46 +08:00） |
+| 第四轮主 agent | k3:max（kimi-code/k3） | 环境变量 KIMI_API_KEY | 回复 42、工具调用 61、工具报错 2（2026-11-14 18:57:02–19:18:14 +08:00） |
 
-统计口径：工具报错 = 会话文件中标记为报错的工具结果条数（含命令非零退出）。每轮一行取该轮会话文件的最终计数；本轮（第三轮）计数要等本轮结束才有，不写进表。第二轮起止按该轮会话文件首条用户消息与末条消息核对。
+统计口径：工具报错 = 会话文件中标记为报错（"isError":true）的工具结果条数（含命令非零退出）。每轮一行取该轮会话文件的最终计数；本轮（第五轮）计数要等本轮结束才有，不写进表。第二轮起止按该轮会话文件首条用户消息与末条消息核对；第三轮起止用会话头时间；第四轮回复与工具调用按 assistant 消息与 toolCall 数、工具报错按 "isError":true 条数，对该轮会话文件只读核对，起止按其首末消息时间。
 
 未启动子代理；密钥不写入本文件与任何产物。
 
@@ -134,8 +156,10 @@ TDD seam 清单（沿用本仓既有测试位置与 mock 惯例，均为公开�
 - Idempotency / ordering / retry / deduplication：PUT 语义整字段覆盖，重复 PATCH 幂等；无并发写竞态（单用户单字段）。
 - Schema / migration / backfill / rollback / replay：`0028_add_user_timezone.sql` 为 `ALTER TABLE users ADD COLUMN timezone text`，可空无默认，存量行天然为 null（自动检测），无需 backfill；回滚即删列，无数据转换；迁移不在本仓验证环境执行，生产执行需用户另行批准。执行时机由部署构建控住：仅 production 构建内先迁移后构建，预览构建不迁移，合入 PR 本身不动线上数据库（vercel.json 原文核对结论见授权节与 Release Readiness 评审）。
 - Observability and repair：无派生数据，无修复路径；非法值在写入侧已被 400 挡住。
-- Required tests：路由测试覆盖 401/400/写入/清空/读取；`isValidIanaTimeZone` 边界用例。
-- 第三轮修订（2026-11-14）：读路径与失败模式收紧——getSession 主查询只取消费列（id/username/displayName/avatarUrl/bannedAt），timezone 由一条单独查询读取；列不存在（未跑 0028）、查询出错、查无行三种情况一律降级 null（自动检测），登录不报错（session.test.ts 四条用例钉住）。设置接口 GET/PATCH 在列不存在时返回 503 并指明先跑 db:migrate（Postgres 42703 或缺列报文匹配），其余写失败仍为 500、不产生半更新。校验收紧只改应用层接受集，Schema/迁移不变。Status 维持 confirmed。
+- Required tests：路由测试覆盖 401/400/写入/清空/读取与规范化落库；`normalizeIanaTimeZone` 边界用例（bun 与 node 两侧）。
+- 第三轮修订（2026-11-14）：读路径与失败模式收紧——getSession 主查询只取消费列（id/username/displayName/avatarUrl/bannedAt），timezone 由一条单独查询读取；列不存在（未跑 0028）、查询出错、查无行三种情况一律降级 null（自动检测），会话解析（getSession）不报错（session.test.ts 四条用例钉住）；密码登录、设备轮询、团队相关查询仍整行查 users，未迁移的库上仍会出错。设置接口 GET/PATCH 在列不存在时返回 503 并指明先跑 db:migrate（Postgres 42703 或缺列报文匹配），其余写失败仍为 500、不产生半更新。校验收紧只改应用层接受集，Schema/迁移不变。Status 维持 confirmed。
+- 第四轮修订（2026-11-14）：校验实现由 supportedValuesOf 列表改为构造器判定（新旧 IANA 写法与 UTC 在 Node/Bun 均接受；+/- 开头偏移写法、UTC+8/GMT+8 这类、空串、超长串、仅大小写差异仍拒绝），仍只改应用层接受集，Schema/迁移/读写路径不变；落库为提交写法原文，无规范化改写。Status 维持 confirmed。
+- 第五轮修订（2026-11-14）：校验并入 `normalizeIanaTimeZone` 并在通过时返回本运行时 resolvedOptions().timeZone 的写法——PATCH 落库由提交原文改为该规范化写法（Node 上 Asia/Kolkata 与 Asia/Calcutta 都落 Asia/Calcutta，asia/shanghai 落 Asia/Shanghai）；asia/shanghai 这类仅大小写差异的写法由拒绝转接受，EST、GMT 这类无斜杠缩写由（第四轮）接受转拒绝；?tz 共用同一函数，规范化结果只参与归日计算，等价。Schema/迁移/读写路径不变。Status 维持 confirmed。
 
 ### Legacy Change Safety Review
 
@@ -148,6 +172,8 @@ TDD seam 清单（沿用本仓既有测试位置与 mock 惯例，均为公开�
 - Validation plan：先红后绿，再跑项目四条 web 验证（结果见证据节）。
 - Review mode: normal
 - 第三轮复核（2026-11-14）：Status: characterized（normal）。Behavior to change：`isValidIanaTimeZone` 接受集收窄为规范名集合＋UTC（offset 形式 "+08:00"/"GMT+8"、非规范大小写、别名 Asia/Chungking/US/Eastern 由通过转 400，PATCH 与 `?tz` 同源生效）；getSession 不再整行查 users（主查询收窄至消费列），timezone 单独查询、缺列/出错/无行降级 null；设置接口缺列时由笼统 500 转为 503 明确错误。Behavior to preserve：规范名与 UTC 照旧通过、UTC 用户不变、SessionUser 既有字段与封禁判断不变、submit token 路径不变、设置接口 401/400/成功响应不变。Current reproduction evidence：bun 实测构造器校验对 "+08:00"/"asia/shanghai"/Asia/Chungking/US/Eastern 返回 true；diff 8715c0e..HEAD 显示整行 select 经 schema 卷入 timezone 列；第二轮已记录未迁移库会话查询必崩模式。Safety net：既有 150 条＋本轮新增 14 条（校验 4、session 6、路由缺列 2、组件层 2），全量 164 pass。Validation plan：先红后绿（红 18:28:37/18:28:44/18:28:49 → 绿 18:29:55）＋四条 web 命令全绿（证据节）。
+- 第四轮复核（2026-11-14）：Status: characterized（normal）。Behavior to change：`isValidIanaTimeZone` 接受集由 supportedValuesOf 列表＋UTC 改为构造器判定——新旧写法对（Asia/Kolkata↔Asia/Calcutta、Europe/Kyiv↔Europe/Kiev、Asia/Ho_Chi_Minh↔Asia/Saigon）、可构造别名（US/Eastern、Asia/Chungking）、GMT、Etc/GMT+8 由拒绝转接受；+/- 开头偏移写法与仅大小写差异写法维持拒绝。TimezoneSection：已存值不在运行时 supportedValuesOf 列表时向 select 追加该值的 option（此前无匹配项，select 显示为自动检测）。Behavior to preserve：PATCH 与 `?tz` 同源 400 拒绝面（非 IANA 串、offset 写法、错误大小写仍拒）；落库为提交写法原文；UTC 用户行为不变；浏览器检测兜底不变；session 降级与设置接口 503 不变。Current reproduction evidence：Node 22.20.0 实测 supportedValuesOf 缺 Asia/Kolkata、Europe/Kyiv、UTC（Researchy 18:56 阻塞复现）；Bun 1.4.4 实测缺 Asia/Calcutta、Europe/Kiev。Safety net：既有 164 条＋本轮净增 1 条（TimezoneSection 组件测试；校验测试以新旧写法接受用例替换别名拒绝用例，数量不变），全量 165 pass。Validation plan：先红后绿（红 19:06:46 → 绿 19:07:21）＋四条 web 命令全绿与双运行时探针（证据节）。
+- 第五轮复核（2026-11-14）：Status: characterized（normal）。Behavior to change：`isValidIanaTimeZone` 更名重写为 `normalizeIanaTimeZone`——三规则同时满足（不以 +/- 开头且非 UTC±/GMT± 偏移写法；为 "UTC" 或带 "/"；构造器能构造）才返回本运行时 resolvedOptions().timeZone 的写法，否则 null。接受集：EST、GMT 由（第四轮）接受转拒绝，asia/shanghai 这类仅大小写差异的写法由拒绝转接受。落库由提交原文改为规范化写法。TimezoneSection：已存值与选项先经本运行时 resolvedOptions 换算成同一写法再比，仍无匹配才追加原值 option（第四轮为缺席即追加原文）。测试顺序无关化：route.test.ts 与 publicProfileData.test.ts 的 mock 队列 afterEach 清空（400 用例入队不消费的遗留曾串扰下一条），ProfilePageClient.test.tsx afterAll 补 GlobalRegistrator.unregister()、TimezoneSection.test.tsx 补带守卫的 unregister（bun 按文件逐个加载执行，后者先跑时无人注销会污染后续文件，seed 11/13/29 实测 21/11/11 fail）。Behavior to preserve：PATCH 与 `?tz` 同源 400 拒绝面（非 IANA 串、+/- 与 UTC±/GMT± 偏移写法、空串、超长串仍拒）；UTC 用户行为不变；浏览器检测兜底不变（resolveViewerTimeZone/detectBrowserTimeZone 校验后仍返回原值）；session 降级与设置接口 503 不变；GET 响应形状不变。Current reproduction evidence：Reviewy 19:00 对 1485fc4 的 NOT CLEAN 三条阻塞；改动前 `bun test --randomize --seed=3475213529` 实测 159 pass/6 fail。Safety net：165 条基础上净增 2 条（路由规范化落库 1、下拉框兜底 1；校验块改写等数替换），全量 167 pass；--randomize 指定 seed 与另 19 个 seed 全绿；node --test 用例在 Node 22.20.0 直引生产文件 2 pass。Validation plan：先红后绿（红复证 19:43:38 → 绿同刻，明细见进度节与证据节）＋tsc/lint/bun test/randomize/node/build 六条全绿。
 
 ### Refactoring Review
 
@@ -160,6 +186,8 @@ TDD seam 清单（沿用本仓既有测试位置与 mock 惯例，均为公开�
 - Safety net and validation：同 Legacy 节。
 - Deferred refactors：无。
 - 第三轮复核（2026-11-14）：Status: proceed（normal）。范围：`timezone.ts`（校验实现替换）、`session.ts`（select 形状收窄＋一条兜底查询）、设置路由（缺列判定函数＋两个 catch 分支）、三个测试文件与一个组件测试文件。no refactor needed；无延期项。
+- 第四轮复核（2026-11-14）：Status: proceed（normal）。范围：`timezone.ts`（校验实现替换）、`TimezoneSection.tsx`（zones memo 追加已存值）、`timezone.test.ts`（接受集用例替换）、新建 `TimezoneSection.test.tsx`、`ProfilePageClient.test.tsx`（happy-dom 注册加 isRegistered 守卫）。no refactor needed；无延期项。
+- 第五轮复核（2026-11-14）：Status: proceed（normal）。范围：`timezone.ts`（校验函数更名重写为 normalizeIanaTimeZone）、两个调用方（route.ts 存规范化写法、publicProfileData.ts tz 参数）、`TimezoneSection.tsx`（canonicalTimeZoneName 辅助与 selectedZone/options 匹配）、四个测试文件、新建 `web/scripts/test-timezone-node.mjs` 与 web/package.json test:node 脚本、ci.yml Web job 加一步。no refactor needed；无延期项。
 
 ### Release Readiness Review
 
@@ -168,8 +196,8 @@ TDD seam 清单（沿用本仓既有测试位置与 mock 惯例，均为公开�
 - Failure modes and safeguards：非法 tz → 400（写设置）/400（读个人页），不静默落回 UTC；重取失败保留 ISR 首屏数据；看的人时钟偏斜由一次性重取闸挡住循环；访客无会话落到浏览器检测值；`PRIVATE_CACHE_CONTROL` 挡住设置接口响应进共享缓存；未迁移库上 getSession 的 timezone 读取降级 null（console.warn 留痕），设置接口读写返回 503 明确错误。
 - Capacity / backpressure / limits：非 UTC 看的人在跨日期窗口每个个人页最多多发一次 API 请求；u 页 ISR 缓存键不变，无缓存分裂；设置接口单行单字段更新。
 - Observability / alerts / runbook：设置读写失败走既有 console.error 通道；无新指标。
-- Rollout / migration / rollback / cleanup：**第三轮起部署次序由登录硬前提放宽为特性前提——getSession 不再整行查 users：主查询只取消费列，timezone 单独查询且失败（含缺列）降级 null，未跑 0028 的库上登录与会话解析不再报错；未迁移时只是设置接口的时区读写返回 503（明确提示先跑 db:migrate），时区特性本身不可用。** 自部署文档（docs/deploy/self-host-production 中英双语）上线步骤已注明：升级到含 0028_add_user_timezone 的版本前先手动跑 db:migrate。迁移本身是纯加列，旧代码对新列无感，回滚 web 即可。迁移执行需用户另行批准，不在本会话授权内。时机与次序按 web/vercel.json 原文核对：buildCommand 为「`if [ "$VERCEL_ENV" = "production" ]; then ... bun run db:migrate; fi && bun run build`」，即仅正式环境构建才先跑迁移再编译，同一次构建内迁移先于新 web 代码生效；`git.deploymentEnabled.main` 为 false，main 分支不自动部署，合入本 PR 本身不动线上数据库；真正执行迁移的是之后那次手动正式部署。预览部署不跑迁移，预览库缺 timezone 列时设置接口返回 503，预览环境的时区设置功能不能作为验收依据（登录不受影响）。
-- Required validation and result：第一轮 tsc、lint（对 base 无新增）、bun test 150、build 全绿，未登录 401、非法 tz 400、docs 三语小节冒烟通过；第三轮 tsc、lint（对 base 无新增）、bun test 164、build 全绿，别名/offset tz 400 与规范名放行冒烟通过；结果见证据节。
+- Rollout / migration / rollback / cleanup：**第三轮起 getSession 不再整行查 users：主查询只取消费列，timezone 单独查询且失败（含缺列）降级 null，未跑 0028 的库上会话解析（getSession）不报错；但密码登录、设备轮询、团队相关查询仍整行查 users，未迁移的库上仍会出错，其余接口仍需先迁移再上线。未迁移时设置接口的时区读写返回 503（明确提示先跑 db:migrate），时区特性本身不可用。** 自部署文档（docs/deploy/self-host-production 中英双语）上线步骤已注明：升级到含 0028_add_user_timezone 的版本前先手动跑 db:migrate。迁移本身是纯加列，旧代码对新列无感，回滚 web 即可。迁移执行需用户另行批准，不在本会话授权内。时机与次序按 web/vercel.json 原文核对：buildCommand 为「`if [ "$VERCEL_ENV" = "production" ]; then ... bun run db:migrate; fi && bun run build`」，即仅正式环境构建才先跑迁移再编译，同一次构建内迁移先于新 web 代码生效；`git.deploymentEnabled.main` 为 false，main 分支不自动部署，合入本 PR 本身不动线上数据库；真正执行迁移的是之后那次手动正式部署。预览部署不跑迁移，预览库缺 timezone 列时设置接口返回 503，预览环境的时区设置功能不能作为验收依据（会话解析不受影响，但密码登录等整行查 users 的接口仍依赖迁移）。
+- Required validation and result：第一轮 tsc、lint（对 base 无新增）、bun test 150、build 全绿，未登录 401、非法 tz 400、docs 三语小节冒烟通过；第三轮 tsc、lint（对 base 无新增）、bun test 164、build 全绿，别名/offset tz 400 与规范名放行冒烟通过；第四轮 tsc、lint（对 base 无新增）、bun test 165、build 全绿，Node 22.20.0 与 Bun 1.4.4 双运行时探针 27 值判定逐行一致；第五轮 tsc、lint（对 base 无新增）、bun test 167、bun test --randomize --seed=3475213529（167 pass/0 fail，另 19 个 seed 全绿）、node --test 用例（Node 22.20.0 直引生产文件，2 pass）、build 全绿，Node 与 Bun 接受/拒绝集一致、存储写法各随本运行时 resolvedOptions；结果见证据节。
 - Optional checks, accountable owner acceptance, and residual risk：带真实数据库的浏览器级 E2E（UTC+8 00:30 实景）本机无 postgres 服务与 docker，无法运行，由路由级测试与区间函数固定时刻测试覆盖归日逻辑；CI、合并、部署与生产迁移执行不在本会话授权内。
 
 ### ponytail-review 结论
@@ -177,6 +205,8 @@ TDD seam 清单（沿用本仓既有测试位置与 mock 惯例，均为公开�
 Lean already. Ship. 五个纯函数全部被引用、无新依赖、无投机抽象；过程中删掉一处会导致 week 视图误空窗的守卫（见进度节第 9 条）。
 
 第三轮（2026-11-14）：Lean already. Ship. 校验函数由构造器试抛改为集合查找（更短）；session 拆分查询为评审要求的必需兜底；唯一发现是 `bun add` 夹带的无关改动（package.json 空行格式、tokens-cli 1.0.2→1.0.4），已当场还原，锁文件净增仅 happy-dom 及其传递依赖（组件测试必需的 DOM 环境，devDep）。
+
+第五轮（2026-11-14）：Lean already. Ship. `normalizeIanaTimeZone` 三个调用方（PATCH、?tz、客户端校验）全用到返回值；`canonicalTimeZoneName` 唯一消费方是下拉框匹配；node 用例只用 node:test/node:assert 直引既有生产文件，无新依赖、无投机抽象；测试顺序无关化只加 afterEach 清空与 afterAll 注销，无新测试基建。
 
 ## 证据
 
@@ -208,14 +238,53 @@ Lean already. Ship. 五个纯函数全部被引用、无新依赖、无投机抽
 - Playwright CLI：blocked（本机无 postgres/docker，同第一轮）；Chrome DevTools MCP：not-needed（curl 冒烟已覆盖本轮服务端行为面，登录态页面需真实库）。
 - 未跑且原因：同第一轮——真实库浏览器级 E2E 与 `test:migrations` 需 DATABASE_URL/本地 postgres，本机皆无；迁移未执行（生产执行需用户另行批准）；Rust CLI 未改动，cargo 未跑。冒烟与验证结束后无本会话遗留 next 进程。
 
+第四轮（2026-11-14 19:04–19:14，分支 fix/21-timezone-setting 工作区，基于 HEAD 1485fc4 的未提交改动）：
+
+- 红：19:06:46 `bun test src/lib/timezone.test.ts src/app/settings/TimezoneSection.test.tsx`——15 pass/2 fail：「新旧写法均接受」用例在 Bun 下 Asia/Calcutta 被列表法拒绝（Node 方向即 Researchy 指出的 Asia/Kolkata、Europe/Kyiv、UTC 被拒）；TimezoneSection 用例 select.value 为 ""（已存 Asia/Kolkata 不在打桩列表时显示为自动检测）。
+- 绿：19:07:21，两文件 17 pass/0 fail。全量首跑暴露 happy-dom 重复注册（两个组件测试文件同进程各 register 一次），两文件加 isRegistered 守卫后全量转绿 19:10:12：165 pass/0 fail/21 文件（第三轮 164 pass/20 文件；净增 1：TimezoneSection 组件测试；校验测试以「新旧写法接受」替换「别名拒绝」，数量不变）。
+- 双运行时探针（转绿后执行；临时探针脚本直接 import 生产文件 src/lib/timezone.ts，验毕即删）：Node v22.20.0 与 Bun 1.4.4 对 27 个值判定逐行一致——接受 Asia/Kolkata、Asia/Calcutta、Europe/Kyiv、Europe/Kiev、Asia/Ho_Chi_Minh、Asia/Saigon、UTC、Asia/Shanghai、America/New_York、Pacific/Kiritimati、Etc/GMT+8、GMT、US/Eastern、Asia/Chungking；拒绝 +08:00、-05:00、UTC+8、GMT+8、GMT+08:00、UTC-5、asia/shanghai、AMERICA/NEW_YORK、utc、Not/AZone、Asia、空串、200 字符长串。另实测 supportedValuesOf 列表：Node 缺 Asia/Kolkata、Europe/Kyiv、UTC；Bun 缺 Asia/Calcutta、Europe/Kiev——即阻塞根因，两运行时构造器判定结果一致。
+- `cd web && bunx tsc --noEmit`：19:08:00 exit 0，无输出。
+- `cd web && bun run lint`：19:08:17 exit 0，0 errors/1 warning（docs/page.tsx 354 行 no-img-element）。base 对比：origin/main 仍为 8715c0e（本地 main 引用停在更早的 3277189 未前移，不影响基线口径），沿用第一轮 8715c0e 临时 worktree 实测基线 0 errors/1 warning（同文件同规则）。新增 errors/warnings：0。
+- `cd web && bun test`：19:10:12 全量 165 pass/0 fail/5570 expect()/21 文件。
+- `cd web && bun run build`：19:10:25 起跑，exit 0。
+- 冒烟：本轮未启动 next start——改动仅限校验纯函数与设置页下拉框选项列表，无新请求面；校验行为由路由级既有测试与双运行时探针覆盖。无本会话遗留进程。
+- 依赖：无新增（happy-dom 守卫复用第三轮既有 devDep）；探针脚本为临时文件，已删。
+- rtk：not-needed——四条命令均为终端事实型输出，前轮证据均为 native，保持同口径可比。BDD：skipped——无 .feature 变更（本仓 no-.feature 例外）。Playwright CLI / Chrome DevTools MCP：not-needed——无页面结构与请求面变化，下拉框行为由组件测试钉住。
+- 未跑且原因：同前轮——真实库浏览器级 E2E 与 `test:migrations` 需 DATABASE_URL/本地 postgres，本机皆无；迁移未执行（生产执行需用户另行批准）；Rust CLI 未改动，cargo 未跑。
+
+第五轮（2026-11-14 19:28–19:44，分支 fix/21-timezone-setting 工作区，基于 HEAD 1485fc4 的未提交改动）：
+
+- 基线复现（改动前）：`bun test --randomize --seed=3475213529` 159 pass/6 fail——middleware.test.ts 3 条与 publicProfileData.test.ts 1 条（happy-dom 全局泄漏所致），route.test.ts PATCH 2 条（updateValues 与队列未在 afterEach 清空所致）。
+- 红（实现前首跑，实测）：timezone.test.ts 校验块改写后报 `normalizeIanaTimeZone` 未导出（1 error）；route.test.ts 新「存规范化写法」用例得 400（1 fail/8 pass）；TimezoneSection.test.tsx 新「旧名匹配新名选项」用例下 select 仍追加旧名原文（1 fail/1 pass）；`bun run test:node` 因导出缺失失败（fail 1）。19:43:38 以 git stash 暂存实现文件复证红（1 error），恢复后同刻转绿（timezone.test.ts 16 pass；node 用例 2 pass）。
+- Node/Bun 实测：Node v22.20.0 解析 Asia/Kolkata→Asia/Calcutta、Asia/Calcutta→Asia/Calcutta、Europe/Kyiv→Europe/Kiev、Europe/Kiev→Europe/Kiev、asia/shanghai→Asia/Shanghai、UTC→UTC、Etc/GMT+8→Etc/GMT+8（EST→America/Panama、GMT→UTC，均被规则②拒绝）；Bun 1.4.4 同名原样保留（Asia/Kolkata→Asia/Kolkata、Asia/Calcutta→Asia/Calcutta、Europe/Kyiv→Europe/Kyiv、asia/shanghai→Asia/Shanghai 等；EST→EST、GMT→GMT，同样被规则②拒绝）——Bun 不规范化改名对，组件测试因此用打桩的 resolvedOptions 模拟会规范化的浏览器。接受/拒绝集两运行时一致：接受 Asia/Kolkata、Asia/Calcutta、Europe/Kyiv、Europe/Kiev、UTC、asia/shanghai；拒绝 EST、+08:00、-05:00、UTC+8、GMT+8、空串、200 字符长串。存储写法各随本运行时 resolvedOptions（Node 落旧名、Bun 落提交名），断言一律用运行时自身 resolvedOptions 求得，无写死值。
+- 绿：`cd web && bun test` 19:41:35 全量 167 pass/0 fail/5576 expect()/21 文件（第四轮 165；净增 2：路由规范化落库 1、下拉框兜底 1）。
+- `bun test --randomize --seed=3475213529` 19:41:35：167 pass/0 fail。另抽 19 个 seed 全绿——首版修复（只注销 ProfilePageClient）下 seed 11/13/29 仍 21/11/11 fail（TimezoneSection 后跑时其模块守卫重新注册且无人注销，后续文件被 happy-dom 全局污染）；TimezoneSection.test.tsx 补带 isRegistered 守卫的 unregister 后 20 个 seed 全绿。
+- `cd web && bunx tsc --noEmit`：19:40:34 exit 0，无输出。
+- `cd web && bun run lint`：19:40:38 exit 0，0 errors/1 warning（docs/page.tsx 354 行 no-img-element，与 origin/main 8715c0e 第一轮实测基线同文件同规则，新增 0）。
+- `bun run test:node`（node --test web/scripts/test-timezone-node.mjs，Node v22.20.0 直引 src/lib/timezone.ts，类型剥离无新包）：19:41:35 pass 2/fail 0。
+- `cd web && bun run build`：19:40:53 exit 0，/api/settings/timezone 在路由清单（ƒ 动态）。
+- CI：Web job 在 Typecheck 与 Build 之间新增 actions/setup-node@v6（node-version: 22）与「Time zone validation under Node」（`cd web && bun run test:node`）一步。
+- 冒烟：本轮未启动 next start——接受集与落库写法变化由路由级测试与 Node 实跑钉住，无新请求面；无本会话遗留进程。
+- 依赖：无新增；bun.lock 未动。
+- rtk：not-needed——六条命令均为终端事实型输出，前轮证据均为 native，保持同口径可比。BDD：skipped——无 .feature 变更（本仓 no-.feature 例外）。Playwright CLI / Chrome DevTools MCP：not-needed——无页面结构变化，下拉框行为由组件测试钉住。
+- 未跑且原因：同前轮——真实库浏览器级 E2E 与 `test:migrations` 需 DATABASE_URL/本地 postgres，本机皆无；迁移未执行（生产执行需用户另行批准）；Rust CLI 未改动，cargo 未跑。
+
 ## 状态事件
 
 | at | from | to | reason | evidence |
 |---|---|---|---|---|
-| 2026-11-14T17:33:43.000000+08:00 | planned | in-progress | 开工：范围、验收与 Book Gate Plan 已确认，调查完成，DDIA/Legacy/Refactoring 三门禁结论已出 | task.md 已确认范围与授权节、进度节调查结论、门禁结论节；分支 fix/21-timezone-setting，工作区开工前干净，与 main(8715c0e) 一致 |
-| 2026-11-14T17:55:41.000000+08:00 | in-progress | checking | 实现与验证完成：TDD 三切片先红后绿、迁移文件生成、设置页与 docs 三语落地、四条 web 验证命令全绿、冒烟通过、ponytail-review 与可读性复核完成 | task.md 进度节 17:33:43–17:55:41 各条、证据节 |
+| 2026-11-14T17:36:18.000000+08:00 | planned | in-progress | 开工：范围、验收与 Book Gate Plan 已确认，调查完成，DDIA/Legacy/Refactoring 三门禁结论已出 | task.md 已确认范围与授权节、进度节调查结论、门禁结论节；分支 fix/21-timezone-setting，工作区开工前干净，与 main(8715c0e) 一致 |
+| 2026-11-14T17:55:41.000000+08:00 | in-progress | checking | 实现与验证完成：TDD 三切片先红后绿、迁移文件生成、设置页与 docs 三语落地、四条 web 验证命令全绿、冒烟通过、ponytail-review 与可读性复核完成 | task.md 进度节 17:36:18–17:55:41 各条、证据节 |
 | 2026-11-14T17:55:41.000000+08:00 | checking | done | 验收条件 1-9 已核对：归日与设置读写由路由级与纯函数测试钉住（1-4），三语齐备且覆盖测试通过（5），红绿时间记入进度（6），tsc/lint/bun test/build 实跑通过且 lint 对 base 无新增（7），模型表计数口径注脚在位（8），next 进程已关（9）；浏览器级实景验证因本机无数据库环境记为未跑，不冒充已通过；release-readiness 记 blocked，迁移执行与部署需用户另行批准；不 commit、不 push、不开 PR | 证据节全部实跑记录；门禁结论节五项评审；grep 禁用词与本机路径扫描零命中 |
 | 2026-11-14T18:25:43.854022+08:00 | done | planned | Reviewy 第三轮复核（PR #24，head ba9c8d9）提出 3 条阻塞：时区校验未收查到规范名、getSession 整行查询在未迁移库上必崩、task.md 进度时间与模型表未按会话记录对齐；重开任务一次改完 | 工作区 fix/21-timezone-setting HEAD ba9c8d9049e291562b90fa24b57f4d37a7847994；第三轮 Reviewy 结论 2026-11-14 18:10 到达；会话记录三轮齐全 |
 | 2026-11-14T18:25:47.647829+08:00 | planned | in-progress | 进入第三轮实现：Legacy/Refactoring 两门禁已就本轮范围复核（characterized / proceed），按 TDD 先红后绿改三条阻塞 | task.md 门禁结论节第三轮复核记录；分支 fix/21-timezone-setting 工作区干净 |
 | 2026-11-14T18:47:33.351779+08:00 | in-progress | checking | 第三轮三条阻塞与三条可选项均已实现并验证：TDD 红绿齐全、组件层测试与自部署文档落地、授权措辞统一、进度节与模型表按会话记录对齐、四条 web 验证命令全绿、冒烟通过 | task.md 进度节第三轮条目与证据节第三轮块；红 18:28:37/18:28:44/18:28:49，绿 18:29:55；tsc 18:36:58、lint 18:37:18（0e/1w 与 base 同条）、bun test 18:37:26（164 pass）、build 18:37:51；冒烟端口 3122 已关 |
 | 2026-11-14T18:47:37.208102+08:00 | checking | done | 第三轮验收核对：①校验只认规范名集合与 UTC 且两接口同源、拒绝/通过用例齐全；②getSession 主查询收窄回消费列、timezone 单独查询缺列/出错/无行降级 null，设置接口缺列 503 明确错误，均有测试；③进度节每条真实时间、第一轮红绿补记按会话记录还原、模型表第二轮一行与第三轮注脚在位；三条可选项完成；禁用词与本机路径扫描零命中；不提交、不推送；release-readiness 维持 blocked（迁移执行与部署需用户另行批准） | task.md 证据节第三轮块与门禁结论节第三轮修订；grep 禁用词/路径/密钥扫描零命中；git status 仅列本轮改动文件，无提交 |
+| 2026-11-14T19:04:31.109697+08:00 | done | planned | Researchy 第四轮复核（PR #24，head 1485fc4）18:56 提出阻塞：isValidIanaTimeZone 依赖 Intl.supportedValuesOf("timeZone") 列表，而 Node 22（线上运行时）列表只有旧名（Asia/Calcutta、Europe/Kiev、Asia/Saigon）且无 "UTC"，Bun 恰好相反，测试在 Bun 全过但线上会拒绝新名用户；主 agent 已在 Node 22.20.0 复现（supportedValuesOf 缺 Asia/Kolkata、Europe/Kyiv、UTC）；重开任务改为构造器判定 | 工作区 fix/21-timezone-setting HEAD 1485fc4e8abfd27e4afdbfef40b4108c51a984cc 工作区干净；node -e 探针输出（进度节第四轮条目） |
+| 2026-11-14T19:04:32.118242+08:00 | planned | in-progress | 进入第四轮实现：Legacy/Refactoring 两门禁按本轮范围复核（characterized / proceed），按 TDD 先红后绿改校验函数与设置页下拉框 | task.md 门禁结论节第四轮复核记录；分支 fix/21-timezone-setting 工作区干净 |
+| 2026-11-14T19:16:21.924856+08:00 | in-progress | checking | 第四轮阻塞已实现并验证：校验改构造器判定、下拉框补齐已存值 option、happy-dom 注册守卫；TDD 红绿齐全，双运行时探针逐行一致，四条 web 验证命令全绿 | task.md 进度节第四轮条目与证据节第四轮块；红 19:06:46（15 pass/2 fail），绿 19:07:21（17 pass/0 fail）；tsc 19:08:00、lint 19:08:17（0e/1w 与 origin/main 8715c0e 基线同条）、bun test 19:10:12（165 pass/0 fail）、build 19:10:25 exit 0；探针脚本已删，无遗留进程 |
+| 2026-11-14T19:16:22.929143+08:00 | checking | done | 第四轮验收核对：①校验不再依赖 supportedValuesOf，构造器判定下 Asia/Kolkata 与 Asia/Calcutta、Europe/Kyiv 与 Europe/Kiev、Asia/Ho_Chi_Minh、UTC 在 Node 22.20.0 与 Bun 1.4.4 同接受，+/- 开头偏移写法、UTC+8/GMT+8 这类、空串、超长串、仅大小写差异两运行时同拒；②PATCH 与 ?tz 仍共用 isValidIanaTimeZone；③落库存提交写法原文，不改写运行时别名；④设置页下拉框在已存值缺席列表时追加 option，组件测试钉住显示为已选；⑤进度节第四轮条目、模型表第三轮一行与第四轮注脚、门禁结论第四轮修订均在位；禁用词与本机路径扫描零命中；不提交、不推送、未加依赖；release-readiness 维持 blocked（迁移执行与部署需用户另行批准） | task.md 证据节第四轮块与门禁结论节第四轮修订；grep 禁用词/路径/密钥扫描零命中；git status 仅列本轮改动文件，无提交 |
+| 2026-11-14T19:28:10.660362+08:00 | done | planned | Reviewy 第五轮复核（PR #24，head 1485fc4）19:00 判 NOT CLEAN，三条阻塞：A 校验三规则＋通过后存运行时 resolvedOptions 规范化写法、加 node --test 用例与 package.json 脚本、下拉框两侧换算同一写法再匹配；B ProfilePageClient.test.tsx afterAll 补 GlobalRegistrator.unregister() 并按 seed=3475213529 复验零挂；C task.md 时间戳与「未迁移库登录」措辞更正、模型表补第三/四轮；重开任务一次改完 | 工作区 fix/21-timezone-setting HEAD 1485fc4e8abfd27e4afdbfef40b4108c51a984cc，重开时仅第四轮未提交改动；改动前 randomize 基线复现 6 fail（证据节第五轮块） |
+| 2026-11-14T19:28:10.660362+08:00 | planned | in-progress | 进入第五轮实现：Legacy/Refactoring 两门禁按本轮范围复核（characterized / proceed），按 TDD 先红后绿改三条阻塞与可选项 | task.md 门禁结论节第五轮复核记录；分支 fix/21-timezone-setting 工作区 |
+| 2026-11-14T19:50:05.436582+08:00 | in-progress | checking | 第五轮三条阻塞与可选项均已实现并验证：TDD 红绿齐全、Node/Bun 双运行时实测一致、20 个 seed 全绿、六条验证命令全绿、task.md 各更正落地 | task.md 进度节第五轮条目与证据节第五轮块；红复证 19:43:38（1 error）→ 绿同刻（16 pass＋node 2 pass）；tsc 19:40:34、lint 19:40:38（0e/1w 与基线同条）、build 19:40:53、bun test 19:41:35（167 pass）、randomize 指定 seed 19:41:35（167/0）、node 用例 2 pass |
+| 2026-11-14T19:52:54.196756+08:00 | checking | done | 第五轮验收核对：①`normalizeIanaTimeZone` 三规则同时满足（不以 +/- 开头且非 UTC±/GMT± 偏移写法；为 "UTC" 或带 "/"；`Intl.DateTimeFormat` 能构造）才返回并存本运行时 resolvedOptions().timeZone 写法，PATCH 与 ?tz 共用，不再依赖 supportedValuesOf；②通过集 Asia/Kolkata、Asia/Calcutta、Europe/Kyiv、Europe/Kiev、UTC、asia/shanghai 与拒绝集 EST、+08:00、-05:00、UTC+8、GMT+8、空串、超长串在 bun 测试与 Node 实跑双侧一致，断言一律用运行时自身 resolvedOptions 求得；③node 用例直引生产文件（web/scripts/test-timezone-node.mjs、package.json test:node、CI Web job 加一步）；④下拉框两侧换算同一写法再比，旧名匹配新名选项、无匹配才追加原值，组件测试钉住；⑤ProfilePageClient.test.tsx afterAll 补 unregister，TimezoneSection.test.tsx 补带守卫的 unregister（seed 11/13/29 曾 21/11/11 fail），--randomize --seed=3475213529 与另 19 个 seed 全零挂，route.test.ts/publicProfileData.test.ts 队列清空后顺序无关；⑥task.md 五处 17:33:43 一并更正为 17:36:18（index 行 17:36:37）、第一轮开始 17:20:02、「未迁移库登录」三处措辞更正为会话解析不报错但密码登录/设备轮询/团队查询仍整行查 users 需先迁移、模型表补第三轮（起止用会话头时间）与第四轮（只读核对口径）行、进度节第四/五轮条目在位；禁用词与本机路径扫描零命中；不提交、不推送、未加依赖；release-readiness 维持 blocked（迁移执行与部署需用户另行批准） | task.md 证据节第五轮块与门禁结论节第五轮修订；grep 禁用词/路径/密钥扫描零命中；git status 仅列本轮改动文件，无提交 |

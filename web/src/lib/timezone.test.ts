@@ -3,49 +3,72 @@ import { describe, expect, test } from "bun:test";
 import {
   addDaysToDateString,
   dateStringInTimeZone,
-  isValidIanaTimeZone,
+  normalizeIanaTimeZone,
   resolveViewerTimeZone,
 } from "./timezone";
 
-describe("isValidIanaTimeZone", () => {
-  test("accepts real IANA names", () => {
-    expect(isValidIanaTimeZone("Asia/Shanghai")).toBe(true);
-    expect(isValidIanaTimeZone("America/New_York")).toBe(true);
-    expect(isValidIanaTimeZone("UTC")).toBe(true);
-    expect(isValidIanaTimeZone("Pacific/Kiritimati")).toBe(true);
+// What this runtime itself resolves a zone to — expectations must come from
+// here, never from a hardcoded spelling, because Node maps renamed zones to
+// their old IANA names (Asia/Kolkata → Asia/Calcutta) while Bun keeps the
+// submitted spelling.
+const runtimeSpelling = (zone: string) =>
+  new Intl.DateTimeFormat("en-US", { timeZone: zone }).resolvedOptions()
+    .timeZone;
+
+describe("normalizeIanaTimeZone", () => {
+  test("accepts real IANA names and returns the runtime's spelling", () => {
+    for (const zone of [
+      "Asia/Shanghai",
+      "America/New_York",
+      "UTC",
+      "Pacific/Kiritimati",
+    ]) {
+      expect(normalizeIanaTimeZone(zone)).toBe(runtimeSpelling(zone));
+    }
+  });
+
+  // Acceptance is constructor-based, not list-based: runtimes disagree on
+  // Intl.supportedValuesOf("timeZone") (Node 22 lists only the old names and
+  // omits "UTC"; Bun the reverse), so both spellings of a renamed zone must
+  // pass on either runtime. What gets stored is the runtime's own spelling —
+  // Node canonicalizes to the old name, Bun keeps the submitted one.
+  test("accepts old and new IANA spellings on any runtime", () => {
+    for (const zone of [
+      "Asia/Kolkata",
+      "Asia/Calcutta",
+      "Europe/Kyiv",
+      "Europe/Kiev",
+    ]) {
+      expect(normalizeIanaTimeZone(zone)).toBe(runtimeSpelling(zone));
+    }
+  });
+
+  test("a lower-case spelling is accepted and stored canonicalized", () => {
+    expect(normalizeIanaTimeZone("asia/shanghai")).toBe(
+      runtimeSpelling("asia/shanghai"),
+    );
+    expect(normalizeIanaTimeZone("asia/shanghai")).toBe(
+      normalizeIanaTimeZone("Asia/Shanghai"),
+    );
+  });
+
+  // The Intl constructor is more lenient than the acceptance rule: it takes
+  // offset forms and slash-less abbreviations, and those stay rejected.
+  test("rejects offset forms and slash-less abbreviations", () => {
+    for (const bad of ["EST", "+08:00", "-05:00", "UTC+8", "GMT+8", "GMT"]) {
+      expect(normalizeIanaTimeZone(bad)).toBeNull();
+    }
   });
 
   test("rejects non-IANA strings", () => {
-    expect(isValidIanaTimeZone("Not/AZone")).toBe(false);
-    expect(isValidIanaTimeZone("")).toBe(false);
-    expect(isValidIanaTimeZone("UTC+8")).toBe(false);
-    expect(isValidIanaTimeZone("Asia")).toBe(false);
-  });
-
-  // Only canonical names from Intl.supportedValuesOf("timeZone") plus "UTC"
-  // are accepted. The Intl constructor is more lenient than that: it takes
-  // offset forms, any casing, and alias (linked) names.
-  test("rejects offset forms the Intl constructor would accept", () => {
-    expect(isValidIanaTimeZone("GMT+8")).toBe(false);
-    expect(isValidIanaTimeZone("+08:00")).toBe(false);
-    expect(isValidIanaTimeZone("UTC+8")).toBe(false);
-  });
-
-  test("rejects non-canonical casing", () => {
-    expect(isValidIanaTimeZone("asia/shanghai")).toBe(false);
-    expect(isValidIanaTimeZone("AMERICA/NEW_YORK")).toBe(false);
-  });
-
-  test("rejects alias names in favor of their canonical targets", () => {
-    expect(isValidIanaTimeZone("Asia/Chungking")).toBe(false);
-    expect(isValidIanaTimeZone("Asia/Chongqing")).toBe(false);
-    expect(isValidIanaTimeZone("US/Eastern")).toBe(false);
-    expect(isValidIanaTimeZone("GMT")).toBe(false);
+    expect(normalizeIanaTimeZone("Not/AZone")).toBeNull();
+    expect(normalizeIanaTimeZone("Asia")).toBeNull();
+    expect(normalizeIanaTimeZone("utc")).toBeNull();
   });
 
   test("rejects empty and over-long strings", () => {
-    expect(isValidIanaTimeZone("")).toBe(false);
-    expect(isValidIanaTimeZone("A".repeat(200))).toBe(false);
+    expect(normalizeIanaTimeZone("")).toBeNull();
+    expect(normalizeIanaTimeZone("A".repeat(200))).toBeNull();
   });
 });
 
