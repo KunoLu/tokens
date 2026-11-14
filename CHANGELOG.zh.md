@@ -29,7 +29,6 @@
 
 ### 变更
 
-- **本版本要执行一次数据库迁移 `0028_add_user_timezone`（`users` 表新增可为空的 `timezone` 列），必须先迁移再上线。** Vercel Production 构建会先自动执行 `db:migrate` 再编译（`web/vercel.json`：仅 `VERCEL_ENV` 为 `production` 时执行，且 `main` 分支不自动部署）。自部署要在升级前手动执行 `DATABASE_URL=… bun run db:migrate`，再构建上线新 web 代码（`docs/deploy/self-host-production.md`）；Docker 升级按 `docs/deploy/docker/prod/README.md` 的发版流程在 web 容器内执行 `docker compose exec web bun run --cwd web db:migrate`。未迁移的库上会话解析不报错（时区降级为自动检测），但密码登录、设备轮询、团队相关查询与设置接口的时区读写（503）会出错，所以必须先迁移再上线。
 - MCP 服务器名称默认不再扫描与上报（#23；上游 v27.2.1）。用 `tokens mcp-names`、`settings.json` 的 `shareMcpServerNames` 或 `submit --include-mcp` 开启；`submit --dry-run --json` 打印与真实提交同源的载荷。服务端只存载荷带 `mcpServersOptIn: true` 的名称，旧 CLI 上报的名称被丢弃并在下一次本地提交清空已存列表；隐私页与文档页已说明该默认行为。
 - 本仓清单版本（Cargo workspace 与 `packages/cli*`）和钉版脚本 ref 分别推进到 `1.0.5` 与 `v1.0.5`，对应本仓 `v1.0.5` tag。本仓只发布 tag，没有 GitHub Release；这些版本与 ref 改动不改变 `/install.sh` 安装的上游二进制版本。
 
