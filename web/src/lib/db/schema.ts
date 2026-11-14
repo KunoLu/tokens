@@ -61,6 +61,13 @@ export const users = pgTable(
      * holds a read token. Banned accounts still render the ban notice.
      */
     isPrivate: boolean("is_private").notNull().default(false),
+    /**
+     * Day-assignment override (issue #21). Null means auto-detect from the
+     * viewer's browser; a set value must be an IANA time zone name, enforced
+     * at the settings API (the column stays plain text because the IANA
+     * database changes faster than any enum could track).
+     */
+    timezone: text("timezone"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

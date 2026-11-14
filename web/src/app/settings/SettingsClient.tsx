@@ -16,6 +16,7 @@ import { useLocale, useT } from "@/components/layout/LocaleProvider";
 import { richText } from "@/lib/i18n/rich";
 import type { Translator } from "@/lib/i18n/translate";
 import PrivacySection from "./PrivacySection";
+import TimezoneSection from "./TimezoneSection";
 
 interface User {
   id: string;
@@ -1223,6 +1224,8 @@ export default function SettingsClient() {
             </TokenList>
           )}
         </Section>
+
+        <TimezoneSection />
 
         <PrivacySection />
 

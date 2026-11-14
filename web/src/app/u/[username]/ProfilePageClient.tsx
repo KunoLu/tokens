@@ -10,7 +10,7 @@ import { useLocale, useT } from "@/components/layout/LocaleProvider";
 import { localizeHref } from "@/lib/i18n/config";
 import { richText } from "@/lib/i18n/rich";
 
-import { useEffect, useId, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useRouter } from "nextjs-toploader/app";
 import {
   createContributionRangeOptions,
@@ -36,7 +36,11 @@ import {
 } from "@/components/profile";
 import type { DailyContribution } from "@/lib/types";
 import type { ProfileMembership as ProfileMembershipData } from "@/lib/teams/profileMembership";
-import { toLocalDateString } from "@/lib/leaderboard/dateRange";
+import {
+  dateStringInTimeZone,
+  detectBrowserTimeZone,
+  resolveViewerTimeZone,
+} from "@/lib/timezone";
 import { useSettings } from "@/lib/useSettings";
 
 type ProfilePeriod = "all" | "week" | "month";
@@ -111,6 +115,16 @@ export default function ProfilePageClient({
   const locale = useLocale();
   const [isEmbedOpen, setIsEmbedOpen] = useState(false);
   const [devices, setDevices] = useState(initialDevices);
+  const [data, setData] = useState(initialData);
+  // undefined until the session answer lands: guests and not-yet-loaded
+  // viewers both fall through to the browser's detected zone.
+  const [savedTimeZone, setSavedTimeZone] = useState<string | null | undefined>(
+    undefined,
+  );
+
+  useEffect(() => {
+    setData(initialData);
+  }, [initialData]);
 
   useEffect(() => {
     let cancelled = false;
@@ -118,8 +132,11 @@ export default function ProfilePageClient({
       const sessionResponse = await fetch("/api/auth/session");
       if (!sessionResponse.ok) return;
       const session = (await sessionResponse.json()) as {
-        user?: { username?: string } | null;
+        user?: { username?: string; timezone?: string | null } | null;
       };
+      // The viewer's own override, needed on every profile they open — not
+      // just their own (issue #21, rule 3).
+      if (!cancelled) setSavedTimeZone(session.user?.timezone ?? null);
       if (session.user?.username?.toLowerCase() !== username.toLowerCase()) return;
       const devicesResponse = await fetch(`/api/users/${encodeURIComponent(username)}/devices`);
       if (!devicesResponse.ok || cancelled) return;
@@ -139,7 +156,6 @@ export default function ProfilePageClient({
     setPalette: setContributionPalette,
   } = useSettings();
   const contributionBreakdownId = useId();
-  const data = initialData;
 
   // The redesigned shell renders models as a table rather than a chart.
   const modelRows = useMemo(
@@ -227,21 +243,64 @@ export default function ProfilePageClient({
     [data.contributions, selectedContributionDate],
   );
 
-  // The viewer's own calendar date, not UTC. `toISOString()` would answer in
-  // UTC, so anywhere west of it the current local day stops being called Today
-  // as soon as UTC rolls over — 8pm in New York, with four hours of the local
-  // day still to go. Contribution days are calendar dates in each submitter's
-  // pinned bucketing timezone, so the comparison that means anything here is
-  // against another calendar date, not against an instant.
+  // The viewer's own calendar date, in the viewer's zone: the saved account
+  // setting when there is one, otherwise the browser's detection — never the
+  // profile owner's zone (issue #21). Contribution days are calendar dates
+  // in each submitter's pinned bucketing timezone, so the comparison that
+  // means anything here is against another calendar date, not an instant.
   //
-  // Read after mount rather than during render: the clock gives the server and
-  // the browser different answers across a timezone boundary, which would be a
-  // hydration mismatch. Until it lands the day card just does not claim to be
-  // today, which is the safe direction to be wrong in.
+  // Resolved after mount rather than during render: the clock and the zone
+  // give the server and the browser different answers, which would be a
+  // hydration mismatch. Until they land the day card just does not claim to
+  // be today, which is the safe direction to be wrong in.
+  const [detectedTimeZone, setDetectedTimeZone] = useState<string | null>(null);
+  useEffect(() => {
+    setDetectedTimeZone(detectBrowserTimeZone());
+  }, []);
+  const viewerTimeZone = resolveViewerTimeZone(savedTimeZone, detectedTimeZone);
   const [viewerLocalDate, setViewerLocalDate] = useState<string | null>(null);
   useEffect(() => {
-    setViewerLocalDate(toLocalDateString(new Date()));
-  }, []);
+    if (viewerTimeZone) {
+      setViewerLocalDate(dateStringInTimeZone(new Date(), viewerTimeZone));
+    }
+  }, [viewerTimeZone]);
+
+  // The ISR payload carries ranges bucketed by the server's UTC date — it
+  // cannot know the viewer. When the viewer-zone today disagrees with the
+  // range end, refetch once with `tz` so the chart and the week/month filter
+  // follow the viewer (issue #21). Equal ends mean the UTC answer was
+  // already right; for UTC viewers that is always true, so they never
+  // refetch and nothing changes for them. The once-per-key guard stops a
+  // skewed viewer clock from looping: if the refetched range still disagrees
+  // with the local clock, the server's answer stands.
+  const tzRefetchedFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!viewerTimeZone || !viewerLocalDate) return;
+    const serverEnd = data.chartRange?.end ?? null;
+    if (!serverEnd || serverEnd === viewerLocalDate) return;
+    const refetchKey = `${period}:${username}:${viewerTimeZone}`;
+    if (tzRefetchedFor.current === refetchKey) return;
+    tzRefetchedFor.current = refetchKey;
+    let cancelled = false;
+    fetch(
+      `/api/users/${encodeURIComponent(username)}?period=${period}&tz=${encodeURIComponent(viewerTimeZone)}`,
+    )
+      .then(async (response) => {
+        if (!response.ok || cancelled) return;
+        const payload = (await response.json()) as ProfileData;
+        if (!cancelled) setData(payload);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    viewerTimeZone,
+    viewerLocalDate,
+    data.chartRange?.end,
+    period,
+    username,
+  ]);
 
   /**
    * The card at the top is about today and nothing else.

@@ -13,6 +13,11 @@ import { buildSubmissionFreshness } from "@/lib/submissionFreshness";
 import { PRIVATE_CACHE_CONTROL, getViewerAccess } from "@/lib/privacy";
 import { addModelBreakdown, type ModelBreakdownData } from "@/lib/db/helpers";
 import { mergeSpeedUsage } from "@/lib/speedUsage";
+import {
+  addDaysToDateString,
+  dateStringInTimeZone,
+  isValidIanaTimeZone,
+} from "@/lib/timezone";
 
 const LEGACY_CLIENT_ALIASES: Record<string, string> = { kilocode: "kilo" };
 function normalizeClientId(id: string): string {
@@ -29,55 +34,50 @@ interface ProfilePeriodDateRange {
   end: string;
 }
 
-function toUtcDateString(date: Date): string {
-  return date.toISOString().slice(0, 10);
-}
-
 function parseProfilePeriod(value: string | null): ProfilePeriod {
   return PROFILE_PERIODS.includes(value as ProfilePeriod)
     ? (value as ProfilePeriod)
     : "all";
 }
 
-function getProfilePeriodDateRange(
+/**
+ * "Today" for the profile is the viewer's calendar date, not the server's
+ * UTC date (issue #21): a UTC+8 viewer's submitted row for their local today
+ * exists from their 00:00 on, and a range computed in UTC leaves it out until
+ * 08:00. `timeZone` is the viewer's zone; it defaults to UTC so callers that
+ * do not know the viewer (cached page render, embeds) reproduce the old
+ * behavior exactly.
+ */
+export function getProfilePeriodDateRange(
   period: ProfilePeriod,
   now: Date = new Date(),
+  timeZone: string = "UTC",
 ): ProfilePeriodDateRange | null {
   if (period === "all") {
     return null;
   }
 
-  const end = new Date(
-    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
-  );
-  const start = new Date(end);
-  start.setUTCDate(start.getUTCDate() - (period === "week" ? 6 : 29));
-
+  const end = dateStringInTimeZone(now, timeZone);
   return {
-    start: toUtcDateString(start),
-    end: toUtcDateString(end),
+    start: addDaysToDateString(end, period === "week" ? -6 : -29),
+    end,
   };
 }
 
-function getRollingProfileDateRange(
+export function getRollingProfileDateRange(
   now: Date = new Date(),
+  timeZone: string = "UTC",
 ): ProfilePeriodDateRange {
-  const end = new Date(
-    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
-  );
-  const targetYear = end.getUTCFullYear() - 1;
-  const month = end.getUTCMonth();
-  const lastValidDay = new Date(
-    Date.UTC(targetYear, month + 1, 0),
-  ).getUTCDate();
-  const start = new Date(
-    Date.UTC(targetYear, month, Math.min(end.getUTCDate(), lastValidDay)),
-  );
+  const end = dateStringInTimeZone(now, timeZone);
+  const [year, month, day] = end.split("-").map(Number);
+  const targetYear = year - 1;
+  // Same calendar day one year back, clamped: February 29 has no 2027 twin.
+  const lastValidDay = new Date(Date.UTC(targetYear, month, 0)).getUTCDate();
+  const start = `${targetYear}-${String(month).padStart(2, "0")}-${String(
+    Math.min(day, lastValidDay),
+  ).padStart(2, "0")}`;
 
-  return {
-    start: toUtcDateString(start),
-    end: toUtcDateString(end),
-  };
+  return { start, end };
 }
 
 function serializeUpdatedAt(
@@ -104,8 +104,16 @@ export async function getPublicProfileResponse(
     const { username } = await params;
     const { searchParams } = new URL(request.url);
     const period = parseProfilePeriod(searchParams.get("period"));
-    const periodRange = getProfilePeriodDateRange(period);
-    const chartRange = periodRange ?? getRollingProfileDateRange();
+    // The viewer's time zone arrives as `tz`; a bad value is a 400 rather
+    // than a silent fall back to UTC, which would mis-assign days while
+    // looking healthy.
+    const timeZoneParam = searchParams.get("tz");
+    if (timeZoneParam !== null && !isValidIanaTimeZone(timeZoneParam)) {
+      return NextResponse.json({ error: "Invalid time zone" }, { status: 400 });
+    }
+    const timeZone = timeZoneParam ?? "UTC";
+    const periodRange = getProfilePeriodDateRange(period, new Date(), timeZone);
+    const chartRange = periodRange ?? getRollingProfileDateRange(new Date(), timeZone);
 
     // Find user
     const matchingUsers = await db

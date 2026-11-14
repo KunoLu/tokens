@@ -315,6 +315,20 @@ export default async function DocsPage() {
         </Section>
 
         <Section
+          id="time-zone"
+          title={t("docs.timezoneTitle")}
+          description={t("docs.timezoneDesc")}
+        >
+          <p className="text-sm leading-relaxed text-muted-foreground">
+            {t("docs.timezoneRule")}{" "}
+            <a href="/settings" className="text-foreground underline underline-offset-4">
+              {t("docs.timezoneSettingsLink")}
+            </a>{" "}
+            {t("docs.timezoneRuleAfter")}
+          </p>
+        </Section>
+
+        <Section
           id="clients"
           title={t("docs.clientsTitle")}
           description={t("docs.clientsDesc")}

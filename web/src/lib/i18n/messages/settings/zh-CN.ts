@@ -19,6 +19,13 @@ const messages = {
     turnOff: "关闭",
     description: "私密账号不会出现在公开排名里。访客看到的页面和找不到用户一样。你仍可提交用量；只有这个浏览器会话能把账号改回公开。",
   },
+  timezone: {
+    title: "时区",
+    label: "归日时区",
+    autoDetect: "自动检测",
+    detected: "检测到：{zone}",
+    description: "决定用量归到哪个日历日：个人页图表的最后一天与「今天/昨天」卡片。你打开的每个个人页都按你的时区归日，从不按页面主人的。",
+  },
   readTokens: {
     label: "读取 Token",
     description: "读令牌可以打开你的私密资料、徽章或 embed。它不能提交用量，也不能关闭私密模式。明文只显示一次。",
@@ -119,6 +126,7 @@ const messages = {
     renameDevice: "重命名设备失败",
     revokeReadToken: "撤销读取 Token 失败",
     updatePrivacy: "更新隐私设置失败",
+    updateTimezone: "更新时区失败",
   },
   actions: {
     creating: "正在创建…",

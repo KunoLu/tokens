@@ -12,6 +12,12 @@ export interface SessionUser {
   username: string;
   displayName: string | null;
   avatarUrl: string | null;
+  /**
+   * The account's day-assignment override (issue #21); null/absent means
+   * auto-detect. Only the cookie path reads it — submit tokens never render
+   * profiles, so they neither need nor get it.
+   */
+  timezone?: string | null;
 }
 
 /**
@@ -57,6 +63,7 @@ export async function getSession(): Promise<SessionUser | null> {
     username: user.username,
     displayName: user.displayName,
     avatarUrl: user.avatarUrl,
+    timezone: user.timezone,
   };
 }
 
