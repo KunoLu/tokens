@@ -7,7 +7,7 @@ mode_note: Lord 2026-11-15 按用户 2026-11-14 群内确认（选甲）排定�
 status: "done"
 branch: fix/brand-purple
 created_at: '2026-11-15T00:51:54+08:00'
-updated_at: "2026-11-15T01:08:11+08:00"
+updated_at: "2026-11-15T01:16:40+08:00"
 completed_at: "2026-11-15T01:03:49+08:00"
 ---
 # 品牌紫色统一（页头图标、主题变量、对外品牌色）
@@ -22,7 +22,7 @@ completed_at: "2026-11-15T01:03:49+08:00"
 
 - 本会话按 strict 执行（Lord 2026-11-15 按用户 2026-11-14 群内确认（选甲）排定本 PR，Lord 记录）。不 commit、不 push、不开 PR、不访问生产、不启动子代理、不加新依赖，只改工作区文件。
 - 起点 main 9355a5e9c517908ce9545737e40aa65617e9b6c1；分支 fix/brand-purple；开工前 git status 实测干净，HEAD 与起点一致。
-- 色值基准：ai/tasks/archive/2026-Q3/t12-brand-purple/prd.md 与 implement.md 及提交 79e8f13 定下品牌紫 #7C3AED；web/public/brand/tokens-favicon.svg 已为 #7C3AED。存档未定义亮/暗两套主题的 oklch 取值，缺失部分按 #7C3AED 推导，推导见「色值推导」节。
+- 色值基准：品牌紫 #7C3AED 出自存档 ai/tasks/archive/2026-Q3/t12-brand-purple/：prd.md:8（TokensMark fill 改为 #7C3AED）、implement.md:8（fill #2F6FDB → #7C3AED）、implement.md:11（demo 品牌 tile 已是 #7C3AED）、implement.md:53（Hardcoded #7C3AED 为 TokensMark 既有模式）；提交 79e8f13（2026-09-17，「feat(web): recolor favicons to brand purple and slim the footer」），色值 #7C3AED；web/public/brand/tokens-favicon.svg 已为 #7C3AED。存档未定义亮/暗两套主题的 oklch 取值，缺失部分按 #7C3AED 推导，推导见「色值推导」节。
 - 未完整调用 grill-with-docs：改动对象、色值来源、保留范围与验收条件均已逐条写明，需求无歧义，不重复访谈。
 
 ## 验收条件
@@ -71,20 +71,26 @@ TDD：本任务为字面色值替换，无逻辑缝可红绿；对比度以脚�
 
 ## 保留清单（非品牌颜色，不改）
 
-| 位置 | 颜色 | 理由 |
-|---|---|---|
-| globals.css --token-input/-output/-cache-read/-cache-write/-reasoning | #0072b2 等五色（暗色另一套） | 用量图表固定分类图例（TokenBreakdown 消费），多色序列语义，非品牌 |
-| globals.css --chart-2..5 | 青/黄/品红/绿 | 图表多色序列；chart-1 才是品牌序列 |
-| globals.css --danger、--danger-solid、--success、--destructive | 红/绿 | 状态语义色 |
-| lib/themes.ts 贡献图主题目录（含默认 blue 与 purple 选项） | GitHub 风格九套色板 | 用户可选数据可视化主题，非品牌；改默认项会改变全部既有个人页与嵌入图外观，留待单独决定 |
-| lib/embed/renderIsometric3DSvg.ts graphGrade | 蓝阶梯 #79B8FF/#388BFD/#1F6FEB/#0D419D 等 | 3D 嵌入卡贡献图色阶，镜像默认贡献图主题（lib/themes.ts blue），数据可视化语义；同文件 accent 为品牌色，已改紫 |
-| lib/embed/clientLogos.generated.ts、lib/brandIcons.generated.ts | 各厂商 logo 原色（含蓝） | 第三方品牌标识，generated 文件 |
-| lib/constants.ts SOURCE_COLORS 与 usageChartData.ts 兜底 #3b82f6 | 各家厂商品牌色 | 第三方品牌标识 |
-| lib/avatar.ts #64748b | 板岩灰 | 默认头像占位中性色 |
-| components/TokenGraph2D.tsx、TokenGraph3D.tsx、GraphControls.tsx | 画布底色/网格色 | 2D/3D 画布渲染专用色 |
-| settings/SettingsClient.tsx hover:bg-[#8f1d14] | 深红 | 危险操作悬停态 |
-| profile/SpeedTier.tsx #17181B/#e5e5e5 | 深灰 tooltip | 中性浮层 |
-| profile/usageChartData.ts #737373、#94a3b8、#090d14 | 灰/深画布 | 图表中性色与未归属提供方色 |
+行号为本轮 rg -n 对当前工作树实测，与文件现行内容一致。
+
+| 文件路径 | 行号 | 颜色 | 理由 |
+|---|---|---|---|
+| web/src/app/globals.css | 82–86、95–99 | --token-input/-output/-cache-read/-cache-write/-reasoning：亮色 #0072b2 等五色、暗色 #56b4e9 等五色 | 用量图表固定分类图例（TokenBreakdown 消费），多色序列语义，非品牌 |
+| web/src/app/globals.css | 202–205、236–239 | --chart-2..5：青/黄/品红/绿 | 图表多色序列；chart-1 才是品牌序列 |
+| web/src/app/globals.css | 78–80、91–93、195、229 | --danger、--danger-solid、--success、--destructive：红/绿 | 状态语义色 |
+| web/src/lib/themes.ts | 25–100 | 贡献图主题目录：GitHub 风格九套色板（含默认 blue 与 purple 选项） | 用户可选数据可视化主题，非品牌；改默认项会改变全部既有个人页与嵌入图外观，留待单独决定 |
+| web/src/lib/embed/renderIsometric3DSvg.ts | 48、60、71 | graphGrade 蓝阶梯 #79B8FF/#388BFD/#1F6FEB/#0D419D 等 | 3D 嵌入卡贡献图色阶，镜像默认贡献图主题（lib/themes.ts blue），数据可视化语义；同文件 accent 为品牌色，已改紫 |
+| web/src/lib/embed/clientLogos.generated.ts | 16–185 | 各厂商 logo 原色（含蓝） | 第三方品牌标识，generated 文件 |
+| web/src/lib/brandIcons.generated.ts | 1–45 | 无内嵌色值：厂商品牌单色路径走 currentColor | 第三方品牌标识，generated 文件 |
+| web/src/lib/constants.ts | 157–214 | SOURCE_COLORS 各家厂商品牌色（含 #00A8E8、#1A73E8 等蓝） | 第三方品牌标识 |
+| web/src/components/profile/usageChartData.ts | 569 | 未归属提供方兜底 #3b82f6 | 第三方品牌标识 |
+| web/src/lib/avatar.ts | 17 | #64748b 板岩灰 | 默认头像占位中性色 |
+| web/src/components/TokenGraph2D.tsx | 55–57 | 画布底色/网格色 | 2D/3D 画布渲染专用色 |
+| web/src/components/TokenGraph3D.tsx | 88、115 | 画布底色/网格色 | 2D/3D 画布渲染专用色 |
+| web/src/components/GraphControls.tsx | 41、45 | 画布底色/网格色 | 2D/3D 画布渲染专用色 |
+| web/src/app/settings/SettingsClient.tsx | 275 | hover:bg-[#8f1d14] 深红 | 危险操作悬停态 |
+| web/src/components/profile/SpeedTier.tsx | 57 | #17181B/#e5e5e5 深灰 tooltip | 中性浮层 |
+| web/src/components/profile/usageChartData.ts | 568、570、583–590、853 | #737373、#94a3b8、#090d14 灰/深画布 | 图表中性色与未归属提供方色 |
 
 ## 取舍说明
 
