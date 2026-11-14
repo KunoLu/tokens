@@ -3,31 +3,31 @@ schema_version: 1
 id: 20261115-brand-purple
 workflow_mode: strict
 mode_source: user
-mode_note: Lord 2026-11-15 按用户 2026-11-14 群内确认（选甲）排定本 PR，按 strict 执行，Lord 记录。
+mode_note: Lord 2026-11-15 按用户 2026-11-14 23:26 群内确认（选甲）排定本 PR，按 strict 执行，Lord 记录。
 status: "done"
 branch: fix/brand-purple
 created_at: '2026-11-15T00:51:54+08:00'
-updated_at: "2026-11-15T01:16:40+08:00"
+updated_at: "2026-11-15T01:33:12+08:00"
 completed_at: "2026-11-15T01:03:49+08:00"
 ---
-# 品牌紫色统一（页头图标、主题变量、对外品牌色）
+# 品牌紫色统一（页头图标、应用图标、主题变量、对外品牌色）
 
 ## 目标
 
-把站点残留的上游蓝色品牌元素统一为站内紫色系（品牌紫 #7C3AED），覆盖页头图标、亮/暗两套主题变量、按钮与链接、焦点框、对外 OG 图与嵌入 SVG 品牌色；非品牌含义的颜色保留并在「保留清单」节列明。
+把站点残留的上游蓝色品牌元素统一为站内紫色系（品牌紫 #7C3AED），覆盖页头图标、四张应用图标、亮/暗两套主题变量、按钮与链接、焦点框、对外 OG 图与嵌入 SVG 品牌色；非品牌含义的颜色保留并在「保留清单」节列明。
 
-依据：用户 2026-11-14 群内确认（截图指出站点左上角图标是上游蓝色、页面按钮与可跳转链接文字也是蓝色，要求换站内紫色系并全站检查按钮与链接颜色统一），Lord 记录；用户 2026-11-14 群内确认（选甲：本 PR 只改颜色，不改版本号、不改 CHANGELOG；完成后发 v1.0.6，发版另走 PR），Lord 记录。
+依据：用户 2026-11-14 23:23 群内确认（截图指出站点左上角图标是上游蓝色、页面按钮与可跳转链接文字也是蓝色，要求换站内紫色系并全站检查按钮与链接颜色统一），Lord 记录；用户 2026-11-14 23:26 群内确认（选甲：本 PR 只改颜色，不改版本号、不改 CHANGELOG；完成后发 v1.0.6，发版另走 PR），Lord 记录。
 
 ## 已确认范围与授权
 
-- 本会话按 strict 执行（Lord 2026-11-15 按用户 2026-11-14 群内确认（选甲）排定本 PR，Lord 记录）。不 commit、不 push、不开 PR、不访问生产、不启动子代理、不加新依赖，只改工作区文件。
+- 本会话按 strict 执行（Lord 2026-11-15 按用户 2026-11-14 23:26 群内确认（选甲）排定本 PR，Lord 记录）。不 commit、不 push、不开 PR、不访问生产、不启动子代理、不加新依赖，只改工作区文件。
 - 起点 main 9355a5e9c517908ce9545737e40aa65617e9b6c1；分支 fix/brand-purple；开工前 git status 实测干净，HEAD 与起点一致。
 - 色值基准：品牌紫 #7C3AED 出自存档 ai/tasks/archive/2026-Q3/t12-brand-purple/：prd.md:8（TokensMark fill 改为 #7C3AED）、implement.md:8（fill #2F6FDB → #7C3AED）、implement.md:11（demo 品牌 tile 已是 #7C3AED）、implement.md:53（Hardcoded #7C3AED 为 TokensMark 既有模式）；提交 79e8f13（2026-09-17，「feat(web): recolor favicons to brand purple and slim the footer」），色值 #7C3AED；web/public/brand/tokens-favicon.svg 已为 #7C3AED。存档未定义亮/暗两套主题的 oklch 取值，缺失部分按 #7C3AED 推导，推导见「色值推导」节。
 - 未完整调用 grill-with-docs：改动对象、色值来源、保留范围与验收条件均已逐条写明，需求无歧义，不重复访谈。
 
 ## 验收条件
 
-1. 页头 TokensMark 为紫底白 T（fill #7C3AED），与 web/public/brand/tokens-favicon.svg 同色。
+1. 页头 TokensMark 为紫底白 T（fill #7C3AED），与 web/public/brand/tokens-favicon.svg 同色；四张应用图标（web/public/brand/tokens-app-icon-180.png、web/public/brand/tokens-app-icon-1024.png、web/public/android-chrome-192x192.png、web/public/android-chrome-512x512.png）由该 SVG 按各自原像素尺寸重导为紫色。
 2. globals.css 亮/暗两套主题：--primary、--ring、--chart-1、--accent 改紫色系；--primary-foreground 与 --primary 对比度不低于 WCAG AA 4.5:1，计算结果写入「色值推导」节。
 3. 按钮、链接、焦点框、标签页选中态统一走主题变量或紫色系；web/src 无残留品牌蓝色硬编码（「保留清单」节所列除外）。
 4. 非品牌颜色保留清单与理由写入本文件「保留清单」节。
@@ -42,7 +42,7 @@ completed_at: "2026-11-15T01:03:49+08:00"
 | book-ddd-distilled-modeling | 无完整 grill；纯色值变更，无领域术语或模型歧义 | 需求 | not-required |
 | book-ddia-data-design | 无持久数据、schema、迁移、跨进程流变更 | 设计稳定前 | not-required |
 | book-legacy-change-safety | 非既有行为 bug；纯视觉色值替换，不改变行为 | 首次行为修改前 | not-required |
-| book-refactoring-pass | 修改既有生产代码（globals.css、Navigation.tsx、layout.tsx、og/route.tsx、embedShared.ts、renderProfileBadgeSvg.ts） | 首次生产编辑前 | passed（proceed；normal；结论见门禁结论节） |
+| book-refactoring-pass | 修改既有生产代码（globals.css、Navigation.tsx、layout.tsx、og/route.tsx、embedShared.ts、renderIsometric3DSvg.ts、renderProfileBadgeSvg.ts） | 首次生产编辑前 | passed（proceed；normal；结论见门禁结论节） |
 | book-release-readiness | 触及 api/og 路由文件与对外嵌入 SVG（徽章、嵌入卡被第三方站点引用，OG 图被社交平台缓存） | 验证通过后、收尾前 | passed（ready；结论见门禁结论节） |
 
 TDD：本任务为字面色值替换，无逻辑缝可红绿；对比度以脚本实测计算为准，色值落地由编译产物与页面 HTML 实测钉住。BDD：skipped——本仓 no-.feature 例外，无 .feature 变更。
@@ -53,19 +53,20 @@ TDD：本任务为字面色值替换，无逻辑缝可红绿；对比度以脚�
 
 亮色主题：
 - --primary / --ring / --chart-1 = oklch(0.5413 0.2466 293.01)（即 #7C3AED 原值换算）。
-- --primary-foreground 保持 oklch(0.9911 0.0015 90)（= #FCFCFB）。对比度：相对亮度 L(#FCFCFB)=0.9728、L(#7C3AED)=0.1343，(0.9728+0.05)/(0.1343+0.05) = 5.55:1，不低于 4.5:1，WCAG AA 达标。
+- --primary-foreground 保持 oklch(0.9911 0.0015 90)（= #FCFCFB）。对比度：相对亮度 L(#FCFCFB)=0.9728、L(#7C3AED)=0.1343，(0.9728+0.05)/(0.1343+0.05) = 5.55:1，不低于 WCAG AA 4.5:1。
 - --accent = oklch(0.9433 0.0284 294.59)（= #EDE9FE，violet-100 实测换算）。原值 oklch(0.9603 0.0069 250) 为近中性浅蓝（chroma 0.0069，视觉上不呈蓝）；紫色要可辨认需更高 chroma，故取 violet-100。
 
 暗色主题：
 - --primary / --ring / --chart-1 = oklch(0.7090 0.1592 293.54)（= #A78BFA，violet-400，与品牌 violet-600 同族；原暗色主色 L 0.6845，新值 L 0.7090 保持同级亮度以保证暗底可读）。
-- --primary-foreground 保持 oklch(0.1822 0.0043 264)（= #111214）。对比度：L(#A78BFA)=0.3358、L(#111214)=0.0060，(0.3358+0.05)/(0.0060+0.05) = 6.89:1，不低于 4.5:1，达标。
+- --primary-foreground 保持 oklch(0.1822 0.0043 264)（= #111214）。对比度：L(#A78BFA)=0.3358、L(#111214)=0.0060，(0.3358+0.05)/(0.0060+0.05) = 6.89:1，不低于 4.5:1。
 - --accent = oklch(0.2789 0.0300 293.01)（= #292636，sRGB 色域内）。原值 oklch(0.2789 0.0063 264) 为近中性暗面；hue 转品牌紫 293.01、chroma 提至 0.03，使暗色悬停面呈可辨认暗紫。
 
 对外品牌色（字面 hex；OG/嵌入 SVG 输出给第三方站点，无主题变量环境）：
-- OG 图（api/og/route.tsx）：BRAND #4f8ff0 → #7C3AED；HEAT 蓝色阶梯改紫色阶梯，grade0 #EEF0F3 不变，其余按品牌色相 293.01 等距插值（L 0.90→0.5413、C 0.05→0.2466，脚本换算回 sRGB）：#DFD9FD、#BAA9FB、#9978F5、#7C3AED；头像兜底底色 #E9F0FC → #EDE9FE。
+- OG 图（api/og/route.tsx）：BRAND #4f8ff0 → #7C3AED；HEAT 蓝色阶梯改紫色阶梯，grade0 #EEF0F3 不变，其余按品牌色相 293.01 等距插值（L 0.90→0.5413、C 0.05→0.2466，脚本换算回 sRGB）：#DFD9FD、#BAA9FB、#9978F5、#7C3AED；头像兜底底色 #E9F0FC → #EDE9FE；背景装饰 radial-gradient rgba(79,143,240,0.13)/rgba(79,143,240,0) → rgba(124,58,237,0.13)/rgba(124,58,237,0)（透明度不变）。
 - 嵌入卡（embed/embedShared.ts THEMES）：亮色 brand/accentTokens/glowColor #0969DA → #7C3AED、tokenEnd #54AEFF → #A78BFA；暗色 brand/accentTokens #2F8FFF → #A78BFA、tokenEnd #A5D6FF → #C4B5FD（violet-300，暗底上保持渐变可读）。
 - 徽章（embed/renderProfileBadgeSvg.ts）：METRIC_COLORS.tokens "0073FF" → "7C3AED"（tokens 度量色即品牌色）；cost 绿、rank 橙为度量语义色，保留。
 - 顶部进度条（layout.tsx NextTopLoader）：#0073FF → #7C3AED。
+- 应用图标 PNG（四张）：蓝底 #2F6FDB 满幅方块（四角不透明、无圆角留白）→ 由 web/public/brand/tokens-favicon.svg 按各自原像素尺寸重新栅格化的紫底（#7C3AED）白 T，RGBA PNG、尺寸不变——web/public/brand/tokens-app-icon-180.png（180×180）、web/public/brand/tokens-app-icon-1024.png（1024×1024）、web/public/android-chrome-192x192.png（192×192）、web/public/android-chrome-512x512.png（512×512）。原图版式与 favicon 不同（满幅直角），做法沿用提交 79e8f13 生成 favicon PNG 的方式：由 tokens-favicon.svg 直接栅格化导出（79e8f13 提交说明 favicon.ico 与 favicon-16/32.png 均由该 SVG 重新生成，安装/PWA 图标当时未动）；一次性 bun 脚本调用仓库既有依赖 sharp 完成导出，脚本未留在仓库。导出后实测：四张尺寸与导出前一致，图标主体像素 #7C3AED、中心白 T #FFFFFF、圆角外四角透明。
 
 中性色说明：--foreground、--muted-foreground、--border、--input、--secondary 等 hue 264、chroma 不超过 0.0122 的变量为中性灰（chroma 过低不呈蓝色），保持不变。
 
@@ -119,7 +120,7 @@ TDD：本任务为字面色值替换，无逻辑缝可红绿；对比度以脚�
 Refactoring Review
 Status: proceed
 Review mode: normal
-Existing-code scope: web/src/app/globals.css（亮/暗主题变量与区块注释）、web/src/components/layout/Navigation.tsx（TokensMark fill 与注释）、web/src/app/layout.tsx（NextTopLoader color）、web/src/app/api/og/route.tsx（BRAND/HEAT/头像兜底底色与注释）、web/src/lib/embed/embedShared.ts（THEMES 亮/暗 brand/accentTokens/tokenEnd/glowColor）、web/src/lib/embed/renderProfileBadgeSvg.ts（METRIC_COLORS.tokens）
+Existing-code scope: web/src/app/globals.css（亮/暗主题变量与区块注释）、web/src/components/layout/Navigation.tsx（TokensMark fill 与注释）、web/src/app/layout.tsx（NextTopLoader color）、web/src/app/api/og/route.tsx（BRAND/HEAT/头像兜底底色、背景 radial-gradient rgba 与注释）、web/src/lib/embed/embedShared.ts（THEMES 亮/暗 brand/accentTokens/tokenEnd/glowColor）、web/src/lib/embed/renderIsometric3DSvg.ts（亮/暗 accent）、web/src/lib/embed/renderProfileBadgeSvg.ts（METRIC_COLORS.tokens）
 Behavior that must remain unchanged: 白色 T 路径与 viewBox、布局/排版/交互逻辑、OG 与嵌入 SVG 的结构与文案、badge 度量与宽度表、主题切换机制、token-* 图例、chart-2..5、SOURCE_COLORS、贡献图主题目录
 Structural friction: none——全部为字面色值与同义注释替换，无结构改动
 Decision and smallest safe step: no refactor needed——每处仅替换色值字面量并同步注释措辞
@@ -177,10 +178,16 @@ Lean already. Ship.——diff 逐文件过一遍：全部为字面色值一对�
 - 冒烟（next start，端口 3123）：GET /login 200；页面 HTML 实测 `fill="#7C3AED"` 在位、`#2F6FDB` 零命中；编译产物 CSS（/_next/static/chunks 三个 CSS 文件合并扫描）实测 `--primary:#7c3aed`（亮）/`#a78bfa`（暗）、`--ring` 与 `--chart-1` 同值、`--accent:#ede9fe`（亮）/`#292636`（暗），旧蓝 oklch 值（0.5461/0.6845/0.9603 系）零命中；Chrome 截图确认亮主题（紫底白 T 页标、紫色 Sign in 按钮与 Create one/Resend it 链接）与暗主题（页标品牌紫不变、表单主按钮浅紫 #A78BFA 配深字、链接浅紫）两态；进程已关闭。
 - 对比度计算（bun 脚本，sRGB 线性化→相对亮度→WCAG 比值）：亮色 #FCFCFB on #7C3AED = 5.55:1；暗色 #111214 on #A78BFA = 6.89:1；均不低于 4.5:1。
 - 色相复扫脚本：对 web/src 全部 .ts/.tsx/.css 的 6 位 hex 逐枚算 oklch，hue 220–265 且 chroma>0.05 的命中共 18 行，逐条核对全部属于保留清单（token 图例、贡献图色板与 3D 嵌入色阶、SOURCE_COLORS、generated 厂商 logo、usageChartData 兜底）；Tailwind blue-/sky-/indigo- 类名扫描零命中；命名蓝色（steelblue 等）扫描仅命中 generated 厂商 logo 的 azure 路径数据。
-- git diff --stat：7 个生产文件 + ai/tasks 本任务文件，29 insertions/27 deletions，无越界改动。
+- git diff --stat：第一轮 7 个生产文件 28 insertions/27 deletions（按提交 12d9f89 实测：git diff 9355a5e..12d9f89 --shortstat -- web/src；本文件此前所记 29 与实际不符，按实测改为 28）；本轮再改 og/route.tsx 背景 rgba 一行（1 insertion/1 deletion），当前 web/src 对 9355a5e 合计 7 文件 29 insertions/28 deletions，另有 web/public 四张 PNG 二进制替换（diff --stat 标 Bin），无越界改动。
 - rtk：not-needed——全部命令为终端事实型输出，未走缓存包装。BDD：skipped——无 .feature 变更（本仓 no-.feature 例外）。Playwright 套件：not-needed——无页面结构变化，视觉面由 next start 冒烟与截图覆盖。
 - 未跑且原因：浏览器级全站 E2E 与 test:migrations 需 DATABASE_URL/本地 postgres，本机皆无；Rust CLI 未改动，cargo 未跑；OG/嵌入图未实机请求（/api/og 需数据库取用户数据），embed 与 badge 无既有测试文件（rg 实测零命中），其色值常量经 tsc 类型检查与 build 编译覆盖。
 - 依赖：无新增（bun install --frozen-lockfile 仅恢复声明依赖，bun.lock 未动）。
+
+复验（2026-11-15 01:32:18–01:33:12 +08:00，HEAD 8d63ebb 加本轮未提交修正：og/route.tsx 背景 rgba、四张应用图标 PNG、本文件文字）：
+
+- `cd web && bunx tsc --noEmit`：exit 0，无输出。
+- `cd web && bun run lint`：exit 0，0 errors/1 warning（src/app/(main)/docs/page.tsx 354:19 no-img-element，与 main 基线同一条，新增 0）。
+- `cd web && bun test`：167 pass/0 fail/5576 expect()/21 文件。
 
 ## 状态事件
 
@@ -188,4 +195,4 @@ Lean already. Ship.——diff 逐文件过一遍：全部为字面色值一对�
 |---|---|---|---|---|
 | 2026-11-15T00:51:56.654224+08:00 | planned | in-progress | 开工：范围、验收、Book Gate Plan 与色值推导已写入，调查完成，Refactoring Review 结论 proceed | task.md 已确认范围与授权节、色值推导节、进度节调查结论、门禁结论节 Refactoring Review；分支 fix/brand-purple，工作区开工前干净，HEAD 与 main(9355a5e) 一致 |
 | 2026-11-15T01:03:44.517944+08:00 | in-progress | checking | 实现与验证完成：七个生产文件改色、全站色相复扫零残留品牌蓝、tsc/lint/bun test/build 全绿、亮暗两主题冒烟截图确认、ponytail-review 与可读性复核通过、Release Readiness Review 结论 ready | task.md 进度节 00:51:56–01:00:43 条目与证据节第一轮块；tsc 00:56:12 exit 0、lint 00:56:38 与基线同条、bun test 00:56:45 167 pass/0 fail、build 00:57:08 exit 0；冒烟端口 3123 已关 |
-| 2026-11-15T01:03:49.598875+08:00 | checking | done | 验收条件 1-7 已核对：页标 fill #7C3AED 与 favicon 同色（1）；亮暗两套主题变量改紫且对比度 5.55:1/6.89:1 达标（2）；按钮/链接/焦点框/标签页走主题变量、品牌蓝硬编码零残留（3）；保留清单与理由在位（4）；四条验证命令实跑全绿且 lint 对 main 基线新增 0（5）；禁用词与本机路径扫描零命中（6）；next 进程已关（7）；浏览器级全站 E2E 因本机无数据库环境记为未跑，不冒充已通过；不 commit、不 push、不开 PR | task.md 证据节全部实跑记录；门禁结论节 Refactoring/Release Readiness/ponytail-review/可读性复核；grep 禁用词与本机路径扫描零命中；git status 仅列本任务与七个生产文件 |
+| 2026-11-15T01:03:49.598875+08:00 | checking | done | 验收条件 1-7 已核对：页标 fill #7C3AED 与 favicon 同色、四张应用图标已按原尺寸重导为紫色（1）；亮暗两套主题变量改紫且对比度 5.55:1/6.89:1 不低于 4.5:1（2）；按钮/链接/焦点框/标签页走主题变量、品牌蓝硬编码零残留（3）；保留清单与理由在位（4）；四条验证命令实跑全绿且 lint 对 main 基线新增 0（5）；禁用词与本机路径扫描零命中（6）；next 进程已关（7）；浏览器级全站 E2E 因本机无数据库环境记为未跑，不冒充已通过；不 commit、不 push、不开 PR | task.md 证据节全部实跑记录；门禁结论节 Refactoring/Release Readiness/ponytail-review/可读性复核；grep 禁用词与本机路径扫描零命中；git status 仅列本任务与七个生产文件 |

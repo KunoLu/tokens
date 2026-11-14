@@ -194,7 +194,7 @@ function Background() {
         height: 1000,
         display: "flex",
         borderRadius: 999,
-        background: "radial-gradient(circle, rgba(79,143,240,0.13) 0%, rgba(79,143,240,0) 62%)",
+        background: "radial-gradient(circle, rgba(124,58,237,0.13) 0%, rgba(124,58,237,0) 62%)",
       }}
     />
   );
