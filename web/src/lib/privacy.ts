@@ -4,6 +4,7 @@ import { db, sessions, users } from "@/lib/db";
 import { getBearerToken } from "@/lib/auth/bearerToken";
 import { READ_TOKEN_PREFIX, verifyReadTokenForUser } from "@/lib/auth/readTokens";
 import { hashToken } from "@/lib/auth/utils";
+import { revalidateLeaderboard } from "@/lib/leaderboard/cache";
 import {
   USERNAME_LOOKUP_LIMIT,
   getSingleUsernameMatch,
@@ -101,7 +102,11 @@ export async function getViewerAccess(
 export function revalidateUserVisibility(username: string): void {
   const usernameCacheKey = normalizeUsernameCacheKey(username);
   try {
-    revalidateTag("leaderboard", { expire: 0 });
+    // The whole board in one shot: every tagged data entry (all period, sort,
+    // page and search variants — teamboard aggregates hang on the same tag)
+    // plus the per-language page copies, so a private account leaves the
+    // shared edge cache now instead of riding out its stale window.
+    revalidateLeaderboard();
     revalidateTag(`user:${usernameCacheKey}`, { expire: 0 });
     revalidateTag("user-rank", { expire: 0 });
     revalidateTag(`user-rank:${usernameCacheKey}`, { expire: 0 });
@@ -110,7 +115,6 @@ export function revalidateUserVisibility(username: string): void {
     revalidateTag(`embed-user:${usernameCacheKey}:cost`, { expire: 0 });
     revalidateTag(`embed-contrib:${usernameCacheKey}`, { expire: 0 });
     revalidateTag(`embed-today:${usernameCacheKey}`, { expire: 0 });
-    revalidatePath("/leaderboard");
     revalidatePath("/teamboard");
     revalidateUsernamePaths(username);
   } catch {
