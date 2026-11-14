@@ -124,3 +124,33 @@ describe("settings auth gate", () => {
     expect(res.headers.get("x-middleware-request-x-tokens-locale")).toBe("en");
   });
 });
+
+describe("shared cache list", () => {
+  const SHARED = "public, max-age=0, s-maxage=30, stale-while-revalidate=60";
+
+  test("the board is shared-cacheable now that it ships whole", () => {
+    const res = middleware(req("/leaderboard"));
+    expect(res.headers.get("cache-control")).toBe(SHARED);
+  });
+
+  test("a prefixed board gets the same header as the English one", () => {
+    const res = middleware(req("/zh-CN/leaderboard"));
+    expect(res.headers.get("cache-control")).toBe(SHARED);
+  });
+
+  test("allowlisted view parameters keep the board cacheable", () => {
+    const res = middleware(req("/leaderboard?period=week&sortBy=cost&page=2"));
+    expect(res.headers.get("cache-control")).toBe(SHARED);
+    expect(res.headers.get("location")).toBeNull();
+  });
+
+  test("a stray parameter is canonicalised away instead of splitting the cache", () => {
+    const res = middleware(req("/leaderboard?utm_source=x"));
+    expect(res.headers.get("location")).toBe(`${BASE}/leaderboard`);
+  });
+
+  test("the teamboard stays out of the shared cache: it answers per viewer", () => {
+    const res = middleware(req("/teamboard"));
+    expect(res.headers.get("cache-control")).toBeNull();
+  });
+});

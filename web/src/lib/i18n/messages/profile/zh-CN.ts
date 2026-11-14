@@ -102,10 +102,12 @@ const messages = {
 
   today: {
     heading: "今天",
-    dayFallback: "当天",
+    yesterdayHeading: "昨天",
+    dayAria: "日期",
     usageAria: "{heading}用量",
     messages: "消息数",
     empty: "今天还没有记录。",
+    emptyYesterday: "昨天没有记录。",
     clientMessages: "{count, plural, one {# 条} other {# 条}}",
   },
 

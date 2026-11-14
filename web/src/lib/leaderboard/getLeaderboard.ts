@@ -19,6 +19,7 @@ import type {
 import {
   escapeLikePattern,
   hasDirectives,
+  matchesLeaderboardSearch,
   parseSearchDirectives,
   type ParsedSearchDirectives,
 } from "@/lib/leaderboard/searchDirectives";
@@ -143,6 +144,17 @@ export function getPeriodDateRange(
     };
   }
 
+  if (period === "yesterday") {
+    // Same anchor as "today" — customFrom is the viewer's local today, not
+    // yesterday — so one parameter means one thing for both periods.
+    const [year, month, day] = (customFrom || toUtcDateString(end)).split("-").map(Number);
+    const yesterdayDate = toUtcDateString(new Date(Date.UTC(year, month - 1, day - 1)));
+    return {
+      start: yesterdayDate,
+      end: yesterdayDate,
+    };
+  }
+
   if (period === "week") {
     const start = new Date(end);
     start.setUTCDate(start.getUTCDate() - 6);
@@ -221,24 +233,6 @@ export function aggregatePeriodRows(
   return Array.from(usersById.values()).sort((left, right) =>
     compareLeaderboardUsers(left, right, sortBy)
   );
-}
-
-function matchesLeaderboardSearch(
-  user: Pick<LeaderboardUser, "username" | "displayName">,
-  textSearch: string
-): boolean {
-  if (!textSearch) {
-    return true;
-  }
-
-  const lowerSearch = textSearch.toLowerCase();
-  if (user.username.toLowerCase().includes(lowerSearch)) {
-    return true;
-  }
-  if (user.displayName && user.displayName.toLowerCase().includes(lowerSearch)) {
-    return true;
-  }
-  return false;
 }
 
 /**
@@ -685,8 +679,8 @@ export function periodCacheKey(
 ): string {
   return period === "custom"
     ? `custom:${customFrom}:${customTo}`
-    : period === "today"
-    ? `today:${customFrom ?? ""}`
+    : period === "today" || period === "yesterday"
+    ? `${period}:${customFrom ?? ""}`
     : period;
 }
 
@@ -753,8 +747,8 @@ export function getLeaderboardData(
 
   const cacheKey = period === "custom"
     ? `leaderboard:custom:${customFrom}:${customTo}:${page}:${limit}:${sortBy}:${search}`
-    : period === "today"
-    ? `leaderboard:today:${customFrom ?? ""}:${page}:${limit}:${sortBy}:${search}`
+    : period === "today" || period === "yesterday"
+    ? `leaderboard:${period}:${customFrom ?? ""}:${page}:${limit}:${sortBy}:${search}`
     : `leaderboard:${period}:${page}:${limit}:${sortBy}:${search}`;
 
   return unstable_cache(

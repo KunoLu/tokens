@@ -6,6 +6,7 @@ import {
   LegalPage,
 } from "@/components/legal/LegalPage";
 import { getTranslator } from "@/lib/i18n/server";
+import { richText } from "@/lib/i18n/rich";
 import { SITE_HOST, SITE_URL } from "@/lib/site";
 
 export const metadata: Metadata = {
@@ -72,6 +73,23 @@ export default async function PrivacyPage() {
         </p>
         <p>
           <strong className="font-medium text-foreground">
+            {t("legal.privacy.collect.mcpLabel")}
+          </strong>{" "}
+          {richText(t("legal.privacy.collect.mcp"), {
+            enable: <code className="font-mono text-[13px]">tokens mcp-names enable</code>,
+            flag: <code className="font-mono text-[13px]">--include-mcp</code>,
+            claudePath: <code className="font-mono text-[13px]">~/.claude/.mcp.json</code>,
+            cursorPath: <code className="font-mono text-[13px]">~/.cursor/mcp.json</code>,
+            kiroPath: <code className="font-mono text-[13px]">~/.kiro/settings/mcp.json</code>,
+            opencodePath: (
+              <code className="font-mono text-[13px]">
+                ~/.config/opencode/skills, ~/.opencode/skills
+              </code>
+            ),
+          })}
+        </p>
+        <p>
+          <strong className="font-medium text-foreground">
             {t("legal.privacy.collect.bannedLabel")}
           </strong>{" "}
           {t("legal.privacy.collect.banned")}
@@ -85,6 +103,7 @@ export default async function PrivacyPage() {
             t("legal.privacy.never.2"),
             t("legal.privacy.never.3"),
             t("legal.privacy.never.4"),
+            t("legal.privacy.never.5"),
           ]}
         />
       </Clause>
@@ -105,6 +124,7 @@ export default async function PrivacyPage() {
         <p>{t("legal.privacy.public.p1")}</p>
         <p>{t("legal.privacy.public.p2")}</p>
         <p>{t("legal.privacy.public.p3")}</p>
+        <p>{t("legal.privacy.public.p4")}</p>
       </Clause>
 
       <Clause heading={t("legal.privacy.h.cookies")}>
@@ -184,6 +204,16 @@ export default async function PrivacyPage() {
                 {t("legal.privacy.choices.stopLabel")}
               </strong>{" "}
               {t("legal.privacy.choices.stop")}
+            </>,
+            <>
+              <strong className="font-medium text-foreground">
+                {t("legal.privacy.choices.stopMcpLabel")}
+              </strong>{" "}
+              {richText(t("legal.privacy.choices.stopMcp"), {
+                command: (
+                  <code className="font-mono text-[13px]">tokens mcp-names disable</code>
+                ),
+              })}
             </>,
           ]}
         />

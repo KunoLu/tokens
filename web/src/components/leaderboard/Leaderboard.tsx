@@ -23,11 +23,17 @@ import { cn } from "@/lib/utils";
 import { CONTAINER } from "@/components/layout/Container";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { useLocale, useT } from "@/components/layout/LocaleProvider";
+import { localizeHref } from "@/lib/i18n/config";
 import { formatCurrency, formatNumber } from "@/lib/format";
+import { resolveSortByParam } from "@/lib/leaderboard/constants";
 import type {
   LeaderboardSortBy,
   LeaderboardTokenFormat,
 } from "@/lib/leaderboard/constants";
+import {
+  matchesLeaderboardSearch,
+  parseSearchDirectives,
+} from "@/lib/leaderboard/searchDirectives";
 import type { LeaderboardData, LeaderboardUser, Period } from "@/lib/leaderboard/types";
 import { toLocalDateString } from "@/lib/leaderboard/dateRange";
 import { avatarUrlFor } from "@/lib/avatar";
@@ -45,10 +51,12 @@ interface SessionUser {
 }
 
 interface LeaderboardProps {
+  /** The whole board for this period, not a page of it. */
   initialData: LeaderboardData;
-  currentUser: SessionUser | null;
-  initialSortBy: LeaderboardSortBy;
-  initialUserRank: LeaderboardUser | null;
+  /** A `client:`/`model:` query, which re-runs the aggregation server-side and
+   *  therefore already narrowed what arrived here. Plain text is filtered
+   *  locally and never reaches the server. */
+  directiveSearch: string;
 }
 
 // All time leads because it is the standing everyone compares against; Today
@@ -57,6 +65,7 @@ interface LeaderboardProps {
 export const PERIODS: ReadonlyArray<{ value: Period }> = [
   { value: "all" },
   { value: "today" },
+  { value: "yesterday" },
   { value: "week" },
   { value: "month" },
   { value: "last-month" },
@@ -68,12 +77,12 @@ export const PERIODS: ReadonlyArray<{ value: Period }> = [
 export const PERIOD_LABEL_KEYS: Record<Period, string> = {
   all: "leaderboard.period.allTime",
   today: "leaderboard.period.today",
+  yesterday: "leaderboard.period.yesterday",
   week: "leaderboard.period.week",
   month: "leaderboard.period.month",
   "last-month": "leaderboard.period.lastMonth",
   custom: "leaderboard.period.allTime",
 };
-
 
 function Stat({
   label,
@@ -102,6 +111,7 @@ function Stat({
     </div>
   );
 }
+
 // Exported for the Teamboard, which renders the same rows minus the Team
 // column (`hideTeam`) — one row implementation, two column sets.
 export function DeveloperRow({
@@ -119,10 +129,12 @@ export function DeveloperRow({
   tokenFormat: LeaderboardTokenFormat;
   hideTeam?: boolean;
 }) {
-  const compact = tokenFormat === "compact";
+  const t = useT();
   const locale = useLocale();
+  const compact = tokenFormat === "compact";
   const primary = sortBy === "cost" ? user.totalCost : user.totalTokens;
   const share = max > 0 ? Math.max(primary / max, 0.006) : 0;
+
   return (
     <TableRow
       className={cn(
@@ -150,7 +162,7 @@ export function DeveloperRow({
             visitor who will open at most one. Hover still prefetches, which is
             where the intent actually is. */}
         <Link
-          href={`/u/${user.username}`}
+          href={localizeHref(`/u/${user.username}`, locale)}
           prefetch={false}
           className="flex min-w-0 items-center gap-3"
         >
@@ -165,7 +177,7 @@ export function DeveloperRow({
               {user.displayName || user.username}
             </span>
             <span className="truncate text-xs text-muted-foreground">
-              @{user.username}
+              {t("leaderboard.userHandle", { username: user.username })}
             </span>
             <MembershipBadges team={hideTeam ? null : user.team} group={user.group} />
           </span>
@@ -219,7 +231,7 @@ export function DeveloperRow({
           >
             {formatNumber(user.totalTokens, compact, locale)}
           </span>
-          {/* Share of the top row on this page — a shape you can scan without
+          {/* Share of the top row on the board — a shape you can scan without
               reading every number. */}
           <div className="h-0.5 w-full max-w-32 overflow-hidden rounded-full bg-border">
             <div
@@ -287,11 +299,33 @@ export function FormatToggle({
   );
 }
 
+/** Rows per page. The whole board is already here; this is a display choice. */
+const PAGE_SIZE = 50;
+
+/**
+ * Order the board the way the SQL did, including the tie-break.
+ *
+ * The secondary column matters: without it two people on identical totals swap
+ * places between renders, and the rank shown in the "Your position" card would
+ * disagree with the rank on the same person's row in the table.
+ */
+function sortBoard(
+  users: ReadonlyArray<LeaderboardUser>,
+  sortBy: LeaderboardSortBy
+): LeaderboardUser[] {
+  const primary = (u: LeaderboardUser) =>
+    sortBy === "cost" ? u.totalCost : u.totalTokens;
+  const secondary = (u: LeaderboardUser) =>
+    sortBy === "cost" ? u.totalTokens : u.totalCost;
+
+  return [...users]
+    .sort((a, b) => primary(b) - primary(a) || secondary(b) - secondary(a))
+    .map((user, index) => ({ ...user, rank: index + 1 }));
+}
+
 export default function Leaderboard({
   initialData,
-  currentUser,
-  initialSortBy,
-  initialUserRank,
+  directiveSearch,
 }: LeaderboardProps) {
   const router = useRouter();
   const pathname = usePathname();
@@ -302,12 +336,59 @@ export default function Leaderboard({
     showExact: t("leaderboard.formatToggle.exact"),
     abbreviate: t("leaderboard.formatToggle.abbreviate"),
   };
-  const [sortBy, setSortBy] = useState<LeaderboardSortBy>(initialSortBy);
-  const [search, setSearch] = useState(searchParams.get("search") ?? "");
-  // The query these results actually answer, as opposed to what is currently
-  // typed in the box.
-  const appliedSearch = searchParams.get("search")?.trim() ?? "";
+
+  const {
+    leaderboardSortBy,
+    setLeaderboardSort,
+    leaderboardTokenFormat: tokenFormat,
+    setLeaderboardTokenFormat,
+    mounted,
+  } = useSettings();
+
+  // A `sortBy` in the URL wins, so a shared link opens on the ordering it was
+  // shared with. Otherwise the stored preference — but only once mounted: the
+  // server rendered the token ordering, and reaching for localStorage during
+  // the first render would reorder the table underneath the reader.
+  const sortByParam = resolveSortByParam(searchParams.get("sortBy"));
+  const sortBy: LeaderboardSortBy =
+    sortByParam ?? (mounted ? leaderboardSortBy : "tokens");
+
+  const [search, setSearch] = useState(() => searchParams.get("search") ?? "");
+  const [page, setPage] = useState(() =>
+    Math.max(1, Number(searchParams.get("page")) || 1)
+  );
   const [pendingPeriod, setPendingPeriod] = useState<Period | null>(null);
+
+  /**
+   * Who is reading, and nothing else.
+   *
+   * The page itself is one cached document for every reader, so identity
+   * cannot come from the render — but it does not need to. The only thing
+   * fetched here is *which* row is mine; every number in the rank card is then
+   * read out of the same sorted array the table is drawn from. That is the
+   * whole point: the card and the table cannot disagree, because there is only
+   * one set of figures. Fetching the rank itself would reintroduce exactly the
+   * drift this removes, and worse — the table would be an edge copy up to five
+   * minutes old while the rank came back freshly computed.
+   *
+   * Same endpoint the header already uses, so a signed-in reader pays for it
+   * once.
+   */
+  const [me, setMe] = useState<SessionUser | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/auth/session")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!cancelled) setMe(data?.user ?? null);
+      })
+      .catch(() => {
+        // A failed session lookup is not a sign-out; it just means no card.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // The server resolves the period, so it is read from props rather than
   // mirrored into state. `pendingPeriod` only holds the optimistic selection
@@ -319,9 +400,9 @@ export default function Leaderboard({
     setPendingPeriod(null);
   }
   const searchRef = useRef<HTMLInputElement>(null);
-  const { leaderboardTokenFormat: tokenFormat, setLeaderboardTokenFormat } =
-    useSettings();
 
+  /** Navigate. Only the period and the date window change what the server has
+   *  to compute, so only they come through here. */
   const pushQuery = useCallback(
     (next: Record<string, string | null>) => {
       const params = new URLSearchParams(searchParams.toString());
@@ -335,15 +416,38 @@ export default function Leaderboard({
     [pathname, router, searchParams]
   );
 
+  /**
+   * Record a view choice in the URL without asking the server for anything.
+   *
+   * Sorting, searching and paging are now array operations over rows already in
+   * memory, so a navigation would fetch a document identical to the one on
+   * screen. They stay in the address bar because these links get shared, and
+   * `replaceState` is how you keep that without the round trip — it also keeps
+   * the back button meaning "the previous page", not "the previous keystroke".
+   */
+  const replaceQuery = useCallback(
+    (next: Record<string, string | null>) => {
+      const params = new URLSearchParams(window.location.search);
+      for (const [key, value] of Object.entries(next)) {
+        if (value === null || value === "") params.delete(key);
+        else params.set(key, value);
+      }
+      const qs = params.toString();
+      window.history.replaceState(null, "", qs ? `${pathname}?${qs}` : pathname);
+    },
+    [pathname]
+  );
+
   // The server can only resolve "today" in UTC, but daily rows are bucketed by
   // the submitter's local date, so it lands on the wrong day for anyone not on
-  // UTC — and a signed-in viewer whose local day has rolled over gets no rank
-  // at all, because the rank is a position within the period. Send our own date
-  // up as soon as we have one. `replace` rather than `push` so the correction
-  // does not sit in the back stack, and the equality check makes it idempotent
-  // while still re-firing when the day rolls over under a long-lived tab.
+  // UTC. Send our own date up as soon as we have one. `replace` rather than
+  // `push` so the correction does not sit in the back stack, and the equality
+  // check makes it idempotent while still re-firing when the day rolls over
+  // under a long-lived tab.
   useEffect(() => {
-    if (period !== "today") return;
+    // "yesterday" is anchored on the same local date, so it needs the same
+    // correction.
+    if (period !== "today" && period !== "yesterday") return;
     const now = new Date();
     const localDate = toLocalDateString(now);
     const fromParam = searchParams.get("from");
@@ -371,21 +475,65 @@ export default function Leaderboard({
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  const max = useMemo(() => {
-    if (initialData.users.length === 0) return 0;
-    return Math.max(
-      ...initialData.users.map((u) =>
-        sortBy === "cost" ? u.totalCost : u.totalTokens
-      )
-    );
-  }, [initialData.users, sortBy]);
+  // One ordering, computed once. Everything below is a view of this array —
+  // the table, the page count, and the viewer's own row — which is what makes
+  // it impossible for the rank in the card to disagree with the rank on the
+  // same person's row further down.
+  const ranked = useMemo(
+    () => sortBoard(initialData.users, sortBy),
+    [initialData.users, sortBy]
+  );
 
-  const { pagination, stats, users } = initialData;
+  // Only the plain-text part. A `client:`/`model:` directive was applied by the
+  // server before these rows were sent, so re-applying it here would filter the
+  // result of a filter.
+  const appliedSearch = useMemo(
+    () => parseSearchDirectives(search).text.trim(),
+    [search]
+  );
+
+  const filtered = useMemo(
+    () => ranked.filter((user) => matchesLeaderboardSearch(user, appliedSearch)),
+    [ranked, appliedSearch]
+  );
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  // Typing a query that shortens the board past the current page would
+  // otherwise leave the reader looking at an empty table with no way back.
+  const currentPage = Math.min(page, totalPages);
+  const users = useMemo(
+    () => filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE),
+    [filtered, currentPage]
+  );
+
+  // The bar lengths compare against the whole board, not against whichever
+  // fifty rows are on screen — otherwise page 2 redraws itself full-width and
+  // reads as everyone suddenly being equal.
+  const max = useMemo(() => {
+    if (ranked.length === 0) return 0;
+    return sortBy === "cost" ? ranked[0].totalCost : ranked[0].totalTokens;
+  }, [ranked, sortBy]);
+
+  const goToPage = useCallback(
+    (next: number) => {
+      setPage(next);
+      replaceQuery({ page: next > 1 ? String(next) : null });
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    },
+    [replaceQuery]
+  );
+
+  const myRow = useMemo(
+    () => (me ? (ranked.find((user) => user.userId === me.id) ?? null) : null),
+    [ranked, me]
+  );
+
+  const { stats } = initialData;
 
   return (
     <div className={cn(CONTAINER, "pb-24 pt-10 sm:pt-14")}>
       <PageHeader
-        title={t("nav.leaderboard")}
+        title={t("leaderboard.title")}
         description={t("leaderboard.description")}
       />
 
@@ -398,21 +546,31 @@ export default function Leaderboard({
       <section
         className={cn(
           "grid grid-cols-2 gap-6",
-          initialUserRank ? "sm:grid-cols-4" : "sm:grid-cols-3"
+          myRow ? "sm:grid-cols-4" : "sm:grid-cols-3"
         )}
         aria-label={t("leaderboard.totals")}
       >
-        <Stat label={t("leaderboard.sort.tokens")} value={formatNumber(stats.totalTokens, true, locale)} />
-        <Stat label={t("leaderboard.sort.cost")} value={formatCurrency(stats.totalCost, true, locale)} />
+        <Stat
+          label={t("leaderboard.stats.tokens")}
+          value={formatNumber(stats.totalTokens, true, locale)}
+        />
+        <Stat
+          label={t("leaderboard.stats.cost")}
+          value={formatCurrency(stats.totalCost, true, locale)}
+        />
         <Stat
           label={t("leaderboard.stats.developers")}
           value={formatNumber(stats.uniqueUsers, false, locale)}
-          className={initialUserRank ? undefined : "col-span-2 sm:col-span-1"}
+          className={myRow ? undefined : "col-span-2 sm:col-span-1"}
         />
         {/* The only figure here that is about the viewer, so it takes the
             accent — same signal as the highlighted self row below. */}
-        {initialUserRank && (
-          <Stat label={t("leaderboard.stats.yourRank")} value={`#${initialUserRank.rank}`} accent />
+        {myRow && (
+          <Stat
+            label={t("leaderboard.stats.yourRank")}
+            value={t("leaderboard.stats.yourRankValue", { rank: myRow.rank })}
+            accent
+          />
         )}
       </section>
 
@@ -420,7 +578,7 @@ export default function Leaderboard({
           targets stay at 40px on mobile; the desktop row tightens to 32px
           where the pointer is precise. */}
       <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-2">
-        {/* The five periods do not fit on a narrow screen, so the row scrolls
+        {/* The six periods do not fit on a narrow screen, so the row scrolls
             horizontally rather than wrapping into a ragged block. */}
         <div className="-mx-4 overflow-x-auto px-4 pb-1 sm:mx-0 sm:overflow-visible sm:px-0 sm:pb-0 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {/* Base UI's ToggleGroup is array-valued even in single-select mode. */}
@@ -438,7 +596,10 @@ export default function Leaderboard({
               pushQuery({
                 period: next,
                 page: null,
-                from: next === "today" ? toLocalDateString(new Date()) : null,
+                from:
+                  next === "today" || next === "yesterday"
+                    ? toLocalDateString(new Date())
+                    : null,
               });
             }}
             variant="outline"
@@ -459,8 +620,12 @@ export default function Leaderboard({
             onValueChange={(value) => {
               const next = value[0] as LeaderboardSortBy | undefined;
               if (!next) return;
-              setSortBy(next);
-              pushQuery({ sortBy: next, page: null });
+              // Re-ordering rows already in memory. The preference is stored
+              // for the next visit and written to the URL so the link carries
+              // it, but nothing is fetched.
+              setLeaderboardSort(next);
+              setPage(1);
+              replaceQuery({ sortBy: next, page: null });
             }}
             variant="outline"
             aria-label={t("leaderboard.sortBy")}
@@ -470,18 +635,22 @@ export default function Leaderboard({
             <ToggleGroupItem value="cost">{t("leaderboard.sort.cost")}</ToggleGroupItem>
           </ToggleGroup>
 
+          {/* Filters the rows already here, so results follow the keystrokes
+              instead of a round trip. Submitting is kept as a no-op so Enter
+              does not reload the page out from under the filter. */}
           <form
             className="relative flex-1 sm:ml-auto sm:flex-none"
-            onSubmit={(event) => {
-              event.preventDefault();
-              pushQuery({ search: search.trim() || null, page: null });
-            }}
+            onSubmit={(event) => event.preventDefault()}
           >
             <SearchIcon className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input
               ref={searchRef}
               value={search}
-              onChange={(event) => setSearch(event.target.value)}
+              onChange={(event) => {
+                setSearch(event.target.value);
+                setPage(1);
+                replaceQuery({ search: event.target.value.trim() || null, page: null });
+              }}
               placeholder={t("leaderboard.search.placeholder")}
               aria-label={t("leaderboard.search.label")}
               className="h-10 w-full pl-8 text-sm sm:h-8 sm:w-56"
@@ -492,14 +661,14 @@ export default function Leaderboard({
 
       {/* Own standing, anchored directly under the period controls so it is
           visible without paginating to wherever the rank happens to fall. It
-          follows the period/sort query like the table does, because the server
-          recomputes it per period.
+          follows the period/sort query like the table does, because the rows
+          are all here.
 
           Shown unconditionally, including when the same row is also visible in
           the table below. A block that appeared and disappeared as you paged
           would read as a glitch; a fixed anchor that is always in the same
           place is worth more than avoiding one duplicated row. */}
-      {initialUserRank && (
+      {myRow && (
         <div
           className={cn("mt-4 transition-opacity", pending && "opacity-50")}
           aria-busy={pending}
@@ -511,9 +680,9 @@ export default function Leaderboard({
             <Table>
               <TableBody>
                 <DeveloperRow
-                  user={initialUserRank}
+                  user={myRow}
                   isSelf
-                  max={max || initialUserRank.totalTokens}
+                  max={max || myRow.totalTokens}
                   sortBy={sortBy}
                   tokenFormat={tokenFormat}
                 />
@@ -533,13 +702,15 @@ export default function Leaderboard({
         <Table>
           <TableHeader>
             <TableRow className="hover:bg-transparent">
-              <TableHead className="w-12 pl-4 sm:pl-6">#</TableHead>
+              <TableHead className="w-12 pl-4 sm:pl-6">{t("leaderboard.table.rank")}</TableHead>
               <TableHead>{t("leaderboard.table.developer")}</TableHead>
               <MembershipColumnHeaders
                 teamLabel={t("leaderboard.table.team")}
                 groupLabel={t("leaderboard.table.group")}
               />
-              <TableHead className="pr-4 text-right sm:hidden">{t("leaderboard.table.usage")}</TableHead>
+              <TableHead className="pr-4 text-right sm:hidden">
+                {t("leaderboard.table.usage")}
+              </TableHead>
               {/* Both numeric headers toggle abbreviated figures (1.2B) for
                   exact ones — a toggle contributed upstream by Fai Chou that
                   people rely on when comparing close totals. It was invisible:
@@ -549,7 +720,7 @@ export default function Leaderboard({
                   preference so the two columns cannot disagree. */}
               <TableHead className="hidden w-44 p-0 text-right sm:table-cell">
                 <FormatToggle
-                  label={t("leaderboard.sort.tokens")}
+                  label={t("leaderboard.stats.tokens")}
                   titles={formatTitles}
                   compact={tokenFormat === "compact"}
                   onToggle={() =>
@@ -561,7 +732,7 @@ export default function Leaderboard({
               </TableHead>
               <TableHead className="hidden w-32 p-0 pr-4 text-right sm:table-cell">
                 <FormatToggle
-                  label={t("leaderboard.sort.cost")}
+                  label={t("leaderboard.stats.cost")}
                   titles={formatTitles}
                   compact={tokenFormat === "compact"}
                   onToggle={() =>
@@ -578,7 +749,7 @@ export default function Leaderboard({
               <DeveloperRow
                 key={user.userId}
                 user={user}
-                isSelf={currentUser?.id === user.userId}
+                isSelf={me?.id === user.userId}
                 max={max}
                 sortBy={sortBy}
                 tokenFormat={tokenFormat}
@@ -596,36 +767,55 @@ export default function Leaderboard({
                   the applied query rather than the input, which can have been
                   typed past what these results answer. */}
               <EmptyTitle>
-                {appliedSearch ? t("leaderboard.empty.noResults") : t("leaderboard.empty.nothing")}
+                {appliedSearch || directiveSearch
+                  ? t("leaderboard.empty.noResults")
+                  : t("leaderboard.empty.nothing")}
               </EmptyTitle>
+              {/* Three different situations, and saying "no usage was
+                  submitted" for any of the other two reads as the leaderboard
+                  being broken. The directive is named separately because the
+                  server narrowed the board before it arrived, so a reader who
+                  clears only the text box would still see nothing. */}
               <EmptyDescription>
                 {appliedSearch
                   ? t("leaderboard.empty.noMatch", { query: appliedSearch })
-                  : t("leaderboard.empty.none")}
+                  : directiveSearch
+                    ? t("leaderboard.empty.noMatch", { query: directiveSearch })
+                    : t("leaderboard.empty.none")}
               </EmptyDescription>
             </EmptyHeader>
           </Empty>
         )}
       </div>
 
-      {pagination.totalPages > 1 && (
-        <nav className="mt-6 flex items-center justify-between" aria-label={t("leaderboard.pagination.label")}>
+      {/* Paging is a slice of an array that is already here, so it costs a
+          render and nothing else. The scroll goes back to the top because a
+          page that changes under a reader halfway down reads as content
+          shifting rather than as having moved. */}
+      {totalPages > 1 && (
+        <nav
+          className="mt-6 flex items-center justify-between"
+          aria-label={t("leaderboard.pagination.label")}
+        >
           <Button
             variant="outline"
-            disabled={!pagination.hasPrev}
+            disabled={currentPage <= 1}
             className="h-10 sm:h-8"
-            onClick={() => pushQuery({ page: String(pagination.page - 1) })}
+            onClick={() => goToPage(currentPage - 1)}
           >
             {t("leaderboard.pagination.previous")}
           </Button>
           <span className="tabular text-xs text-muted-foreground">
-            {t("leaderboard.pagination.page", { current: pagination.page, total: pagination.totalPages })}
+            {t("leaderboard.pagination.page", {
+              current: currentPage,
+              total: totalPages,
+            })}
           </span>
           <Button
             variant="outline"
-            disabled={!pagination.hasNext}
+            disabled={currentPage >= totalPages}
             className="h-10 sm:h-8"
-            onClick={() => pushQuery({ page: String(pagination.page + 1) })}
+            onClick={() => goToPage(currentPage + 1)}
           >
             {t("leaderboard.pagination.next")}
           </Button>

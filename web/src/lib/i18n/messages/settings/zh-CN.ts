@@ -23,6 +23,7 @@ const messages = {
     label: "读取 Token",
     description: "读令牌可以打开你的私密资料、徽章或 embed。它不能提交用量，也不能关闭私密模式。明文只显示一次。",
     create: "创建读取 Token",
+    revokeConsequence: "任何用它读取你私密主页的地方——徽章或嵌入卡片——都会看到“找不到”，直到换用新令牌。",
     empty: "还没有读取 Token。",
   },
   tokens: {

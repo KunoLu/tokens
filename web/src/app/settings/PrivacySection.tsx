@@ -2,6 +2,15 @@
 
 import { useCallback, useEffect, useId, useState } from "react";
 import { useT } from "@/components/layout/LocaleProvider";
+import { richText } from "@/lib/i18n/rich";
+import {
+  CancelButton,
+  ConfirmDangerButton,
+  ModalActions,
+  ModalBody,
+  ModalShell,
+  ModalTitle,
+} from "./SettingsClient";
 
 const Section = "mb-6 rounded-xl border bg-card p-6";
 const SectionTitle = "mb-4 text-lg font-semibold text-foreground";
@@ -20,6 +29,7 @@ interface IssuedReadToken extends ReadTokenRow {
 export default function PrivacySection() {
   const t = useT();
   const errorId = useId();
+  const revokeTitleId = useId();
   const [isPrivate, setIsPrivate] = useState<boolean | null>(null);
   const [privacyLoadFailed, setPrivacyLoadFailed] = useState(false);
   const [isSavingPrivacy, setIsSavingPrivacy] = useState(false);
@@ -28,6 +38,8 @@ export default function PrivacySection() {
   const [tokenName, setTokenName] = useState("");
   const [createdToken, setCreatedToken] = useState<IssuedReadToken | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [revokingToken, setRevokingToken] = useState<ReadTokenRow | null>(null);
+  const [isRevoking, setIsRevoking] = useState(false);
 
   const loadPrivacy = useCallback(async () => {
     setPrivacyLoadFailed(false);
@@ -108,6 +120,20 @@ export default function PrivacySection() {
     setTokens((current) => current.filter((token) => token.id !== tokenId));
   };
 
+  // Revocation is immediate and irreversible, so it goes through the same
+  // confirmation modal as an API token — with the consequence spelled out for
+  // a read token rather than for a submit token.
+  const confirmRevoke = async () => {
+    if (!revokingToken || isRevoking) return;
+    setIsRevoking(true);
+    try {
+      await revokeToken(revokingToken.id);
+    } finally {
+      setIsRevoking(false);
+      setRevokingToken(null);
+    }
+  };
+
   return (
     <section className={Section}>
       <h2 className={SectionTitle}>{t("settings.privacy.title")}</h2>
@@ -176,13 +202,36 @@ export default function PrivacySection() {
           {tokens.map((token) => (
             <li key={token.id} className="flex items-center justify-between gap-3 text-sm">
               <span>{token.name}</span>
-              <button type="button" className="underline" onClick={() => void revokeToken(token.id)}>
+              <button type="button" className="underline" onClick={() => setRevokingToken(token)}>
                 {t("settings.actions.revoke")}
               </button>
             </li>
           ))}
         </ul>
       )}
+      {revokingToken ? (
+        <ModalShell
+          labelledBy={revokeTitleId}
+          dismissable={!isRevoking}
+          onClose={() => setRevokingToken(null)}
+        >
+          <ModalTitle id={revokeTitleId}>⚠ {t("settings.revoke.title")}</ModalTitle>
+          <ModalBody>
+            {richText(t("settings.revoke.body"), {
+              name: <strong>{revokingToken.name}</strong>,
+              consequence: t("settings.readTokens.revokeConsequence"),
+            })}
+          </ModalBody>
+          <ModalActions>
+            <CancelButton onClick={() => setRevokingToken(null)} disabled={isRevoking}>
+              {t("settings.actions.cancel")}
+            </CancelButton>
+            <ConfirmDangerButton $disabled={isRevoking} onClick={() => void confirmRevoke()}>
+              {isRevoking ? t("settings.actions.revoking") : t("settings.revoke.title")}
+            </ConfirmDangerButton>
+          </ModalActions>
+        </ModalShell>
+      ) : null}
     </section>
   );
 }

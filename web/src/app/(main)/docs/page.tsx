@@ -11,6 +11,7 @@ import {
 } from "@/lib/constants";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { getTranslator } from "@/lib/i18n/server";
+import { richText } from "@/lib/i18n/rich";
 import type { TranslationKey, Translator } from "@/lib/i18n/translate";
 import { cn } from "@/lib/utils";
 import { SITE_URL } from "@/lib/site";
@@ -300,6 +301,14 @@ export default async function DocsPage() {
             </p>
             <p className="text-sm leading-relaxed text-muted-foreground">
               {t("docs.privateDevices")}
+            </p>
+            <p className="text-sm leading-relaxed text-muted-foreground">
+              {richText(t("docs.privateMcp"), {
+                enable: <code className="font-mono text-[13px]">tokens mcp-names enable</code>,
+                flag: <code className="font-mono text-[13px]">tokens submit --include-mcp</code>,
+                disable: <code className="font-mono text-[13px]">tokens mcp-names disable</code>,
+                status: <code className="font-mono text-[13px]">tokens mcp-names status</code>,
+              })}
             </p>
           </div>
         </Section>

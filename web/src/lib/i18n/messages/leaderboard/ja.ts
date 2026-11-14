@@ -1,15 +1,21 @@
 const messages = {
+  "title": "リーダーボード",
+  "userHandle": "@{username}",
   "description": "Tokens CLI が報告した AI コーディングの Token 使用量。",
   "totals": "合計",
   "yourPosition": "あなたの位置",
   "stats": {
+    "tokens": "Token",
+    "cost": "コスト",
     "developers": "開発者",
     "yourRank": "あなたの順位",
+    "yourRankValue": "{rank} 位"
   },
   "period": {
     "label": "期間",
     "allTime": "全期間",
     "today": "今日",
+    "yesterday": "昨日",
     "week": "今週",
     "month": "今月",
     "lastMonth": "先月"
@@ -28,6 +34,7 @@ const messages = {
     "abbreviate": "数値を短縮表示",
   },
   "table": {
+    "rank": "#",
     "developer": "開発者",
     "team": "チーム",
     "group": "グループ",

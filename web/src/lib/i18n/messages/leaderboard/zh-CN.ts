@@ -1,15 +1,21 @@
 const messages = {
+  "title": "排行榜",
+  "userHandle": "@{username}",
   "description": "由 Tokens CLI 上报的 AI 编程 Token 用量。",
   "totals": "总计",
   "yourPosition": "你的位置",
   "stats": {
+    "tokens": "Token",
+    "cost": "费用",
     "developers": "开发者",
     "yourRank": "你的排名",
+    "yourRankValue": "第 {rank} 名"
   },
   "period": {
     "label": "时间范围",
     "allTime": "全部时间",
     "today": "今天",
+    "yesterday": "昨天",
     "week": "本周",
     "month": "本月",
     "lastMonth": "上月"
@@ -28,6 +34,7 @@ const messages = {
     "abbreviate": "缩写数值",
   },
   "table": {
+    "rank": "#",
     "developer": "开发者",
     "team": "团队",
     "group": "分组",
