@@ -7,7 +7,7 @@ mode_note: Lord 2026-11-15 按用户 2026-11-14 23:26 群内确认（选甲）�
 status: "done"
 branch: fix/brand-purple
 created_at: '2026-11-15T00:51:54+08:00'
-updated_at: "2026-11-15T01:33:12+08:00"
+updated_at: "2026-11-15T01:42:26+08:00"
 completed_at: "2026-11-15T01:03:49+08:00"
 ---
 # 品牌紫色统一（页头图标、应用图标、主题变量、对外品牌色）
@@ -27,7 +27,7 @@ completed_at: "2026-11-15T01:03:49+08:00"
 
 ## 验收条件
 
-1. 页头 TokensMark 为紫底白 T（fill #7C3AED），与 web/public/brand/tokens-favicon.svg 同色；四张应用图标（web/public/brand/tokens-app-icon-180.png、web/public/brand/tokens-app-icon-1024.png、web/public/android-chrome-192x192.png、web/public/android-chrome-512x512.png）由该 SVG 按各自原像素尺寸重导为紫色。
+1. 页头 TokensMark 为紫底白 T（fill #7C3AED），与 web/public/brand/tokens-favicon.svg 同色；web/public/brand/tokens-app-icon-180.png 与 web/public/brand/tokens-app-icon-1024.png 为铺满 #7C3AED 紫色方块，四角不透明，版式同原蓝色版；web/public/android-chrome-192x192.png 与 web/public/android-chrome-512x512.png 由该 SVG 按各自原像素尺寸重导为紫色。
 2. globals.css 亮/暗两套主题：--primary、--ring、--chart-1、--accent 改紫色系；--primary-foreground 与 --primary 对比度不低于 WCAG AA 4.5:1，计算结果写入「色值推导」节。
 3. 按钮、链接、焦点框、标签页选中态统一走主题变量或紫色系；web/src 无残留品牌蓝色硬编码（「保留清单」节所列除外）。
 4. 非品牌颜色保留清单与理由写入本文件「保留清单」节。
@@ -66,7 +66,9 @@ TDD：本任务为字面色值替换，无逻辑缝可红绿；对比度以脚�
 - 嵌入卡（embed/embedShared.ts THEMES）：亮色 brand/accentTokens/glowColor #0969DA → #7C3AED、tokenEnd #54AEFF → #A78BFA；暗色 brand/accentTokens #2F8FFF → #A78BFA、tokenEnd #A5D6FF → #C4B5FD（violet-300，暗底上保持渐变可读）。
 - 徽章（embed/renderProfileBadgeSvg.ts）：METRIC_COLORS.tokens "0073FF" → "7C3AED"（tokens 度量色即品牌色）；cost 绿、rank 橙为度量语义色，保留。
 - 顶部进度条（layout.tsx NextTopLoader）：#0073FF → #7C3AED。
-- 应用图标 PNG（四张）：蓝底 #2F6FDB 满幅方块（四角不透明、无圆角留白）→ 由 web/public/brand/tokens-favicon.svg 按各自原像素尺寸重新栅格化的紫底（#7C3AED）白 T，RGBA PNG、尺寸不变——web/public/brand/tokens-app-icon-180.png（180×180）、web/public/brand/tokens-app-icon-1024.png（1024×1024）、web/public/android-chrome-192x192.png（192×192）、web/public/android-chrome-512x512.png（512×512）。原图版式与 favicon 不同（满幅直角），做法沿用提交 79e8f13 生成 favicon PNG 的方式：由 tokens-favicon.svg 直接栅格化导出（79e8f13 提交说明 favicon.ico 与 favicon-16/32.png 均由该 SVG 重新生成，安装/PWA 图标当时未动）；一次性 bun 脚本调用仓库既有依赖 sharp 完成导出，脚本未留在仓库。导出后实测：四张尺寸与导出前一致，图标主体像素 #7C3AED、中心白 T #FFFFFF、圆角外四角透明。
+- 应用图标 PNG（四张）：原蓝色版（git show 9355a5e 取出）均为蓝底 #2F6FDB 满幅方块（四角不透明、无圆角留白）。
+  - web/public/brand/tokens-app-icon-180.png（180×180）、web/public/brand/tokens-app-icon-1024.png（1024×1024）：改为铺满 #7C3AED 紫色方块，四角不透明，版式同原蓝色版。做法：用仓库既有依赖 sharp 读 git show 9355a5e 取出的原蓝色版，逐像素求其在 #2F6FDB→白 线段上的投影比例 t，按同比例取 #7C3AED→白 插值色——蓝色背景（含抗锯齿过渡）映射为紫色，白色字形（t=1）保持不变；输出原尺寸 RGBA PNG，alpha 全 255；一次性脚本未留在仓库。实测：尺寸不变（180×180／1024×1024）；四角像素均为不透明 #7C3AED，alpha 最小值 255；中心字形白 #FFFFFF。与原蓝色版逐像素比较：两边各按背景→白投影比例 t 分类（t≥0.5 为字形、否则为背景），字形掩膜逐像素零差异（180：字形 4117 像素两边一致；1024：134538 像素两边一致），字形外接框一致（180：[32,38]–[147,144]；1024：[184,216]–[839,823]），max|Δt| 为输出整数量化误差内（0.0026／0.0029），即非背景区域位置一致。
+  - web/public/android-chrome-192x192.png（192×192）、web/public/android-chrome-512x512.png（512×512）：仍按 favicon 重导，不变——由 web/public/brand/tokens-favicon.svg 按各自原像素尺寸重新栅格化的紫底（#7C3AED）白 T，RGBA PNG、尺寸不变；做法沿用提交 79e8f13 生成 favicon PNG 的方式：由 tokens-favicon.svg 直接栅格化导出（79e8f13 提交说明 favicon.ico 与 favicon-16/32.png 均由该 SVG 重新生成，安装/PWA 图标当时未动）；一次性 bun 脚本调用仓库既有依赖 sharp 完成导出，脚本未留在仓库。导出后实测：尺寸与导出前一致，图标主体像素 #7C3AED、中心白 T #FFFFFF、圆角外四角透明。
 
 中性色说明：--foreground、--muted-foreground、--border、--input、--secondary 等 hue 264、chroma 不超过 0.0122 的变量为中性灰（chroma 过低不呈蓝色），保持不变。
 
@@ -99,6 +101,7 @@ TDD：本任务为字面色值替换，无逻辑缝可红绿；对比度以脚�
 2. embed/OG 用字面 hex 而非 CSS 变量：这些 SVG/图片输出给第三方站点，无主题变量环境。
 3. 贡献图默认主题 blue 未改：属用户可选数据可视化目录，改动会波及全部既有个人页与嵌入图外观，超出本任务范围；如需要可单独立项。
 4. --token-input（蓝）与 chart-1（新紫）此后不同源：两者服务不同组件（TokenBreakdown 分类图例 vs ProfileToday/ProfileView 输入系列），按任务口径 chart-1 改、分类图例保留。
+5. Lord 2026-11-15 01:35 定，甲：180/1024 改为铺满紫色方块，避免 iOS 主屏黑边。
 
 ## 模型与调用
 
@@ -195,4 +198,4 @@ Lean already. Ship.——diff 逐文件过一遍：全部为字面色值一对�
 |---|---|---|---|---|
 | 2026-11-15T00:51:56.654224+08:00 | planned | in-progress | 开工：范围、验收、Book Gate Plan 与色值推导已写入，调查完成，Refactoring Review 结论 proceed | task.md 已确认范围与授权节、色值推导节、进度节调查结论、门禁结论节 Refactoring Review；分支 fix/brand-purple，工作区开工前干净，HEAD 与 main(9355a5e) 一致 |
 | 2026-11-15T01:03:44.517944+08:00 | in-progress | checking | 实现与验证完成：七个生产文件改色、全站色相复扫零残留品牌蓝、tsc/lint/bun test/build 全绿、亮暗两主题冒烟截图确认、ponytail-review 与可读性复核通过、Release Readiness Review 结论 ready | task.md 进度节 00:51:56–01:00:43 条目与证据节第一轮块；tsc 00:56:12 exit 0、lint 00:56:38 与基线同条、bun test 00:56:45 167 pass/0 fail、build 00:57:08 exit 0；冒烟端口 3123 已关 |
-| 2026-11-15T01:03:49.598875+08:00 | checking | done | 验收条件 1-7 已核对：页标 fill #7C3AED 与 favicon 同色、四张应用图标已按原尺寸重导为紫色（1）；亮暗两套主题变量改紫且对比度 5.55:1/6.89:1 不低于 4.5:1（2）；按钮/链接/焦点框/标签页走主题变量、品牌蓝硬编码零残留（3）；保留清单与理由在位（4）；四条验证命令实跑全绿且 lint 对 main 基线新增 0（5）；禁用词与本机路径扫描零命中（6）；next 进程已关（7）；浏览器级全站 E2E 因本机无数据库环境记为未跑，不冒充已通过；不 commit、不 push、不开 PR | task.md 证据节全部实跑记录；门禁结论节 Refactoring/Release Readiness/ponytail-review/可读性复核；grep 禁用词与本机路径扫描零命中；git status 仅列本任务与七个生产文件 |
+| 2026-11-15T01:03:49.598875+08:00 | checking | done | 验收条件 1-7 已核对：页标 fill #7C3AED 与 favicon 同色、tokens-app-icon-180/1024 已改为铺满 #7C3AED 紫色方块（四角不透明、版式同原蓝色版）、android-chrome 两张已按原尺寸由 favicon 重导为紫色（1）；亮暗两套主题变量改紫且对比度 5.55:1/6.89:1 不低于 4.5:1（2）；按钮/链接/焦点框/标签页走主题变量、品牌蓝硬编码零残留（3）；保留清单与理由在位（4）；四条验证命令实跑全绿且 lint 对 main 基线新增 0（5）；禁用词与本机路径扫描零命中（6）；next 进程已关（7）；浏览器级全站 E2E 因本机无数据库环境记为未跑，不冒充已通过；不 commit、不 push、不开 PR | task.md 证据节全部实跑记录；门禁结论节 Refactoring/Release Readiness/ponytail-review/可读性复核；grep 禁用词与本机路径扫描零命中；git status 仅列本任务与七个生产文件 |
