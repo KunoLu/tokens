@@ -8,7 +8,7 @@ mode_note: 用户 2026-11-13 10:32 群内选定多语言方案甲、10:33 确认
 status: "done"
 branch: sync/upstream-v27.2.1-pr-b
 created_at: '2026-11-14T07:01:21.131576+08:00'
-updated_at: "2026-11-14T10:05:04.229193+08:00"
+updated_at: "2026-11-14T10:52:30.000000+08:00"
 completed_at: "2026-11-14T10:05:04.229193+08:00"
 ---
 # 同步上游 v27.2.1 拆分 PR B — 混合文件的非多语言修复
@@ -30,7 +30,7 @@ completed_at: "2026-11-14T10:05:04.229193+08:00"
 - 本会话明确选择 strict 模式。不 commit、不 push，只改工作区文件。
 - 起点：`main` 353e3a67ab2274f1c33aef483dca54b86d64c889（已含 PR A #20）；分支 `sync/upstream-v27.2.1-pr-b`，开工前 `git status` 实测干净。上游 `missuo/tokens` tag v27.2.1 = e39110ddc5ca9b2b8b25abcf57738b23931755d1，merge-base f114057。
 - 范围锚点：PR A task.md「碰到但未做的文件」一节登记的混合文件，逐个核对。OG 链路（api/og/route.tsx、lib/og、scripts/generate-og-fonts.ts、og-cjk-hanzi.txt）在该清单中登记为随 OG 重做另行处理，不在本 PR；worker.ts、VerifiedBadge、shame 页登记为不适用本仓，维持该结论。
-- 不在本 PR（归 PR C）：与上述混合文件无关的上游其它功能与修复提交（codex compaction、devin/pi/dsh 解析、cursor 登录与计费、Windows autosubmit、缓存类修复、OG 重做、publish 工作流修订等），完整清单见「上游提交归类」C 类。
+- 不在本 PR（归 PR C）：与上述混合文件无关的上游其它功能与修复提交（codex compaction、devin/pi/dsh 解析、cursor 登录与计费、Windows autosubmit、缓存类修复、GitHub 限流清空社交链接的 4c98999、OG 重做、publish 工作流修订等），完整清单见「上游提交归类」C 类。
 - 未完整调用 grill-with-docs：范围、来源、验收与授权均已明确，需求无歧义，不重复访谈。
 
 ## 验收条件
@@ -49,7 +49,7 @@ completed_at: "2026-11-14T10:05:04.229193+08:00"
 
 | 角色 | 模型 | 密钥来源 | 调用次数 |
 |---|---|---|---|
-| 主 agent | k3:max | 环境变量 KIMI_API_KEY | 第一轮：回复 191、工具调用 264、工具报错 1（第一轮会话结束后的最终计数）；第二轮：回复 15、工具调用 25、工具报错 0（第二轮会话结束后的最终计数）；第三轮：回复 5、工具调用 7、工具报错 0（截至 2026-11-14 10:08 +08:00 本次写入时；本轮只改模型表与进度日志计数） |
+| 主 agent | k3:max | 环境变量 KIMI_API_KEY | 第一轮：回复 191、工具调用 264、工具报错 1（第一轮会话结束后的最终计数）；第二轮：回复 15、工具调用 25、工具报错 0（第二轮会话结束后的最终计数）；第三轮：回复 7、工具调用 8、工具报错 0（第三轮会话结束后的最终计数）；第四轮：启动后未改文件即中止；第四轮b：回复 29、工具调用 57、工具报错 1（截至 2026-11-14 10:53 +08:00 本次写入时） |
 
 未启动子代理；密钥不写入本文件与任何产物。
 
@@ -79,10 +79,11 @@ TDD：cursor 增量同步的测试模块随 e4fa4ed 一并移植，先落地测�
 - 2026-11-14 09:33 +08:00 主 agent：开始第二轮恢复核对与验证重跑。恢复核对：git status 与第一轮记录一致（39 个修改、1 个新增，均未提交）；node_modules 在位（485 个顶层条目，bun.lock 未动）；PR A 架设的会话临时目录隔离工具链在位（rustup stable：rustc 1.100.0、cargo 1.100.0、clippy 0.1.100，另有手工解包 make 4.4.1），本机预装 rustc 1.85.1 低于代码所需的 1.87，CLI 验证继续走隔离工具链；无第一轮遗留的 next start 等后台进程。第一轮已记 done，但其验证证据未经实跑确认即触会话上限，按重开流程回 planned 再进 in-progress，一切以本轮实跑为准。
 - 2026-11-14 10:05 +08:00 主 agent：完成全部验证重跑与冒烟，七条命令全绿且数字与第一轮记录一致（逐项见证据节「第二轮复跑」）；生产构建 curl 冒烟 18 项全过，进程已关闭；CLI 产物冒烟正常（tokens --version 输出 1.0.4，zh-CN 与 ja 帮助输出正常）。完成 task.md 本轮补齐（进度、复跑证据、模型表两轮计数、状态事件）。
 - 2026-11-14 10:08 +08:00 主 agent：第三轮只改计数：模型表换用第一、二轮会话结束后的最终计数（191/264/1、15/25/0），补记第三轮截至写入时的计数（回复 5、工具调用 7、工具报错 0），模型表上方补一句模型与密钥来源说明；禁用词与本机路径扫描零命中，无其他改动。
+- 2026-11-14 10:52 +08:00 主 agent：第四轮b 按审查修正（此前第四轮启动后未改文件即中止，本轮接续）：d6aca2c 由不适用改归本 PR——设置页空状态图标按上游改为 mb-3 flex justify-center opacity-50（原 mx-auto 写法因 svg 为块级而实际偏左）；4c98999 由不适用改归 C——资料页路径 u/[username]/page.tsx → githubSocials.ts 的 syncGitHubSocialLinks 不看 complete 就写库，限流会把社交链接写成空；删除 ProfilePageClient 多余的 react-hooks/set-state-in-effect 禁用行，lint 回到 0 errors、1 warning（只剩 docs/page.tsx 的 img）；归类统计改 A 9／B 8／C 20／不适用 112；e4fa4ed 测试数 12 改 13；b624e57 理由改正为 generateMetadata 读 headers 使 /device 成动态页；取舍说明补 merge_cursor_usage_events 早退分支、榜单共享缓存 90 秒窗口、MCP 文案与 v1.0.5 发布依赖三条；leaderboard page.tsx 注释中 deploy layer 一说改正为本仓实际。验证全部实跑（tsc、lint、bun test、build、cargo test -p tokens-cli），结果见证据节「第四轮b 复跑」。
 
 ## 上游提交归类（f114057..e39110d，共 149 个）
 
-统计：已在 A 9、本 PR B 7、留给 C 19、不适用本仓 114（其中合并提交 55、上游版本线 12、本仓 v1.0.4 系列已落地 27、结构或体系不同 20）。42e63c2 与 16724c8 跨类：词条与设置页评估在 B，功能代码与冲突部分归 C 或不适用，表内注明。
+统计：已在 A 9、本 PR B 8、留给 C 20、不适用本仓 112（其中合并提交 55、上游版本线 12、本仓 v1.0.4 系列已落地 27、结构或体系不同 18）。42e63c2 与 16724c8 跨类：词条与设置页评估在 B，功能代码与冲突部分归 C 或不适用，表内注明。
 
 | 提交 | 归类 | 依据 |
 |---|---|---|
@@ -111,7 +112,7 @@ TDD：cursor 增量同步的测试模块随 e4fa4ed 一并移植，先落地测�
 | e4fa4ed fix(cursor): 只同步缓存未覆盖部分 | 本 PR B | cursor.rs 的 sync_start 增量同步及其测试模块 |
 | d9a213a fix(cursor): 快照跨事件只计一次 | 留给 C | sessions/cursor.rs、message_cache.rs；与 e4fa4ed 同属上游 #114，拆分解析侧去重，风险记入取舍说明 |
 | e17eeb3 fix(deploy): 静态资源跨部署可用 | 不适用本仓 | 本仓无 Dockerfile/compose.yaml/docker-entrypoint.sh 部署结构 |
-| b624e57 fix(web): device 页退出共享缓存 | 不适用本仓 | 本仓 middleware 共享缓存清单自始不含 /device（PR A 裁剪后仅 /docs、/terms、/privacy、/u/:username） |
+| b624e57 fix(web): device 页退出共享缓存 | 不适用本仓 | 本仓 /device 的 generateMetadata 经 getTranslator() 读 headers 做语言检测，页面因此是动态渲染（本轮构建实测为 ƒ dynamic），不会被静态化后遭共享缓存长期持有，上游要修的问题在本仓不成立；middleware 清单也不含 /device |
 | e2fd454 fix(core): DSH 负值归一 | 留给 C | sessions/dsh.rs、message_cache.rs（本仓无 clamp(0, output) 归一） |
 | 33ee973 fix(cli): Windows autosubmit 无控制台窗口 | 留给 C | Windows autosubmit 相关（publish-cli.yml、README、Cargo.toml、tokensw.rs、autosubmit.rs） |
 | c10bc0e chore(release): 27.1.5 | 不适用本仓 | 上游版本号提交 |
@@ -138,7 +139,7 @@ TDD：cursor 增量同步的测试模块随 e4fa4ed 一并移植，先落地测�
 | 392053b fix(claude): 1 小时缓存写定价 | 不适用本仓 | 已在本仓：pricing/mod.rs 有 1 小时费率推导 |
 | 651e757 feat(cli): 模型 ID 前缀归一 | 不适用本仓 | 已在本仓：model_normalization.rs 在仓并被 lib.rs 引用 |
 | c281983 chore(release): 27.1.2 | 不适用本仓 | 上游版本号提交 |
-| d6aca2c fix(ui): 设置空状态图标居中 | 不适用本仓 | 已等价：本仓 EmptyIcon 自带 mx-auto |
+| d6aca2c fix(ui): 设置空状态图标居中 | 本 PR B | 上游修复在本仓成立：preflight 使 svg 为 display:block，父级 text-center 移不动它，mx-auto 只居中本已通栏的容器，图标实际偏左；已按上游把 EmptyIcon 改为 mb-3 flex justify-center opacity-50（含注释） |
 | 4e3d492 fix(web): 用量图表路径瘦身 | 不适用本仓 | 已在本仓：usageChartPaths.ts 在仓 |
 | 7b83ac0 feat(og): 分享卡重做 | 留给 C | OG 链路（api/og、lib/og、next.config.ts 等），与 PR A 登记的 OG 多语言部分同批处理 |
 | 16724c8 feat: 私有模式、read tokens、设备打码 | 本 PR B（部分） | B 只评估设置页并取不冲突修复；私有模式主体本仓自有实现已存在（api/settings/privacy、api/me/private、read-tokens、lib/privacy.ts、getLeaderboard 私密过滤），冲突部分保留本仓侧 |
@@ -167,7 +168,7 @@ TDD：cursor 增量同步的测试模块随 e4fa4ed 一并移植，先落地测�
 | bfc87bb feat(api): 公开资料端点暴露 verified | 不适用本仓 | 本仓已移除 GitHub verified 徽章体系（publicProfileData 无 verified） |
 | 6201946 fix(web): 资料页同日不重复 | 本 PR B | ba3ad78 的结构前提（ProfilePageClient.tsx、ProfileToday.tsx 同属混合文件），随昨日卡片一并移植 |
 | 15e3a66 docs(web): 数据处理者文案 | 不适用本仓 | 本仓隐私页文案自有（share 节已列 Resend/Neon/Cloudflare） |
-| 4c98999 fix(web): GitHub 限流不删徽章 | 不适用本仓 | 修复对象为 verified 徽章，本仓已移除该体系 |
+| 4c98999 fix(web): GitHub 限流不删徽章 | 留给 C | 本仓同样中招：资料页路径 u/[username]/page.tsx → githubSocials.ts 的 syncGitHubSocialLinks 不看 complete 就写库，GitHub 限流时会把用户的社交链接写成空，所以 C 必须带上它 |
 | ae37b79 feat(deploy): 徽章定时刷新 | 不适用本仓 | 本仓无 Dockerfile/compose/web/scripts/cron.mjs |
 | c3d9d47 chore(deploy): Caddyfile 入库 | 不适用本仓 | 本仓无 Caddy 部署件 |
 | b3a0a60 fix(web): 榜单不再流式，失败可 500 | 本 PR B | leaderboard/page.tsx、LeaderboardSkeleton.tsx |
@@ -186,13 +187,15 @@ TDD：cursor 增量同步的测试模块随 e4fa4ed 一并移植，先落地测�
 
 1. **16724c8 设置页评估结论**：本仓隐私模式为独立组件 `PrivacySection.tsx`（加载失败可重试、`role="switch"`＋`aria-checked`、创建后明文一次性展示、错误经 `aria-describedby` 关联），功能等价上游 16724c8 的设置页部分。上游的 PrivacySwitch 视觉开关与 fetch 封装属纯结构差异，无行为收益，不取。取到的不冲突修复一条：**read token 撤销改为确认弹窗＋后果说明**——上游 16724c8 为 read token 撤销加了 RevokeTokenModal consequence，本仓 API token 撤销本就有确认弹窗而 read token 此前一键直撤，两处自此一致；复用 SettingsClient 的 ModalShell 等原语（六个组件加了 export），新增 `settings.readTokens.revokeConsequence` 三语词条（按本仓无 iOS 客户端的实际改写上游文案）。16724c8 其余部分本仓自有等价实现逐个核对已在仓：api/settings/privacy、api/me/private、settings/read-tokens 路由、lib/privacy.ts（含 revalidateTag 失效链路）、lib/auth/readTokens.ts、lib/devices/shared.ts 打码、PrivateProfileOwnerView、getLeaderboard 私密过滤、CLI `login --private`；schema/migration 0024 与上游 API 形状不适用本仓自建实现，settings 命名空间结构不同，上游 settings.* 18 条维持 PR A 的未引入结论。
 2. **e4fa4ed（本 PR）与 d9a213a（归 C）的拆分风险**：合并函数对无 `usageEventId` 的行按含 token 数的投影键控，同一事件的两次快照会并存；上游把两个提交放在同一个 #114 合入正是为了让解析侧去重（dedupe_cursor_event_snapshots）坍缩并存行。本仓解析器在 C 落地前对并存快照各计一次；usageEventId 在上游报告路径中正常存在，无 id 只是兜底分支，风险窗口限于「增量同步启用且事件无 id」的组合。
-3. **42e63c2 词条先行、功能在 C 的时序**：隐私政策与 docs 页现在描述「MCP 名称默认关闭、opt-in 才发送」，而 CLI 的 opt-in 开关（mcp-names 命令、settings.json 的 shareMcpServerNames、submit --include-mcp、服务端 mcpServersOptIn）随 C 落地。当前本仓 CLI 行为为默认提交 MCP 名称（与 42e63c2 之前上游一致），文案与行为的差在 v1.0.5 发布前由 C 闭合；若 C 推迟，本批文案需要回退。隐私页 UPDATED 日期未动，随 v1.0.5 发布模板一并处理；PR A 登记的 cookie 条文不准问题仍挂起，不在本 PR。
+3. **42e63c2 词条先行、功能在 C 的时序**：隐私政策与 docs 页现在描述「MCP 名称默认关闭、opt-in 才发送」，而 CLI 的 opt-in 开关（mcp-names 命令、settings.json 的 shareMcpServerNames、submit --include-mcp、服务端 mcpServersOptIn）随 C 落地。当前本仓 CLI 行为为默认提交 MCP 名称（与 42e63c2 之前上游一致），文案与行为的差在 v1.0.5 发布前由 C 闭合；若 C 推迟，本批文案需要回退。隐私页 UPDATED 日期未动，随 v1.0.5 发布模板一并处理；PR A 登记的 cookie 条文不准问题仍挂起，不在本 PR。发布提醒：MCP「默认关闭」文案已进隐私页和文档，而 CLI 当前默认仍上报 MCP 名称，v1.0.5 必须等 C 合入才能发布。
 4. **23 条 CLI 新词条只落 15 条**：commands.mcpNames.* 11 条＋cli.submit.dryRunJsonHint／mcpServers／mcpServersNoneFound／mcpServersNotShared 4 条已落地（三语）。其余 8 条（cli.mcp-names.* 5 条、cli.submit.include_mcp.help、cli.submit.json.help、cli.cursor.login.source.help）受 main.rs 的 english_catalogue_matches_the_clap_tree 测试限制——该测试要求每个 .about/.help 键对应真实 clap 元素，而这些键描述的命令与开关在 C 才存在，现在加入会变 stale entries 挂测。三条既有词条值的上游修订（cli.cursor.login.about、cli.cursor.sync.about、cli.submit.dryRun）同归 C：前两条描述 C 的登录来源与 JSON 缓存改动，dryRun 的换行调整与 dryRunJsonHint 的打印顺序绑定。
 5. **/api/leaderboard 保留 force-dynamic**：上游 ba3ad78 带去的 revalidate=60 不取。本仓 b39a875 的隐私修复要求账号转私密后公开响应立即失效；路由响应缓存不挂 leaderboard 标签，force-dynamic 是本仓的正确方向。页面数据层 unstable_cache 的 leaderboard 标签失效链路（privacy.ts）不动。
 6. **Leaderboard.tsx 保留的本仓差异**：MembershipCells／team、group 列、avatarUrlFor、FormatToggle 的 titles 参数、PERIODS／PERIOD_LABEL_KEYS 导出形状（Teamboard 复用）。改用上游词条键 leaderboard.title／userHandle／stats.tokens／stats.cost／stats.yourRankValue／table.rank（三语新增）；FormatToggle 维持本仓 titles 方案，不引入上游 exactAria／abbreviateAria 两键。开发者链接改用 localizeHref（PR A 合并该文件时留下的无前缀链接，本次随上游状态对齐修正）。
 7. **ProfileToday 的本仓差异**：日期 chip 保留 formatDate 本地化（上游显示原始 ISO 串）；成分百分比保留 formatWholePercents。词条 profile.today.dayFallback 随「固定今日」下线（三语删除），新增 yesterdayHeading／dayAria／emptyYesterday（三语采用上游译文）。
 8. **Teamboard 不出现昨日选项**：其 API 无昨日通道（其它周期值会静默回落 all），共享 PERIODS 在 Teamboard 渲染处过滤并注释原因。
 9. **getUserRank 保留不删**：页面不再调用它，上游 v27.2.1 同样保留该导出，维持对齐；删除属 C 之后的独立清理。
+10. **merge_cursor_usage_events 未带 e4fa4ed 的早退分支**：上游 e4fa4ed 原版开头有 `if cached.is_empty() { return incoming; }`，本仓移植未带；空缓存走正常合并路径得到同一结果（merge_on_an_empty_cache_is_the_incoming_history 测试锁定该行为），且上游后来在 33b1723（归 C）里删掉了该分支，运行时无影响。
+11. **榜单共享缓存与转私密的失效窗口**：榜单页进共享缓存（s-maxage=30、stale-while-revalidate=60）后，privacy.ts 的 revalidatePath("/leaderboard") 不一定清掉 /zh-CN、/ja 前缀与带查询参数的副本，转私密的用户最长还会在榜上停留 90 秒；是否接受需 640 决定。
 
 ## 证据
 
@@ -207,7 +210,7 @@ TDD：cursor 增量同步的测试模块随 e4fa4ed 一并移植，先落地测�
 
 - cursor.rs TDD：先落 e4fa4ed 的 13 条测试，编译失败 E0425（缺 merge_cursor_usage_events 等 6 个函数与 2 个常量）为红；再落实现，`cargo test -p tokens-cli` 228 pass／0 fail（215 基线＋13 新）。
 - `cd web && bunx tsc --noEmit`：exit 0（全部改动后）。
-- `cd web && bun run lint`：0 errors，2 warnings（既有 img warning＋ProfilePageClient 既有 unused-disable）。说明：首次基线跑显示 1 条 warning，系首次运行的输出不全；对 HEAD 原样重跑 lint 实测同为 2 条，本 PR 新增 warning 为零。
+- `cd web && bun run lint`：0 errors，2 warnings（既有 img warning＋ProfilePageClient 的 unused-disable）。说明：首次基线跑显示 1 条 warning，系首次运行的输出不全；对 HEAD 原样重跑 lint 实测同为 2 条。第四轮b 经审查确认该 react-hooks/set-state-in-effect 禁用行多余并已删除，lint 回到 0 errors、1 warning（只剩 docs/page.tsx 的 img），见「第四轮b 复跑」。
 - `cd web && bun test`：105 pass／0 fail（13 文件）＝基线 100＋middleware 5 条新测试（榜单进共享缓存清单、前缀一致、白名单查询参数、杂散参数 307 规范化、teamboard 不在清单内）。middleware 测试为实现后补的行为刻画（移植性质），cursor 侧为真先红后绿，如实区分。
 - `cd web && bun run build`：成功（全部页面生成，Proxy (Middleware) 正常）。
 - `bunx next start` 生产构建 curl 实测：`/leaderboard` 200 且 `cache-control: public, max-age=0, s-maxage=30, stale-while-revalidate=60`；`/zh-CN/leaderboard` 同头且中文渲染；`/leaderboard?period=yesterday` 200；`/leaderboard?utm_source=x` 307 归一到 `/leaderboard`；`?sortBy=cost&page=2` 保持共享缓存头；`/teamboard` 仍 private no-store；`/settings` 307→`/login?returnTo=%2Fsettings`，`/zh-CN/settings` 307→`/login?returnTo=%2Fzh-CN%2Fsettings`（既有行为不变）；`/privacy`、`/zh-CN/privacy`、`/ja/privacy` 渲染全部 MCP 新条款（collect／never.5／public.p4／choices.stopMcp）；`/docs`、`/zh-CN/docs`、`/ja/docs` 渲染 privateMcp 段与四个 code 命令；榜单页 SSR 含「昨天／昨日／Yesterday」切换；`/api/leaderboard?period=yesterday` 在无 DATABASE_URL 环境 500，与 today／all 行为一致（缺库所致，非回归）。
@@ -219,13 +222,23 @@ TDD：cursor 增量同步的测试模块随 e4fa4ed 一并移植，先落地测�
 ### 第二轮复跑（2026-11-14 09:33–10:05 +08:00，同分支同工作区，结论与第一轮记录一致）
 
 - `cd web && bunx tsc --noEmit`：exit 0。
-- `cd web && bun run lint`：0 errors、2 warnings（docs/page.tsx 既有 img warning＋ProfilePageClient 既有 unused-disable），与第一轮记录及 HEAD 重跑结论一致，本 PR 新增 warning 为零。
+- `cd web && bun run lint`：0 errors、2 warnings（docs/page.tsx 既有 img warning＋ProfilePageClient 的 unused-disable），与第一轮记录及 HEAD 重跑结论一致。该 unused-disable 经审查确认为多余禁用行，第四轮b 已删除，当前 lint 为 0 errors、1 warning（只剩 docs/page.tsx 的 img），见「第四轮b 复跑」。
 - `cd web && bun test`：105 pass／0 fail（13 文件）。
 - `cd web && bun run build`：exit 0，全部页面生成，Proxy (Middleware) 正常。
 - `cargo test --manifest-path cli/Cargo.toml`（隔离工具链）：2480 pass／0 fail／4 ignored；其中 tokens-cli 228 pass，含 13 条新增量同步测试。
 - `cargo clippy --manifest-path cli/Cargo.toml --all-targets -- -D warnings`：exit 0；tokens-cli 清单级 csv 未使用依赖 warning 为 HEAD 既有，与本 diff 无关。
 - `cargo build --release --manifest-path cli/Cargo.toml -p tokens-cli`：exit 0。产物冒烟：`tokens --version` 输出 1.0.4；`--lang zh-CN cursor sync --help` 中文、`--lang ja submit --help` 日文正常。
 - 生产构建 `bunx next start`（端口 3107）curl 冒烟 18 项全过：`/leaderboard` 与 `/zh-CN/leaderboard` 200 且 `cache-control: public, max-age=0, s-maxage=30, stale-while-revalidate=60`；`/leaderboard?period=yesterday` 200；`/leaderboard?utm_source=x` 307 归一到 `/leaderboard`；`?sortBy=cost&page=2` 保持共享缓存头；`/teamboard` 仍 private no-store；`/settings` 307→`/login?returnTo=%2Fsettings`、`/zh-CN/settings` 307→`/login?returnTo=%2Fzh-CN%2Fsettings`；三语 /privacy 均渲染 MCP 条款（各 43 处）、三语 /docs 均渲染 privateMcp 段（各 35 处）；榜单 SSR 含 Yesterday／昨天／昨日切换；`/api/leaderboard?period=yesterday` 在无 DATABASE_URL 环境 500，与 today／all 行为一致（缺库所致，非回归）。冒烟结束已关闭该进程，无遗留。
+
+### 第四轮b 复跑（2026-11-14 10:40–10:52 +08:00，同分支同工作区，HEAD 892b765＋本轮未提交改动）
+
+本轮代码改动：SettingsClient 空状态图标按 d6aca2c 改 flex 居中、ProfilePageClient 删除多余禁用行、leaderboard page.tsx 注释改正；其余为 task.md 文字。CLI 代码未动。
+
+- `cd web && bunx tsc --noEmit`：exit 0。
+- `cd web && bun run lint`：0 errors、1 warning（docs/page.tsx 既有 img），多余禁用行删除后 unused-disable 消失，与审查预期一致。
+- `cd web && bun test`：105 pass／0 fail（13 文件）。
+- `cd web && bun run build`：exit 0，全部页面生成，/device 实测为 ƒ（Dynamic）server-rendered on demand（generateMetadata 经 getTranslator 读 headers），Proxy (Middleware) 正常。
+- `cargo test -p tokens-cli --manifest-path cli/Cargo.toml`（隔离工具链，rustc 1.100.0）：228 pass／0 fail；CLI 本轮无代码变化，跑一次确认。
 
 ## 门禁结论
 
@@ -234,8 +247,8 @@ TDD：cursor 增量同步的测试模块随 e4fa4ed 一并移植，先落地测�
 - Status: characterized；Review mode: normal。
 - 变更行为：cursor sync 由全量拉取改为水位线增量＋按事件标识合并；榜单由服务端分页＋会话排名改为整榜下发＋客户端定位 viewer；榜单数据库不可用时由流式 200 空榜改为失败前置成 500；资料页顶卡由「图选日」改为固定今日并可切昨日；/api/leaderboard 与页面接受 yesterday 周期。
 - 保留行为：冷缓存仍全量拉取；空增量不动缓存；零事件保护（已有缓存时拉到空结果不覆盖缓存、记录错误）；teams/group 列与 MembershipCells；publicUserCondition 私密过滤；/api/leaderboard 保持 force-dynamic（本仓 b39a875 隐私修复）；tt_session 其他用途不动；Teamboard 不出现昨日选项（其 API 无昨日，详见取舍说明）。
-- 现状证据（改动前基线，本分支 HEAD 353e3a6）：`cd web && bun test` 100 pass／0 fail（13 个文件）；`bunx tsc --noEmit` exit 0；`bun run lint` 0 errors（1 条既有 img warning）；`cargo test --manifest-path cli/Cargo.toml` 2467 pass／0 fail／4 ignored。开工时工作区 node_modules 缺失导致 6 条测试报模块解析失败，以 `bun install --frozen-lockfile` 恢复后全绿，lockfile 未变。
-- 安全网：上述既有全部测试＋e4fa4ed 自带 12 条增量同步测试（先红后绿）＋middleware 19 条＋coverage 2 条。
+- 现状证据（改动前基线，本分支 HEAD 353e3a6）：`cd web && bun test` 100 pass／0 fail（13 个文件）；`bunx tsc --noEmit` exit 0；`bun run lint` 0 errors（HEAD 实为 2 条既有 warning：docs/page.tsx img＋ProfilePageClient 多余禁用行，首次基线输出不全只显示 1 条，对 HEAD 重跑为 2 条；第四轮b 删除该禁用行后剩 img 1 条）；`cargo test --manifest-path cli/Cargo.toml` 2467 pass／0 fail／4 ignored。开工时工作区 node_modules 缺失导致 6 条测试报模块解析失败，以 `bun install --frozen-lockfile` 恢复后全绿，lockfile 未变。
+- 安全网：上述既有全部测试＋e4fa4ed 自带 13 条增量同步测试（先红后绿）＋middleware 19 条＋coverage 2 条。
 - 隐藏依赖／seam：Leaderboard 的 PERIODS／PERIOD_LABEL_KEYS／DeveloperRow／FormatToggle 被 Teamboard 复用；useSettings 的 setLeaderboardSort 会写 sort cookie；/api/auth/session 返回 { user }；无新增 seam。
 - Validation plan：验收条件 5 的全量命令。
 
@@ -247,7 +260,7 @@ TDD：cursor 增量同步的测试模块随 e4fa4ed 一并移植，先落地测�
 - Consistency model：合并对重复 sync 冪等收敛；同事件新快照覆盖旧快照；无 id 行按不可变投影键控，宁留重复不丢行（解析侧快照去重 d9a213a 归 C，见取舍说明）。
 - Schema／migration／backfill／rollback：无 schema 与迁移；缓存文件格式前后兼容；回滚即还原代码。
 - Observability and repair：零事件保护与错误列表维持原语义；榜单数据库故障在首字节前抛错，可被中间件层识别为 500。
-- Required tests：e4fa4ed 自带 12 条（合并保留窗口外历史、快照替换、缓存重复坍缩、无 id 投影键、冷缓存、水位线兼容字符串与数字时间戳、忽略坏行、回退窗口与钟差、无缓存无水位线、坏 JSON 视为空、请求体仅增量携带 startDate、事件标识优先级与空白 id）。
+- Required tests：e4fa4ed 自带 13 条（合并保留窗口外历史、快照替换、缓存重复坍缩、无 id 投影键、冷缓存、水位线兼容字符串与数字时间戳、忽略坏行、回退窗口与钟差、无缓存无水位线、坏 JSON 视为空、请求体仅增量携带 startDate、事件标识优先于投影键、空白 id 被忽略）。
 
 ### Refactoring Review
 
@@ -287,3 +300,4 @@ TDD：cursor 增量同步的测试模块随 e4fa4ed 一并移植，先落地测�
 | 2026-11-14T09:33:16.000000+08:00 | planned | in-progress | 恢复执行：环境核对完成（node_modules 与 PR A 隔离工具链在位、无遗留后台进程），开始重跑验收条件 5 的全部命令 | 第二轮进度日志 09:33 条目 |
 | 2026-11-14T10:03:16.000000+08:00 | in-progress | checking | 七条验证命令与生产 curl 冒烟全部实跑通过，数字与第一轮记录一致 | web: tsc exit 0、lint 0 errors（2 条既有 warning）、bun test 105 pass/0 fail、build exit 0；CLI: cargo test 2480 pass/0 fail/4 ignored、clippy -D warnings exit 0、release build exit 0、产物三语冒烟正常；next start 冒烟 18 项全过且进程已关闭 |
 | 2026-11-14T10:05:04.229193+08:00 | checking | done | 验收条件 1-7 经第二轮实跑确认全部满足；本轮进度日志、证据节复跑记录与模型表两轮计数补齐，禁用词与本机路径扫描零命中 | task.md 第二轮进度日志、证据节「第二轮复跑」与模型表；grep -nE 禁用词与本机路径扫描 exit 1 零命中 |
+| 2026-11-14T10:52:30.000000+08:00 | done | done | 更正：按审查意见修正——d6aca2c 改归本 PR（设置空状态图标改 flex 居中，原 mx-auto 写法因 svg 块级实际偏左）、4c98999 改归 C 并改正理由（syncGitHubSocialLinks 不看 complete 写库，限流会清空社交链接）、删除 ProfilePageClient 多余 eslint-disable（lint 回 0 errors、1 warning）、归类统计改 A 9／B 8／C 20／不适用 112、e4fa4ed 测试数改 13、b624e57 理由改为 generateMetadata 读 headers 成动态页、取舍说明补早退分支与榜单 90 秒窗口与 v1.0.5 发布依赖三条、leaderboard 注释改正为无 deploy layer 组件的本仓实际；状态保持 done，不 commit、不 push | 证据节「第四轮b 复跑」：tsc exit 0、lint 0 errors 1 warning（docs/page.tsx img）、bun test 105 pass/0 fail、build exit 0（/device 为 ƒ dynamic）、cargo test -p tokens-cli 228 pass/0 fail（隔离工具链 rustc 1.100.0） |

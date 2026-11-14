@@ -89,8 +89,10 @@ interface PageProps {
  * leaderboard, stored by the edge, served to everyone in the colo for a minute
  * and a half after the database came back.
  *
- * Awaiting here puts the failure before the first byte, where it can still be a
- * 500 that the deploy layer can strip the cache-control from. The cost is the
+ * Awaiting here puts the failure before the first byte, where it can still be
+ * a 500. Nothing in this repo strips the cache-control from that 500 — the
+ * shareable header the middleware attached is on it too — but Vercel does not
+ * cache 500 responses, so the failed render is not stored. The cost is the
  * shell no longer appears first, and that cost is small: this render is ~40ms,
  * and almost every reader is answered by the edge without reaching it at all.
  */

@@ -240,7 +240,6 @@ export default function ProfilePageClient({
   // today, which is the safe direction to be wrong in.
   const [viewerLocalDate, setViewerLocalDate] = useState<string | null>(null);
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setViewerLocalDate(toLocalDateString(new Date()));
   }, []);
 
