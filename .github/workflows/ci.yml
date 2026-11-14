@@ -172,9 +172,10 @@ jobs:
       # production — and the two runtimes canonicalize renamed IANA zones to
       # different spellings. The time zone acceptance rule therefore also runs
       # once under Node against the real module (no dependencies needed).
+      # Node 24 matches the production runtime version on Vercel.
       - uses: actions/setup-node@v6
         with:
-          node-version: 22
+          node-version: 24
 
       - name: Time zone validation under Node
         run: cd web && bun run test:node
