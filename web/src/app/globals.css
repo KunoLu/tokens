@@ -161,7 +161,8 @@ button {
    Tokens palette
    ==========================================================================
 
-   Calm, slightly warm neutrals with a single blue accent, in the spirit of
+   Calm, slightly warm neutrals with a single violet accent (brand purple
+   #7C3AED and its lighter dark-theme counterpart), in the spirit of
    the tooling sites this audience already lives in. Both themes are tuned
    independently rather than inverted: the light theme sits on warm paper so
    large white tables do not glare, and the dark theme uses a lifted
@@ -179,7 +180,7 @@ button {
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.2178 0.0057 264);
 
-  --primary: oklch(0.5461 0.1445 250);
+  --primary: oklch(0.5413 0.2466 293.01);
   --primary-foreground: oklch(0.9911 0.0015 90);
 
   --secondary: oklch(0.9702 0.0034 90);
@@ -188,16 +189,16 @@ button {
   --muted: oklch(0.9702 0.0034 90);
   --muted-foreground: oklch(0.5486 0.0122 264);
 
-  --accent: oklch(0.9603 0.0069 250);
+  --accent: oklch(0.9433 0.0284 294.59);
   --accent-foreground: oklch(0.2178 0.0057 264);
 
   --destructive: oklch(0.5771 0.1638 27);
 
   --border: oklch(0.9276 0.0058 264);
   --input: oklch(0.9276 0.0058 264);
-  --ring: oklch(0.5461 0.1445 250);
+  --ring: oklch(0.5413 0.2466 293.01);
 
-  --chart-1: oklch(0.5461 0.1445 250);
+  --chart-1: oklch(0.5413 0.2466 293.01);
   --chart-2: oklch(0.6 0.118 184);
   --chart-3: oklch(0.646 0.135 70);
   --chart-4: oklch(0.55 0.15 320);
@@ -213,7 +214,7 @@ button {
   --popover: oklch(0.2134 0.0049 264);
   --popover-foreground: oklch(0.9288 0.0067 264);
 
-  --primary: oklch(0.6845 0.1298 245);
+  --primary: oklch(0.7090 0.1592 293.54);
   --primary-foreground: oklch(0.1822 0.0043 264);
 
   --secondary: oklch(0.2591 0.0057 264);
@@ -222,16 +223,16 @@ button {
   --muted: oklch(0.2591 0.0057 264);
   --muted-foreground: oklch(0.6534 0.0111 264);
 
-  --accent: oklch(0.2789 0.0063 264);
+  --accent: oklch(0.2789 0.0300 293.01);
   --accent-foreground: oklch(0.9288 0.0067 264);
 
   --destructive: oklch(0.6605 0.1512 24);
 
   --border: oklch(0.2789 0.0063 264);
   --input: oklch(0.2789 0.0063 264);
-  --ring: oklch(0.6845 0.1298 245);
+  --ring: oklch(0.7090 0.1592 293.54);
 
-  --chart-1: oklch(0.6845 0.1298 245);
+  --chart-1: oklch(0.7090 0.1592 293.54);
   --chart-2: oklch(0.696 0.117 184);
   --chart-3: oklch(0.769 0.128 70);
   --chart-4: oklch(0.68 0.14 320);

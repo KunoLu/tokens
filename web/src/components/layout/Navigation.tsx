@@ -49,7 +49,7 @@ const NAV_LINKS = [
 const AUTH_PAGES = ["/login", "/register", "/forgot-password", "/reset-password", "/verify-email"];
 
 /**
- * The blue tile, so the corner of the page and the browser tab show the same
+ * The purple tile, so the corner of the page and the browser tab show the same
  * thing. Colours are literal rather than themed: this is the brand tile, and
  * it has to read identically against a light header, a dark header and the
  * favicon beside it.
@@ -57,7 +57,7 @@ const AUTH_PAGES = ["/login", "/register", "/forgot-password", "/reset-password"
 function TokensMark() {
   return (
     <svg viewBox="0 0 64 64" width={22} height={22} aria-hidden="true" className="shrink-0">
-      <rect width={64} height={64} rx={14} fill="#2F6FDB" />
+      <rect width={64} height={64} rx={14} fill="#7C3AED" />
       <g stroke="#FFFFFF" strokeWidth={5} strokeLinecap="round" fill="none">
         <path d="M14 15h36" />
         <path d="M32 15v34" />

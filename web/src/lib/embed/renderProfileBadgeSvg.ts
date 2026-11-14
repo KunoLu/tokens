@@ -34,7 +34,7 @@ const VERDANA_WIDTHS = [
 ];
 
 const METRIC_COLORS: Record<BadgeMetric, string> = {
-  tokens: "0073FF",
+  tokens: "7C3AED",
   cost: "16804B",
   rank: "D97706",
 };

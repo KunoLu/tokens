@@ -126,7 +126,7 @@ export default async function RootLayout({
         />
       </head>
       <body className="flex min-h-dvh flex-col font-sans">
-        <NextTopLoader color="#0073FF" showSpinner={false} />
+        <NextTopLoader color="#7C3AED" showSpinner={false} />
         {/* Every route's <main> carries id="main-content"; this is the link the
             anchors were always for. Off-screen until focused, so it costs
             nothing visually and is the first stop for a keyboard user. */}
