@@ -8,7 +8,7 @@ mode_note: 用户 2026-11-13 10:32 群内选定多语言方案甲、10:33 确认
 status: "done"
 branch: sync/upstream-v27.2.1-pr-b
 created_at: '2026-11-14T07:01:21.131576+08:00'
-updated_at: "2026-11-14T10:52:30.000000+08:00"
+updated_at: "2026-11-14T11:12:34.000000+08:00"
 completed_at: "2026-11-14T10:05:04.229193+08:00"
 ---
 # 同步上游 v27.2.1 拆分 PR B — 混合文件的非多语言修复
@@ -49,7 +49,7 @@ completed_at: "2026-11-14T10:05:04.229193+08:00"
 
 | 角色 | 模型 | 密钥来源 | 调用次数 |
 |---|---|---|---|
-| 主 agent | k3:max | 环境变量 KIMI_API_KEY | 第一轮：回复 191、工具调用 264、工具报错 1（第一轮会话结束后的最终计数）；第二轮：回复 15、工具调用 25、工具报错 0（第二轮会话结束后的最终计数）；第三轮：回复 7、工具调用 8、工具报错 0（第三轮会话结束后的最终计数）；第四轮：启动后未改文件即中止；第四轮b：回复 29、工具调用 57、工具报错 1（截至 2026-11-14 10:53 +08:00 本次写入时） |
+| 主 agent | k3:max | 环境变量 KIMI_API_KEY | 第一轮：回复 191、工具调用 264、工具报错 1（第一轮会话结束后的最终计数）；第二轮：回复 15、工具调用 25、工具报错 0（第二轮会话结束后的最终计数）；第三轮：回复 7、工具调用 8、工具报错 0（第三轮会话结束后的最终计数）；第四轮：回复 12、工具调用 17、工具报错 1（会话结束后的最终计数；启动后未改文件即中止）；第四轮b：回复 32、工具调用 61、工具报错 0（会话结束后的最终计数，按会话文件统计）；第五轮（本轮）：回复 5、工具调用 17、工具报错 0（截至 2026-11-14 11:12 +08:00 本次写入时） |
 
 未启动子代理；密钥不写入本文件与任何产物。
 
@@ -74,16 +74,17 @@ TDD：cursor 增量同步的测试模块随 e4fa4ed 一并移植，先落地测�
 - 2026-11-14 07:46 +08:00 主 agent：开始 cursor.rs 移植（e4fa4ed，先红后绿）。
 - 2026-11-14 07:52 +08:00 主 agent：完成 cursor.rs 移植。13 条增量同步测试先落编译失败（E0425）为红，实现落地后 tokens-cli 228 pass／0 fail。
 - 2026-11-14 08:35 +08:00 主 agent：开始 web 移植（整榜下发、流式修复、昨日卡片、middleware、词条）。
-- 2026-11-14 09:10 +08:00 主 agent：完成 web 移植与词条落地。期间一次模糊匹配误伤 getLeaderboard.ts 邻近注释，tsc 当场暴露并已修复（记入门禁结论）。lint 2 条 warning 经对 HEAD 原样重跑确认均既有。
+- 2026-11-14 09:10 +08:00 主 agent：完成 web 移植与词条落地。期间一次模糊匹配误伤 getLeaderboard.ts 邻近注释，tsc 当场暴露并已修复（记入门禁结论）。lint 2 条 warning：base 既有 docs/page.tsx img 1 条，另 1 条为本轮改动使 ProfilePageClient 一行 eslint-disable 多余（unused-disable）。
 - 2026-11-14 09:23 +08:00 主 agent：完成全部验证与冒烟（结果见证据节）、ponytail-review（Lean already）、可读性复核、release-readiness（blocked：CI/合并/部署不在本会话授权内）。开始最终核对与收尾。
 - 2026-11-14 09:33 +08:00 主 agent：开始第二轮恢复核对与验证重跑。恢复核对：git status 与第一轮记录一致（39 个修改、1 个新增，均未提交）；node_modules 在位（485 个顶层条目，bun.lock 未动）；PR A 架设的会话临时目录隔离工具链在位（rustup stable：rustc 1.100.0、cargo 1.100.0、clippy 0.1.100，另有手工解包 make 4.4.1），本机预装 rustc 1.85.1 低于代码所需的 1.87，CLI 验证继续走隔离工具链；无第一轮遗留的 next start 等后台进程。第一轮已记 done，但其验证证据未经实跑确认即触会话上限，按重开流程回 planned 再进 in-progress，一切以本轮实跑为准。
 - 2026-11-14 10:05 +08:00 主 agent：完成全部验证重跑与冒烟，七条命令全绿且数字与第一轮记录一致（逐项见证据节「第二轮复跑」）；生产构建 curl 冒烟 18 项全过，进程已关闭；CLI 产物冒烟正常（tokens --version 输出 1.0.4，zh-CN 与 ja 帮助输出正常）。完成 task.md 本轮补齐（进度、复跑证据、模型表两轮计数、状态事件）。
 - 2026-11-14 10:08 +08:00 主 agent：第三轮只改计数：模型表换用第一、二轮会话结束后的最终计数（191/264/1、15/25/0），补记第三轮截至写入时的计数（回复 5、工具调用 7、工具报错 0），模型表上方补一句模型与密钥来源说明；禁用词与本机路径扫描零命中，无其他改动。
 - 2026-11-14 10:52 +08:00 主 agent：第四轮b 按审查修正（此前第四轮启动后未改文件即中止，本轮接续）：d6aca2c 由不适用改归本 PR——设置页空状态图标按上游改为 mb-3 flex justify-center opacity-50（原 mx-auto 写法因 svg 为块级而实际偏左）；4c98999 由不适用改归 C——资料页路径 u/[username]/page.tsx → githubSocials.ts 的 syncGitHubSocialLinks 不看 complete 就写库，限流会把社交链接写成空；删除 ProfilePageClient 多余的 react-hooks/set-state-in-effect 禁用行，lint 回到 0 errors、1 warning（只剩 docs/page.tsx 的 img）；归类统计改 A 9／B 8／C 20／不适用 112；e4fa4ed 测试数 12 改 13；b624e57 理由改正为 generateMetadata 读 headers 使 /device 成动态页；取舍说明补 merge_cursor_usage_events 早退分支、榜单共享缓存 90 秒窗口、MCP 文案与 v1.0.5 发布依赖三条；leaderboard page.tsx 注释中 deploy layer 一说改正为本仓实际。验证全部实跑（tsc、lint、bun test、build、cargo test -p tokens-cli），结果见证据节「第四轮b 复跑」。
+- 2026-11-14 11:12 +08:00 主 agent：第五轮按复审意见只改本文件文字与数字，不改代码、不 commit、不 push：不适用小类改合并提交 55／上游版本线 12／本仓已落地 26／结构或体系不同 19（合计 112 不变）；模型表第四轮改 12／17／1、第四轮b 改 32／61／0（均为会话结束后的最终计数）并补第五轮截至写入时计数；lint 基线说法改正——base 353e3a6 只有 docs/page.tsx 的 img 1 条 warning，本 PR 第一轮改动使 ProfilePageClient 一行 eslint-disable 多余而多出 1 条，第四轮b 已删除；删去「首次输出不全」「HEAD 原样重跑同为 2 条」说法，进度、证据、门禁结论与状态事件同步；第四轮b 复跑时段改 10:42–10:55 +08:00；取舍 10 空缓存措辞严谨化；状态事件补本轮更正行。禁用词与本机路径扫描零命中（grep 实测）。
 
 ## 上游提交归类（f114057..e39110d，共 149 个）
 
-统计：已在 A 9、本 PR B 8、留给 C 20、不适用本仓 112（其中合并提交 55、上游版本线 12、本仓 v1.0.4 系列已落地 27、结构或体系不同 18）。42e63c2 与 16724c8 跨类：词条与设置页评估在 B，功能代码与冲突部分归 C 或不适用，表内注明。
+统计：已在 A 9、本 PR B 8、留给 C 20、不适用本仓 112（其中合并提交 55、上游版本线 12、本仓已落地 26、结构或体系不同 19）。42e63c2 与 16724c8 跨类：词条与设置页评估在 B，功能代码与冲突部分归 C 或不适用，表内注明。
 
 | 提交 | 归类 | 依据 |
 |---|---|---|
@@ -194,7 +195,7 @@ TDD：cursor 增量同步的测试模块随 e4fa4ed 一并移植，先落地测�
 7. **ProfileToday 的本仓差异**：日期 chip 保留 formatDate 本地化（上游显示原始 ISO 串）；成分百分比保留 formatWholePercents。词条 profile.today.dayFallback 随「固定今日」下线（三语删除），新增 yesterdayHeading／dayAria／emptyYesterday（三语采用上游译文）。
 8. **Teamboard 不出现昨日选项**：其 API 无昨日通道（其它周期值会静默回落 all），共享 PERIODS 在 Teamboard 渲染处过滤并注释原因。
 9. **getUserRank 保留不删**：页面不再调用它，上游 v27.2.1 同样保留该导出，维持对齐；删除属 C 之后的独立清理。
-10. **merge_cursor_usage_events 未带 e4fa4ed 的早退分支**：上游 e4fa4ed 原版开头有 `if cached.is_empty() { return incoming; }`，本仓移植未带；空缓存走正常合并路径得到同一结果（merge_on_an_empty_cache_is_the_incoming_history 测试锁定该行为），且上游后来在 33b1723（归 C）里删掉了该分支，运行时无影响。
+10. **merge_cursor_usage_events 未带 e4fa4ed 的早退分支**：上游 e4fa4ed 原版开头有 `if cached.is_empty() { return incoming; }`，本仓移植未带；缓存为空时走正常合并，拉回的数据里若有重复行会被合并掉（merge_on_an_empty_cache_is_the_incoming_history 测试锁定该行为）；但这个函数只在缓存非空时被调用，运行时无影响，且上游后来在 33b1723（归 C）里删掉了该分支。
 11. **榜单共享缓存与转私密的失效窗口**：榜单页进共享缓存（s-maxage=30、stale-while-revalidate=60）后，privacy.ts 的 revalidatePath("/leaderboard") 不一定清掉 /zh-CN、/ja 前缀与带查询参数的副本，转私密的用户最长还会在榜上停留 90 秒；是否接受需 640 决定。
 
 ## 证据
@@ -210,7 +211,7 @@ TDD：cursor 增量同步的测试模块随 e4fa4ed 一并移植，先落地测�
 
 - cursor.rs TDD：先落 e4fa4ed 的 13 条测试，编译失败 E0425（缺 merge_cursor_usage_events 等 6 个函数与 2 个常量）为红；再落实现，`cargo test -p tokens-cli` 228 pass／0 fail（215 基线＋13 新）。
 - `cd web && bunx tsc --noEmit`：exit 0（全部改动后）。
-- `cd web && bun run lint`：0 errors，2 warnings（既有 img warning＋ProfilePageClient 的 unused-disable）。说明：首次基线跑显示 1 条 warning，系首次运行的输出不全；对 HEAD 原样重跑 lint 实测同为 2 条。第四轮b 经审查确认该 react-hooks/set-state-in-effect 禁用行多余并已删除，lint 回到 0 errors、1 warning（只剩 docs/page.tsx 的 img），见「第四轮b 复跑」。
+- `cd web && bun run lint`：0 errors，2 warnings（base 353e3a6 只有 docs/page.tsx 的 img 1 条；本 PR 第一轮改动使 ProfilePageClient 一行 eslint-disable 变得多余，多出 1 条 unused-disable）。第四轮b 经审查确认该 react-hooks/set-state-in-effect 禁用行多余并已删除，lint 回到 0 errors、1 warning（只剩 docs/page.tsx 的 img），见「第四轮b 复跑」。
 - `cd web && bun test`：105 pass／0 fail（13 文件）＝基线 100＋middleware 5 条新测试（榜单进共享缓存清单、前缀一致、白名单查询参数、杂散参数 307 规范化、teamboard 不在清单内）。middleware 测试为实现后补的行为刻画（移植性质），cursor 侧为真先红后绿，如实区分。
 - `cd web && bun run build`：成功（全部页面生成，Proxy (Middleware) 正常）。
 - `bunx next start` 生产构建 curl 实测：`/leaderboard` 200 且 `cache-control: public, max-age=0, s-maxage=30, stale-while-revalidate=60`；`/zh-CN/leaderboard` 同头且中文渲染；`/leaderboard?period=yesterday` 200；`/leaderboard?utm_source=x` 307 归一到 `/leaderboard`；`?sortBy=cost&page=2` 保持共享缓存头；`/teamboard` 仍 private no-store；`/settings` 307→`/login?returnTo=%2Fsettings`，`/zh-CN/settings` 307→`/login?returnTo=%2Fzh-CN%2Fsettings`（既有行为不变）；`/privacy`、`/zh-CN/privacy`、`/ja/privacy` 渲染全部 MCP 新条款（collect／never.5／public.p4／choices.stopMcp）；`/docs`、`/zh-CN/docs`、`/ja/docs` 渲染 privateMcp 段与四个 code 命令；榜单页 SSR 含「昨天／昨日／Yesterday」切换；`/api/leaderboard?period=yesterday` 在无 DATABASE_URL 环境 500，与 today／all 行为一致（缺库所致，非回归）。
@@ -222,7 +223,7 @@ TDD：cursor 增量同步的测试模块随 e4fa4ed 一并移植，先落地测�
 ### 第二轮复跑（2026-11-14 09:33–10:05 +08:00，同分支同工作区，结论与第一轮记录一致）
 
 - `cd web && bunx tsc --noEmit`：exit 0。
-- `cd web && bun run lint`：0 errors、2 warnings（docs/page.tsx 既有 img warning＋ProfilePageClient 的 unused-disable），与第一轮记录及 HEAD 重跑结论一致。该 unused-disable 经审查确认为多余禁用行，第四轮b 已删除，当前 lint 为 0 errors、1 warning（只剩 docs/page.tsx 的 img），见「第四轮b 复跑」。
+- `cd web && bun run lint`：0 errors、2 warnings（docs/page.tsx 既有 img warning＋ProfilePageClient 的 unused-disable，与第一轮记录一致；该 unused-disable 为本 PR 第一轮改动致该禁用行多余，非 base 既有）。第四轮b 已删除该多余禁用行，当前 lint 为 0 errors、1 warning（只剩 docs/page.tsx 的 img），见「第四轮b 复跑」。
 - `cd web && bun test`：105 pass／0 fail（13 文件）。
 - `cd web && bun run build`：exit 0，全部页面生成，Proxy (Middleware) 正常。
 - `cargo test --manifest-path cli/Cargo.toml`（隔离工具链）：2480 pass／0 fail／4 ignored；其中 tokens-cli 228 pass，含 13 条新增量同步测试。
@@ -230,7 +231,7 @@ TDD：cursor 增量同步的测试模块随 e4fa4ed 一并移植，先落地测�
 - `cargo build --release --manifest-path cli/Cargo.toml -p tokens-cli`：exit 0。产物冒烟：`tokens --version` 输出 1.0.4；`--lang zh-CN cursor sync --help` 中文、`--lang ja submit --help` 日文正常。
 - 生产构建 `bunx next start`（端口 3107）curl 冒烟 18 项全过：`/leaderboard` 与 `/zh-CN/leaderboard` 200 且 `cache-control: public, max-age=0, s-maxage=30, stale-while-revalidate=60`；`/leaderboard?period=yesterday` 200；`/leaderboard?utm_source=x` 307 归一到 `/leaderboard`；`?sortBy=cost&page=2` 保持共享缓存头；`/teamboard` 仍 private no-store；`/settings` 307→`/login?returnTo=%2Fsettings`、`/zh-CN/settings` 307→`/login?returnTo=%2Fzh-CN%2Fsettings`；三语 /privacy 均渲染 MCP 条款（各 43 处）、三语 /docs 均渲染 privateMcp 段（各 35 处）；榜单 SSR 含 Yesterday／昨天／昨日切换；`/api/leaderboard?period=yesterday` 在无 DATABASE_URL 环境 500，与 today／all 行为一致（缺库所致，非回归）。冒烟结束已关闭该进程，无遗留。
 
-### 第四轮b 复跑（2026-11-14 10:40–10:52 +08:00，同分支同工作区，HEAD 892b765＋本轮未提交改动）
+### 第四轮b 复跑（2026-11-14 10:42–10:55 +08:00，同分支同工作区，HEAD 892b765＋本轮未提交改动）
 
 本轮代码改动：SettingsClient 空状态图标按 d6aca2c 改 flex 居中、ProfilePageClient 删除多余禁用行、leaderboard page.tsx 注释改正；其余为 task.md 文字。CLI 代码未动。
 
@@ -247,7 +248,7 @@ TDD：cursor 增量同步的测试模块随 e4fa4ed 一并移植，先落地测�
 - Status: characterized；Review mode: normal。
 - 变更行为：cursor sync 由全量拉取改为水位线增量＋按事件标识合并；榜单由服务端分页＋会话排名改为整榜下发＋客户端定位 viewer；榜单数据库不可用时由流式 200 空榜改为失败前置成 500；资料页顶卡由「图选日」改为固定今日并可切昨日；/api/leaderboard 与页面接受 yesterday 周期。
 - 保留行为：冷缓存仍全量拉取；空增量不动缓存；零事件保护（已有缓存时拉到空结果不覆盖缓存、记录错误）；teams/group 列与 MembershipCells；publicUserCondition 私密过滤；/api/leaderboard 保持 force-dynamic（本仓 b39a875 隐私修复）；tt_session 其他用途不动；Teamboard 不出现昨日选项（其 API 无昨日，详见取舍说明）。
-- 现状证据（改动前基线，本分支 HEAD 353e3a6）：`cd web && bun test` 100 pass／0 fail（13 个文件）；`bunx tsc --noEmit` exit 0；`bun run lint` 0 errors（HEAD 实为 2 条既有 warning：docs/page.tsx img＋ProfilePageClient 多余禁用行，首次基线输出不全只显示 1 条，对 HEAD 重跑为 2 条；第四轮b 删除该禁用行后剩 img 1 条）；`cargo test --manifest-path cli/Cargo.toml` 2467 pass／0 fail／4 ignored。开工时工作区 node_modules 缺失导致 6 条测试报模块解析失败，以 `bun install --frozen-lockfile` 恢复后全绿，lockfile 未变。
+- 现状证据（改动前基线，本分支 HEAD 353e3a6）：`cd web && bun test` 100 pass／0 fail（13 个文件）；`bunx tsc --noEmit` exit 0；`bun run lint` 0 errors、1 warning（base 353e3a6 只有 docs/page.tsx 的 img 一条；本 PR 第一轮改动使 ProfilePageClient 一行 eslint-disable 多余而多出 1 条 unused-disable，第四轮b 删除该禁用行后回到 img 1 条）；`cargo test --manifest-path cli/Cargo.toml` 2467 pass／0 fail／4 ignored。开工时工作区 node_modules 缺失导致 6 条测试报模块解析失败，以 `bun install --frozen-lockfile` 恢复后全绿，lockfile 未变。
 - 安全网：上述既有全部测试＋e4fa4ed 自带 13 条增量同步测试（先红后绿）＋middleware 19 条＋coverage 2 条。
 - 隐藏依赖／seam：Leaderboard 的 PERIODS／PERIOD_LABEL_KEYS／DeveloperRow／FormatToggle 被 Teamboard 复用；useSettings 的 setLeaderboardSort 会写 sort cookie；/api/auth/session 返回 { user }；无新增 seam。
 - Validation plan：验收条件 5 的全量命令。
@@ -294,10 +295,11 @@ TDD：cursor 增量同步的测试模块随 e4fa4ed 一并移植，先落地测�
 | at | from | to | reason | evidence |
 |---|---|---|---|---|
 | 2026-11-14T07:01:22.895609+08:00 | planned | in-progress | 开工：范围、验收条件与 Book Gate Plan 已确认，调查与归类完成 | task.md 已确认范围与授权节及上游提交归类表；分支 sync/upstream-v27.2.1-pr-b，开工前 git status 实测干净 |
-| 2026-11-14T09:23:04.210809+08:00 | in-progress | checking | 实现与移植完成（cursor 增量同步、整榜下发、流式修复、昨日卡片、MCP 词条、设置页取舍、CLI 词条 15 条），进入收尾核对 | web: tsc exit 0、lint 0 errors（2 条既有 warning 与 HEAD 相同）、bun test 105 pass/0 fail、next build 成功、next start curl 冒烟全过；CLI: cargo test 2480 pass/0 fail/4 ignored、clippy -D warnings exit 0、release build exit 0、三语 help 实测正常 |
-| 2026-11-14T09:29:03.797052+08:00 | checking | done | 验收条件 1-7 全部满足：增量同步与 13 条测试落地、整榜下发/流式修复/昨日卡片移植完成、MCP 词条三语落地并渲染、设置页评估与取舍记录完成、149 个提交归类齐备、验证命令全绿、禁用词与本机路径扫描零命中 | task.md 证据节与取舍说明；web: tsc exit 0、lint 0 errors（2 条既有 warning 与 HEAD 相同）、bun test 105 pass/0 fail、next build 成功、生产构建 curl 冒烟全过；CLI: cargo test 2480 pass/0 fail/4 ignored、clippy -D warnings exit 0、release build exit 0；release-readiness 记 blocked：CI/合并/部署不在本会话授权内 |
+| 2026-11-14T09:23:04.210809+08:00 | in-progress | checking | 实现与移植完成（cursor 增量同步、整榜下发、流式修复、昨日卡片、MCP 词条、设置页取舍、CLI 词条 15 条），进入收尾核对 | web: tsc exit 0、lint 0 errors（2 条 warning：base 既有 docs/page.tsx img＋本 PR 第一轮改动致多余的 ProfilePageClient 禁用行）、bun test 105 pass/0 fail、next build 成功、next start curl 冒烟全过；CLI: cargo test 2480 pass/0 fail/4 ignored、clippy -D warnings exit 0、release build exit 0、三语 help 实测正常 |
+| 2026-11-14T09:29:03.797052+08:00 | checking | done | 验收条件 1-7 全部满足：增量同步与 13 条测试落地、整榜下发/流式修复/昨日卡片移植完成、MCP 词条三语落地并渲染、设置页评估与取舍记录完成、149 个提交归类齐备、验证命令全绿、禁用词与本机路径扫描零命中 | task.md 证据节与取舍说明；web: tsc exit 0、lint 0 errors（2 条 warning：base 既有 docs/page.tsx img＋本 PR 第一轮改动致多余的 ProfilePageClient 禁用行）、bun test 105 pass/0 fail、next build 成功、生产构建 curl 冒烟全过；CLI: cargo test 2480 pass/0 fail/4 ignored、clippy -D warnings exit 0、release build exit 0；release-readiness 记 blocked：CI/合并/部署不在本会话授权内 |
 | 2026-11-14T09:33:15.000000+08:00 | done | planned | 重开：第一轮会话在最终验证阶段触上限被终止，09:29 的 done 所依据的验证证据未经实跑确认；保留该行与证据节作为旧完成证据，completed_at 先随重开失效、本轮重新完成后写入新值，全部验证由第二轮实跑 | 本轮开工说明；git status 与第一轮记录一致（39 个修改、1 个新增，均未提交） |
 | 2026-11-14T09:33:16.000000+08:00 | planned | in-progress | 恢复执行：环境核对完成（node_modules 与 PR A 隔离工具链在位、无遗留后台进程），开始重跑验收条件 5 的全部命令 | 第二轮进度日志 09:33 条目 |
-| 2026-11-14T10:03:16.000000+08:00 | in-progress | checking | 七条验证命令与生产 curl 冒烟全部实跑通过，数字与第一轮记录一致 | web: tsc exit 0、lint 0 errors（2 条既有 warning）、bun test 105 pass/0 fail、build exit 0；CLI: cargo test 2480 pass/0 fail/4 ignored、clippy -D warnings exit 0、release build exit 0、产物三语冒烟正常；next start 冒烟 18 项全过且进程已关闭 |
+| 2026-11-14T10:03:16.000000+08:00 | in-progress | checking | 七条验证命令与生产 curl 冒烟全部实跑通过，数字与第一轮记录一致 | web: tsc exit 0、lint 0 errors（2 条 warning：base 既有 docs/page.tsx img＋第一轮改动致多余的 ProfilePageClient 禁用行）、bun test 105 pass/0 fail、build exit 0；CLI: cargo test 2480 pass/0 fail/4 ignored、clippy -D warnings exit 0、release build exit 0、产物三语冒烟正常；next start 冒烟 18 项全过且进程已关闭 |
 | 2026-11-14T10:05:04.229193+08:00 | checking | done | 验收条件 1-7 经第二轮实跑确认全部满足；本轮进度日志、证据节复跑记录与模型表两轮计数补齐，禁用词与本机路径扫描零命中 | task.md 第二轮进度日志、证据节「第二轮复跑」与模型表；grep -nE 禁用词与本机路径扫描 exit 1 零命中 |
 | 2026-11-14T10:52:30.000000+08:00 | done | done | 更正：按审查意见修正——d6aca2c 改归本 PR（设置空状态图标改 flex 居中，原 mx-auto 写法因 svg 块级实际偏左）、4c98999 改归 C 并改正理由（syncGitHubSocialLinks 不看 complete 写库，限流会清空社交链接）、删除 ProfilePageClient 多余 eslint-disable（lint 回 0 errors、1 warning）、归类统计改 A 9／B 8／C 20／不适用 112、e4fa4ed 测试数改 13、b624e57 理由改为 generateMetadata 读 headers 成动态页、取舍说明补早退分支与榜单 90 秒窗口与 v1.0.5 发布依赖三条、leaderboard 注释改正为无 deploy layer 组件的本仓实际；状态保持 done，不 commit、不 push | 证据节「第四轮b 复跑」：tsc exit 0、lint 0 errors 1 warning（docs/page.tsx img）、bun test 105 pass/0 fail、build exit 0（/device 为 ƒ dynamic）、cargo test -p tokens-cli 228 pass/0 fail（隔离工具链 rustc 1.100.0） |
+| 2026-11-14T11:12:34.000000+08:00 | done | done | 更正：按复审意见修正 task.md 文字与数字——不适用小类改合并提交 55／上游版本线 12／本仓已落地 26／结构或体系不同 19（合计 112）、模型表第四轮改 12/17/1 与第四轮b 改 32/61/0 终值并补第五轮截至写入时计数、lint 基线说法改正（base 353e3a6 只有 docs/page.tsx 的 img 1 条 warning，本 PR 第一轮改动致 ProfilePageClient 一行 eslint-disable 多余多 1 条，第四轮b 已删，删去「首次输出不全」「HEAD 原样重跑同为 2 条」说法）、第四轮b 复跑时段改 10:42–10:55 +08:00、取舍 10 空缓存措辞严谨化；只改本文件，不改代码，不 commit、不 push，状态保持 done | 本轮 task.md 改动；grep -nE 禁用词与本机路径扫描零命中 |
