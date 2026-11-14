@@ -7,6 +7,35 @@ Tags such as `v27.x` belong to upstream `missuo/tokens` and are not releases of 
 
 ## [Unreleased]
 
+## [1.0.5] - 2026-11-14
+
+### Added
+
+- Multilingual interface from upstream v27.2.1 (#20): the web UI and the CLI now ship English, 中文, and 日本語 catalogs with a language switcher and locale-prefixed URLs. The legacy `tt_locale=zh` cookie maps to `zh-CN`, and old unprefixed Chinese URLs redirect instead of returning 404. The CLI accepts `--lang` and `TOKENS_LANG`.
+- The leaderboard gains a "Yesterday" period, and the profile page's "today" card is pinned to today with a switch to yesterday — a card toggle, not a period option (#22; upstream v27.2.1).
+- Redesigned Open Graph cards (#23; upstream v27.2.1): site, page, and profile cards render in all three locales, and the profile card shows tokens, spend, rank, active days, top clients, and a one-year activity strip.
+- Cursor desktop sign-in and unified Cursor billing (#23; upstream v27.2.1).
+- Account time zone setting (#21, #24): the settings page offers a time zone, and leaving it blank falls back to browser auto-detection. The profile page's "today" and the chart end date follow the viewer's time zone — the viewer's setting when present, otherwise the browser-detected one. Fill in an IANA name (such as `Asia/Shanghai`) or `UTC`; offsets like `+08:00` and abbreviations like `EST` are rejected.
+- Cursor CLI account sign-in discovery (#23; upstream v27.2.1): without the desktop IDE, the CLI can use a Cursor Agent CLI login — the CLI's Keychain item on macOS or its `auth.json` on macOS, Linux, and Windows — selected explicitly with `tokens cursor login --source cli`; API-key-only CLI sessions cannot read dashboard usage.
+
+### Fixed
+
+- Cursor synchronization is incremental (#22; upstream v27.2.1): the CLI fetches only the recent delta from a watermark that accounts for the correction window and clock skew, merges by event identity without losing history, leaves the cache untouched on an empty delta, and still performs a full sync on a cold cache.
+- The leaderboard ships the full board in one payload and locates the viewer client-side (#22; upstream v27.2.1). It no longer streams, so a failure surfaces as a 500 instead of a broken stream.
+- GitHub rate limiting no longer wipes profile social links: snapshots are written only when both GitHub requests complete (#23; upstream v27.2.1).
+- Parser fixes from upstream v27.2.1 (#23): Devin sessions deduplicate by request ID and Codex `.jsonl.zst` logs are scanned; Pi and DSH undercounting, Codex compaction accounting, Cursor cross-event snapshot duplication, and negative DSH values are corrected.
+- Windows autosubmit fixes from upstream v27.2.1 (#23), including the windowless `tokensw` launcher packaged with the CLI.
+- Turning a profile private now purges the leaderboard caches immediately (#23): the shared data cache and the en, zh-CN, and ja leaderboard pages are invalidated at once, with no staleness window.
+- A database hiccup on a profile page no longer turns into a cached 404: 5xx responses propagate instead of being cached (#23; upstream v27.2.1).
+- Empty-state icons on the settings page are centered (#22; upstream v27.2.1).
+
+### Changed
+
+- **This release carries one database migration, `0028_add_user_timezone` (a nullable `timezone` column on `users`); run it before the new code serves traffic.** Vercel Production builds run `db:migrate` automatically before compiling (`web/vercel.json`, only when `VERCEL_ENV` is `production`; the `main` branch does not auto-deploy). Self-hosted installs must run `DATABASE_URL=… bun run db:migrate` by hand before building and starting the new web code (`docs/deploy/self-host-production.md`); Docker upgrades run `docker compose exec web bun run --cwd web db:migrate` inside the web container (`docs/deploy/docker/prod/README.md`). On an unmigrated database, session parsing keeps working (the time zone degrades to auto-detection), but password sign-in, device polling, team-related queries, and the settings time zone endpoints (503) fail — migrate first.
+- MCP server names are no longer scanned or submitted by default (#22, #23; upstream v27.2.1). Opt in with `tokens mcp-names`, the `shareMcpServerNames` setting in `settings.json`, or `submit --include-mcp`; `submit --dry-run --json` prints the exact payload. The server stores names only when the payload carries `mcpServersOptIn: true`, drops names sent by older CLIs, and clears the stored list on the next local submission; the privacy and docs pages describe this default.
+- Revoking a read token on the settings page now goes through a confirmation dialog (#22): the dialog spells out that the token stops working at once — badges and embeds reading the private profile with it show "not found" until a new token is issued.
+- This repository's manifest versions (Cargo workspace and `packages/cli*`) and pinned script refs advanced to `1.0.5` and `v1.0.5`, respectively, for this repository's `v1.0.5` tag. This repository publishes tags only, with no GitHub Releases; these version and ref changes do not change the upstream binary version installed by `/install.sh`.
+
 ## [1.0.4] - 2026-10-25
 
 ### Added

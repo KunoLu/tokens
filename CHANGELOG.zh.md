@@ -6,6 +6,35 @@
 
 ## [Unreleased]
 
+## [1.0.5] - 2026-11-14
+
+### 新增
+
+- 同步上游 v27.2.1 多语言界面（#20）：web 与 CLI 提供 English、中文、日本语词条，含语言切换器与带语言前缀的 URL。旧 `tt_locale=zh` cookie 映射为 `zh-CN`，旧不带前缀的中文 URL 会重定向而不是 404。CLI 支持 `--lang` 与 `TOKENS_LANG`。
+- 榜单新增「昨天」期间；资料页的「今天」卡片固定为今天，可切换到昨天——是卡片上的切换，不是期间选项（#22；上游 v27.2.1）。
+- Open Graph 卡片重做（#23；上游 v27.2.1）：站点卡、页面卡、资料卡按三种语言渲染，资料卡展示 token 总量、花费、排名、活跃天数、常用客户端与一年活跃条。
+- Cursor 桌面端登录与 Cursor 统一计费（#23；上游 v27.2.1）。
+- 账号时区设置（#21，#24）：设置页新增时区选项，留空按浏览器自动检测；个人页的「今天」与图表结束日按看的人的时区归日——看的人已设置时区用设置值，否则用其浏览器检测值。填 IANA 名称（如 `Asia/Shanghai`）或 `UTC`；`+08:00` 这类偏移、`EST` 这类缩写会被拒绝。
+- 发现 Cursor CLI 账号登录（#23；上游 v27.2.1）：没有桌面端 IDE 也能用 Cursor Agent CLI 的账号登录——macOS 读该 CLI 的 Keychain 项，macOS／Linux／Windows 读其 `auth.json`——可用 `tokens cursor login --source cli` 显式选择；只有 API key 的 CLI 会话不能读取仪表盘用量。
+
+### 修复
+
+- Cursor 同步改为增量（#22；上游 v27.2.1）：CLI 从按修正窗与钟差回退的水位线只拉取近期增量，按事件标识合并且不丢历史，空增量不动缓存，冷缓存仍全量同步。
+- 榜单改为整榜一次下发、在客户端定位当前用户（#22；上游 v27.2.1）；不再流式渲染，失败直接表现为 500，不再是断开的流。
+- GitHub 限流不再清空资料页社交链接：只有两路 GitHub 请求都完整时才写入快照（#23；上游 v27.2.1）。
+- 同步上游 v27.2.1 解析器修复（#23）：Devin 会话按 request ID 去重，扫描 Codex `.jsonl.zst` 日志；修正 Pi 与 DSH 少计、Codex compaction 计数、Cursor 跨事件快照重复计数与 DSH 负值。
+- 同步上游 v27.2.1 的 Windows autosubmit 修复（#23），含随 CLI 打包的无窗启动器 `tokensw`。
+- 转为私密时立即清除排行榜缓存（#23）：共享数据缓存与 en、zh-CN、ja 三个榜单地址同时失效，不再滞留。
+- 资料页数据库抖动不再被折叠成缓存的 404：5xx 直接抛出、不入缓存（#23；上游 v27.2.1）。
+- 设置页空状态图标居中（#22；上游 v27.2.1）。
+
+### 变更
+
+- **本版本要执行一次数据库迁移 `0028_add_user_timezone`（`users` 表新增可为空的 `timezone` 列），必须先迁移再上线。** Vercel Production 构建会先自动执行 `db:migrate` 再编译（`web/vercel.json`：仅 `VERCEL_ENV` 为 `production` 时执行，且 `main` 分支不自动部署）。自部署要在升级前手动执行 `DATABASE_URL=… bun run db:migrate`，再构建上线新 web 代码（`docs/deploy/self-host-production.md`）；Docker 升级按 `docs/deploy/docker/prod/README.md` 的发版流程在 web 容器内执行 `docker compose exec web bun run --cwd web db:migrate`。未迁移的库上会话解析不报错（时区降级为自动检测），但密码登录、设备轮询、团队相关查询与设置接口的时区读写（503）会出错，所以必须先迁移再上线。
+- MCP 服务器名称默认不再扫描与上报（#22，#23；上游 v27.2.1）。用 `tokens mcp-names`、`settings.json` 的 `shareMcpServerNames` 或 `submit --include-mcp` 开启；`submit --dry-run --json` 打印与真实提交同源的载荷。服务端只存载荷带 `mcpServersOptIn: true` 的名称，旧 CLI 上报的名称被丢弃并在下一次本地提交清空已存列表；隐私页与文档页已说明该默认行为。
+- 设置页撤销读令牌前新增确认弹窗（#22）：弹窗写明令牌立即失效——用它读取私密主页的徽章或嵌入卡片会显示「找不到」，直到换用新令牌。
+- 本仓清单版本（Cargo workspace 与 `packages/cli*`）和钉版脚本 ref 分别推进到 `1.0.5` 与 `v1.0.5`，对应本仓 `v1.0.5` tag。本仓只发布 tag，没有 GitHub Release；这些版本与 ref 改动不改变 `/install.sh` 安装的上游二进制版本。
+
 ## [1.0.4] - 2026-10-25
 
 ### 新增
