@@ -11,6 +11,7 @@
 - [20261025-pr17-description-record](20261025-pr17-description-record/task.md)
 - [20261025-v104-e-cloud-sessions](20261025-v104-e-cloud-sessions/task.md)
 - [20261025-v104-f-release](20261025-v104-f-release/task.md)
+- [20261114-v105-changelog](20261114-v105-changelog/task.md)
 - [20261114-v2721-pr-a-i18n](20261114-v2721-pr-a-i18n/task.md)
 - [20261114-v2721-pr-b-mixed-fixes](20261114-v2721-pr-b-mixed-fixes/task.md)
 - [20261114-v2721-pr-c-remaining](20261114-v2721-pr-c-remaining/task.md)
