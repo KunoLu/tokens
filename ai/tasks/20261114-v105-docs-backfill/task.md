@@ -114,7 +114,7 @@ BDD: skipped（无行为变化；本仓 no-.feature 例外）。ponytail-review�
 
 ## 下一步
 
-本任务验收全部在会话内完成：回填两份任务记录、跑检查、转 checking 与 done。提交、推送、开 PR 与改 PR 正文由编排方 OMP 在 omp 之外做，Reviewy 评审，均不在本会话授权内。本会话不提交、不推送、不访问生产。
+本任务验收全部在会话内完成：回填两份任务记录、跑检查、转 checking 与 done。提交、推送、开 PR 与改 PR 正文由 OMP 在 omp 会话之外做，Reviewy 评审，均不在本会话授权内。本会话不提交、不推送、不访问生产。
 
 ## 状态事件
 
