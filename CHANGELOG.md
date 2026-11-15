@@ -15,9 +15,9 @@ Tags such as `v27.x` belong to upstream `missuo/tokens` and are not releases of 
 - Buttons, links, focus rings, and the primary chart series moved from blue to the brand purple (#27): the theme variables now resolve to #7C3AED in the light theme and #A78BFA in the dark theme, and the hover surface tint is violet in both.
 - The top page-loading progress bar is purple instead of blue (#27).
 - Open Graph share cards use the brand purple (#27): the accent color and the one-year activity heat scale form a purple ramp, the avatar fallback background is light violet, and the background glow is purple.
-- Embeddable profile cards use purple brand accents in both light and dark themes — the brand color, the token gradient end, and the glow — and the isometric 3D embed's accent is purple as well (#27).
+- Embeddable profile cards: the brand color and the token gradient end are purple in both light and dark themes, and the light theme's glow is purple; the isometric 3D embed's accent is purple as well (#27).
 - The profile badge colors its tokens metric purple instead of blue (#27).
-- The app icons are purple (#27): the iPhone icons (180 and 1024) are full-bleed opaque purple squares with the same layout as the previous blue icons, and the Android/PWA icons (192 and 512) are re-exported from the site's purple favicon — a white T on a purple tile, transparent outside the rounded corners.
+- The app icons are purple (#27): the iPhone home-screen icon (180) and its 1024 source image are full-bleed opaque purple squares with the same layout as the previous blue icons, and the Android/PWA icons (192 and 512) are re-exported from the site's purple favicon — a white T on a purple tile, transparent outside the rounded corners.
 - This repository's manifest versions (Cargo workspace and `packages/cli*`) and pinned script refs advanced to `1.0.6` and `v1.0.6`, respectively, for this repository's `v1.0.6` tag. This repository publishes tags only, with no GitHub Releases; these version and ref changes do not change the upstream binary version installed by `/install.sh`.
 
 ## [1.0.5] - 2026-11-14
