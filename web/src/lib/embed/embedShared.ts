@@ -78,9 +78,9 @@ export const THEMES: Record<EmbedTheme, ThemePalette> = {
     title: "#FAFAFA",
     text: "#F4F7FB",
     muted: "#A1A1AA",
-    brand: "#2F8FFF",
-    tokenEnd: "#A5D6FF",
-    accentTokens: "#2F8FFF",
+    brand: "#A78BFA",
+    tokenEnd: "#C4B5FD",
+    accentTokens: "#A78BFA",
     cost: "#3FB950",
     rankGold: "#E3B341",
     rankSilver: "#A8B3C5",
@@ -99,14 +99,14 @@ export const THEMES: Record<EmbedTheme, ThemePalette> = {
     bgStart: "#FFFFFF",
     bgEnd: "#F6F8FA",
     border: "rgba(31,35,40,0.18)",
-    glowColor: "#0969DA",
+    glowColor: "#7C3AED",
     glowOpacity: 0.04,
     title: "#1F2328",
     text: "#1F2328",
     muted: "#57606A",
-    brand: "#0969DA",
-    tokenEnd: "#54AEFF",
-    accentTokens: "#0969DA",
+    brand: "#7C3AED",
+    tokenEnd: "#A78BFA",
+    accentTokens: "#7C3AED",
     cost: "#1A7F37",
     rankGold: "#9A6700",
     rankSilver: "#656D76",
@@ -632,7 +632,7 @@ export function cardHeader(options: CardHeaderOptions): string {
       : "",
     // Drawn in the theme accent rather than the muted grey of the wordmark it
     // leads: the mark is the one element on the card that should read as the
-    // product, and #2F8FFF on the dark surface / #0969DA on the light one both
+    // product, and #A78BFA on the dark surface / #7C3AED on the light one both
     // clear contrast against their own background, which one fixed colour
     // cannot do.
     //

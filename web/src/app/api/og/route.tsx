@@ -28,8 +28,8 @@ const BORDER = "#E8E7E3";
 const INK = "#1C1D21";
 const MUTED = "#6E727B";
 const SUBTLE = "#9A9DA4";
-const BRAND = "#4f8ff0";
-const HEAT = ["#EEF0F3", "#D3E2FB", "#9FC0F5", "#5E95EA", "#4f8ff0"];
+const BRAND = "#7C3AED";
+const HEAT = ["#EEF0F3", "#DFD9FD", "#BAA9FB", "#9978F5", "#7C3AED"];
 
 const SANS = "Geist";
 const MONO = "JetBrains Mono";
@@ -111,7 +111,7 @@ function clientLogoDataUri(client: string): string | null {
   return `data:image/svg+xml;base64,${btoa(unescape(encodeURIComponent(svg)))}`;
 }
 
-/** The Tokens mark as it appears in the nav: white strokes on a blue tile. */
+/** The Tokens mark as it appears in the nav: white strokes on a purple tile. */
 function Mark({ size }: { size: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 64 64" fill="none">
@@ -194,7 +194,7 @@ function Background() {
         height: 1000,
         display: "flex",
         borderRadius: 999,
-        background: "radial-gradient(circle, rgba(79,143,240,0.13) 0%, rgba(79,143,240,0) 62%)",
+        background: "radial-gradient(circle, rgba(124,58,237,0.13) 0%, rgba(124,58,237,0) 62%)",
       }}
     />
   );
@@ -357,7 +357,7 @@ function ProfileCard({
                 width: 112,
                 height: 112,
                 borderRadius: 999,
-                background: "#E9F0FC",
+                background: "#EDE9FE",
                 color: BRAND,
                 display: "flex",
                 alignItems: "center",
