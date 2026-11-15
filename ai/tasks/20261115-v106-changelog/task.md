@@ -7,7 +7,7 @@ mode_note: '依据：用户 2026-11-14 23:23 群内确认（修品牌色为站�
 status: "done"
 branch: docs/v1.0.6-changelog
 created_at: '2026-11-15T10:21:02+08:00'
-updated_at: '2026-11-15T13:24:17+08:00'
+updated_at: '2026-11-15T13:58:08+08:00'
 completed_at: '2026-11-15T11:42:40+08:00'
 ---
 # v1.0.6 发布准备 — 双语 CHANGELOG 与版本推进
@@ -176,7 +176,7 @@ Optional checks, accountable owner acceptance, and residual risk: web build／ts
 - main CI：run 43678012991（push，head 109140032c4755504b59d547af051a0b8f801bd6）。第 1 次尝试 12:43:38–12:49:20 +08:00 conclusion failure，第 2 次尝试 12:49:56–12:55:33 +08:00 conclusion success（gh api attempts/1、attempts/2 实测）。第 1 次失败原因：Windows 计时测试 implicit_sync_deadline_bounds_stalled_metadata_and_reports_partial_cache 未过、重跑通过——来源为 Lord 2026-11-15 13:09 报告，本会话只核对结论与时间（tag message 载同一事实，git cat-file 实测）。
 - tag v1.0.6：tag 对象 e8ef3b24ac8fcefbc3930c804a4eb9f7a0839eb6，指向合并提交 109140032c4755504b59d547af051a0b8f801bd6，tagger 时间 2026-11-15 13:04:48 +08:00（git ls-remote 与 git cat-file -p v1.0.6 实测）；只打 tag，无 GitHub Release。
 - Production 部署：dpl_2ZPdsfCNxtQvDAP6Jazza2NqYuF2 READY，别名 tokens.camp，线上抽查通过——来源为 Lord 2026-11-15 13:09 报告，本会话不访问生产、不独立核对。
-- Actions 停跑与恢复：本仓是 fork，GitHub 自动停用了 fork 上的 Actions，用户在页面上重新启用（来源 Lord 2026-11-15 12:43 群内报告）；恢复后四项检查在 1b2d15c 上 2026-11-15 12:34:17 +08:00 起跑、12:42:35 +08:00 全部通过。
+- Actions 停跑与恢复：本仓是 fork，GitHub 停用了 fork 上的 workflows；用户在 GitHub 页面重新启用 Actions（在 2026-11-15 12:34:17 +08:00 这次运行开始之前）；随后四项检查在 1b2d15c 上 2026-11-15 12:34:17 +08:00 起跑、12:42:35 +08:00 全部通过后才合入。
 - 第六至九轮说明（补记，只写事实）：
   - r6：回复 7／工具调用 11／工具报错 0（2026-11-15T11:28:47+08:00–2026-11-15T11:32:45+08:00），改动未提交、作废。
   - r7：计数 11／12／0 为电脑重启前读到，现存会话文件只到 11:33:12，无法核对；改动未提交、作废。

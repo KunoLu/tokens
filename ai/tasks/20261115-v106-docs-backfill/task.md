@@ -9,8 +9,8 @@ mode_note: '用户 2026-11-14 23:28 群内确认（全自动模式延长到 v1.0
 status: "done"
 branch: docs/v1.0.6-final-backfill
 created_at: '2026-11-15T13:22:32+08:00'
-updated_at: "2026-11-15T13:43:01+08:00"
-completed_at: "2026-11-15T13:43:01+08:00"
+updated_at: "2026-11-15T14:02:01+08:00"
+completed_at: "2026-11-15T14:02:01+08:00"
 ---
 # v1.0.6 文档回填 PR — 发布记录与 #26、#28 任务记录补记
 
@@ -29,6 +29,7 @@ v1.0.6 已按 Tokens 全自动顺序发布（#28 合入 main、tag v1.0.6、正�
 - 用户 2026-11-14 23:28 群内确认（全自动模式延长到 v1.0.6 上线和最终文档回填完成），Lord 记录。
 - Lord 2026-11-15 13:09 定（v1.0.6 上线后开本 PR：cherry-pick e7681b3，补 v1.0.6 发布与部署记录及 #28 丢失轮次说明）。
 - Lord 2026-11-15 13:33 定（第二轮：在 #29 内清掉 #26 记录第 117 行遗留禁用词，不另开 PR）。
+- Lord 2026-11-15 13:46 定（第四轮：在 #29 内改 Reviewy 两条阻断项与两条可选项，#28 记录第 179 行按事实改写、不用决定记录格式）；依据 Reviewy 2026-11-15 13:40 对 d3d66d5 判 NOT CLEAN。
 - 本会话明确选择 strict。只改 ai/tasks 下的任务记录：可动文件为 ai/tasks/20261115-v106-changelog/task.md、ai/tasks/20261114-v105-docs-backfill/task.md、ai/tasks/index.md 与本文件；不改代码、CHANGELOG、README 与版本号；不提交、不推送、不打 tag、不开／改 PR、不访问生产、不读取或打印密钥。
 - 起点：main 109140032c4755504b59d547af051a0b8f801bd6（#28 合并提交，tag v1.0.6 指向它）；分支 docs/v1.0.6-final-backfill 已有提交 31be41e（e7681b3 的原样 cherry-pick，#26 第五轮记录更正，#26 合入后才产生、没进 main），不动它、不重做；开工前 git status 实测干净。
 - 事实来源边界：main CI 第 1 次失败原因（Windows 计时测试 implicit_sync_deadline_bounds_stalled_metadata_and_reports_partial_cache 未过、重跑通过）与 Production 部署 dpl_2ZPdsfCNxtQvDAP6Jazza2NqYuF2 READY、别名 tokens.camp、线上抽查通过来自 Lord 2026-11-15 13:09 报告；Actions 停跑与页面重新启用来自 Lord 2026-11-15 12:43 群内报告。本会话不访问生产、不独立核对部署，对 CI 只核对结论与时间。
@@ -58,7 +59,7 @@ BDD：skipped（无行为变化；本仓 no-.feature 例外）。ponytail-review
 
 ## 进度
 
-口径：起止按会话记录首末（秒级，+08:00）；本会话首条消息时间以会话文件为准，进度条目用实测时钟读数锚定。
+口径：本会话首条消息时间以会话文件为准，进度条目用实测时钟读数锚定。
 
 - 2026-11-15T13:11:59+08:00–2026-11-15T13:18:00+08:00 主 agent：核对与只读验证，全部实测。13:11:59 为本会话首个实测时钟读数：分支 docs/v1.0.6-final-backfill，HEAD 31be41e（e7681b3 的原样 cherry-pick，不动它），其下为 1091400（#28 合并提交）、c166811（#27 合并提交），git status 实测干净。随后完成：
   1. 1.0.6 日期与 ref：CHANGELOG.md:10 与 CHANGELOG.zh.md:9 均为「## [1.0.6] - 2026-11-15」；README.md:106 与 README_zh.md:82 钉版脚本 URL 中 ref 均为 v1.0.6；两份 README 无 1.0.6 日期行。结论：已核对，无需改。
@@ -74,6 +75,7 @@ BDD：skipped（无行为变化；本仓 no-.feature 例外）。ponytail-review
   4. #26 记录回填：模型表补 r4、r5 两行（格式照该表已有行）；进度节补一句说明（按会话记录还原）；其它内容不动。
   5. 本条写入后跑收尾检查、转 checking 与 done；状态事件落盘后全量复扫一次，结果记入证据节末行。
 - 第二轮：依据 Lord 2026-11-15 13:33 定，本任务重开；改动为 #26 记录第 117 行一处措辞替换——删去该处遗留禁用词，改为「由 OMP 在 omp 会话之外做」，该行其它字不动，#26 记录其它内容不动；本文件同步补授权、进度、证据与状态事件。本轮起止与计数只写 PR 正文，不在本文件记录。
+- 第四轮：依据 Lord 2026-11-15 13:46 定（依据 Reviewy 2026-11-15 13:40 对 d3d66d5 判 NOT CLEAN），本任务重开；改动为——本文件证据节两处时间表述改为「2026-11-15 13:29:33 +08:00 实跑」（原表述含本轮禁用词表一词，不复述）；进度口径句删去前半句，只保留进度条目用实测时钟读数锚定的说法；模型表补 r1、r2、r3 三行（格式照 #26 记录模型表已有行）；统计口径工具调用改为「assistant 消息中 toolCall 项条数」、末句改为「第四轮（本轮）起止与计数只写在 PR 正文」；本文件授权、证据与状态事件同步；#28 记录第 179 行按事实改写为普通陈述（fork 仓 workflows 被 GitHub 停用，用户在 GitHub 页面重新启用 Actions，随后四项检查在 1b2d15c 上 2026-11-15 12:34:17 +08:00 起跑、12:42:35 +08:00 全部通过后才合入），该文件仅此一行与 frontmatter updated_at 改动。本轮起止与计数只写 PR 正文，不在本文件记录。
 
 ## 证据
 
@@ -87,12 +89,13 @@ BDD：skipped（无行为变化；本仓 no-.feature 例外）。ponytail-review
 - 起点与分支：`git log --oneline -3` 为「31be41e docs(tasks): second-precision timestamps and r5 wording fixes」「1091400 docs(changelog): add 1.0.6 (release prep) (#28)」「c166811 fix(web): unify brand color to purple #7C3AED (#27)」；`git branch --show-current` 为 docs/v1.0.6-final-backfill；开工前 `git status --porcelain` 为空。
 - 持久化：TaskStore 助手（sbtd-workflow-onboard 安装）与其声明依赖在位；.gitignore 第 153 行根锚定 /.sbtd（git check-ignore 实测 active-task.json 命中该规则），active-task.json 未跟踪；ai/tasks 已跟踪（git ls-files 实测）。
 - 回填编辑：#28、#26 两份记录的改动由 edit 工具逐处应用并即时回显行号确认；index.md 登记一行（编辑工具模糊匹配首次重复一行，当场去重，终态一行，见第 22 行）。
-- frontmatter python 解析（2026-11-15 13:29 前后实跑）：三个任务文件经 python3 yaml.safe_load 解析 frontmatter 均 OK——schema_version／id／workflow_mode／mode_source／mode_note／status／branch／created_at／updated_at／completed_at 齐备，时间戳经 fromisoformat 解析通过；解析时本文件 status in-progress（checking／done 落盘后复解析结果见证据节末行），另两份均为 done。
-- 禁用词与路径扫描（2026-11-15 13:29 前后实跑；词表与三类本机路径前缀以排定消息为准，不在本文件复述，以免自指命中）：git diff -U0 新增行 28 行零命中；本文件全文零命中；两个改动文件全文扫描有一处既有命中——ai/tasks/20261114-v105-docs-backfill/task.md 第 117 行（该文件第二轮写入的既有内容）含本轮禁用词表一词，第一轮授权为「不改该文件其它内容」，当时保持原行不动、仅在此报告；该处已在第二轮处理完毕（#26 记录第 117 行一处措辞替换），见本轮检查条。
+- frontmatter python 解析（2026-11-15 13:29:33 +08:00 实跑）：三个任务文件经 python3 yaml.safe_load 解析 frontmatter 均 OK——schema_version／id／workflow_mode／mode_source／mode_note／status／branch／created_at／updated_at／completed_at 齐备，时间戳经 fromisoformat 解析通过；解析时本文件 status in-progress（checking／done 落盘后复解析结果见证据节末行），另两份均为 done。
+- 禁用词与路径扫描（2026-11-15 13:29:33 +08:00 实跑；词表与三类本机路径前缀以排定消息为准，不在本文件复述，以免自指命中）：git diff -U0 新增行 28 行零命中；本文件全文零命中；两个改动文件全文扫描有一处既有命中——ai/tasks/20261114-v105-docs-backfill/task.md 第 117 行（该文件第二轮写入的既有内容）含本轮禁用词表一词，第一轮授权为「不改该文件其它内容」，当时保持原行不动、仅在此报告；该处已在第二轮处理完毕（#26 记录第 117 行一处措辞替换），见本轮检查条。
 - CHANGELOG 与 README 零改动：`git diff --stat -- CHANGELOG.md CHANGELOG.zh.md README.md README_zh.md` 输出为空（exit 0）。
 - git status --porcelain（2026-11-15 13:30:13 +08:00 实跑）：` M ai/tasks/20261114-v105-docs-backfill/task.md`、` M ai/tasks/20261115-v106-changelog/task.md`、` M ai/tasks/index.md`、`?? ai/tasks/20261115-v106-docs-backfill/`。git diff --stat：3 files changed, 28 insertions(+), 2 deletions(-)（#26 记录 +3、#28 记录 +26/-2、index.md +1）。
 - 状态事件落盘后终态复扫（2026-11-15 13:31 实跑，checking／done 事件落盘与 frontmatter 时间到秒规范化之后）：git diff -U0 新增行零命中；本文件全文（含三条状态事件行）零命中；三个任务文件 frontmatter python 复解析通过，status 分别为 done／done／done，completed_at 分别为 2026-11-15T13:31:03+08:00／2026-11-15T11:42:40+08:00／2026-11-15T00:12:18+08:00；CHANGELOG 与 README 各两份 diff 仍为空；git status 终态为三个已跟踪文件修改＋本任务目录未跟踪；git diff --stat 终态为 3 files changed, 28 insertions(+), 2 deletions(-)。
 - 第二轮检查（2026-11-15 13:41:30 +08:00 实跑，覆盖本条写入前的全部改动；本条自身与后续状态事件行的复扫记入 checking 事件证据）：两份改动文件 frontmatter 经 python3 yaml.safe_load 解析通过，schema_version／id／workflow_mode／mode_source／mode_note／status／branch／created_at／updated_at／completed_at 齐备，时间戳 fromisoformat 解析通过（解析时本文件为重开后的 in-progress，#26 记录为 done 不变）；git diff -U0 新增行 9 行，对本轮排定消息给出的禁用词表与三类本机路径前缀扫描零命中（词表与前缀不在本文件复述，以免自指命中）；两份文件全文对该遗留禁用词扫描均零命中；git diff --stat 仅本文件与 #26 记录两个文件。
+- 第四轮检查（2026-11-15 14:00:52 +08:00 实跑，覆盖本条写入前的全部改动；本条自身与后续状态事件行的复扫记入 checking 事件证据）：两份改动文件 frontmatter 经 python3 yaml.safe_load 解析通过，schema_version／id／workflow_mode／mode_source／mode_note／status／branch／created_at／updated_at／completed_at 齐备，时间戳 fromisoformat 解析通过（解析时本文件为重开后的 in-progress，#28 记录为 done 不变）；git diff -U0 新增行 16 行，对本任务排定消息给出的禁用词表与三类本机路径前缀扫描零命中（词表与前缀不在本文件复述，以免自指命中）；本 PR 新增行（1091400 至工作区，170 行）扫描零命中；本文件全文与 #28 记录全文扫描均零命中；git diff --stat 仅本文件与 #28 记录两个文件（16 insertions(+), 9 deletions(-)）。
 
 ## 模型与调用
 
@@ -100,8 +103,11 @@ BDD：skipped（无行为变化；本仓 no-.feature 例外）。ponytail-review
 
 | 角色 | 模型 | 密钥来源 | 调用次数 |
 |---|---|---|---|
+| 主 agent（r1） | k3:max | 环境变量 KIMI_API_KEY | 回复 38／工具调用 48／工具报错 2（2026-11-15 13:11:37–13:32:26 +08:00，按会话记录还原；2 条报错为 13:20:44、13:20:48 两次 write 缺少内容参数，随后改正） |
+| 主 agent（r2） | k3:max | 环境变量 KIMI_API_KEY | 回复 23／工具调用 30／工具报错 2（2026-11-15 13:34:25–13:44:09 +08:00，按会话记录还原；2 条报错为 13:40:24、13:43:28 两次 bash，随后改正） |
+| 主 agent（r3） | k3:max | 环境变量 KIMI_API_KEY | 回复 4／工具调用 3／工具报错 0（2026-11-15 13:44:23–13:46:14 +08:00，按会话记录还原；只把第二轮写错的决定时间 13:35 改为 13:33） |
 
-统计口径：回复 = 该轮会话文件 assistant 消息条数；工具调用 = tool_execution_start 条数；工具报错 = 会话文件中标记为报错的工具结果条数（含命令非零退出）。本轮（第一轮，唯一轮）的起止与计数只写在 PR 正文，本表不加行。
+统计口径：回复 = 该轮会话文件 assistant 消息条数；工具调用 = assistant 消息中 toolCall 项条数；工具报错 = 会话文件中标记为报错的工具结果条数（含命令非零退出）。第四轮（本轮）起止与计数只写在 PR 正文。
 
 未启动子代理；密钥不写入本文件与任何产物。
 
@@ -120,3 +126,7 @@ BDD：skipped（无行为变化；本仓 no-.feature 例外）。ponytail-review
 | 2026-11-15T13:40:42+08:00 | planned | in-progress | 进入第二轮：仅改 #26 记录第 117 行一处措辞（删去遗留禁用词，改为「由 OMP 在 omp 会话之外做」）与本文件记录，其它不动 | 分支 docs/v1.0.6-final-backfill 工作区干净；Book Gate 本轮无新触发，各门禁状态不变 |
 | 2026-11-15T13:42:56+08:00 | in-progress | checking | 第二轮改动与检查完成：#26 记录第 117 行一处措辞替换落地（该行其它字与该文件其它行不动），本文件授权、进度、证据同步；进入核对 | 进度节第二轮条目与证据节第二轮检查条；2026-11-15 13:42:39 +08:00 复跑：git diff -U0 全部新增行（含检查条）禁用词与本机路径前缀扫描零命中，两份文件全文对该遗留禁用词零命中 |
 | 2026-11-15T13:43:01+08:00 | checking | done | 第二轮验收：①#26 记录第 117 行一处措辞替换落地，删去该处遗留禁用词、改为「由 OMP 在 omp 会话之外做」，该行其它字与该文件其它行（含 frontmatter）不动；②本文件授权节补 Lord 2026-11-15 13:33 依据、进度节末尾补第二轮说明（起止与计数只写 PR 正文）、证据节补本轮检查条并将第一轮保留未改表述就地改为已在第二轮处理；③检查全部实跑通过，两份文件全文对该遗留禁用词零命中；④不提交、不推送、不开／改 PR、不访问生产，密钥未写入任何文件 | 证据节第二轮检查条与 13:42:39 复扫；git diff --stat 仅本文件与 #26 记录两个文件；frontmatter 复解析 status 为 done、completed_at 与本条 at 一致（到秒规范化在落盘后即做） |
+| 2026-11-15T13:56:51+08:00 | done | planned | Lord 2026-11-15 13:46 定：第四轮在 #29 内改 Reviewy 两条阻断项与两条可选项（依据 Reviewy 2026-11-15 13:40 对 d3d66d5 判 NOT CLEAN），重开本任务处理 | 原完成事件 2026-11-15T13:43:01+08:00 与对应 completed_at 保留于状态事件表；分支 docs/v1.0.6-final-backfill，HEAD 890615fba07894d5f200e6f8867923985357b456，git status 实测干净 |
+| 2026-11-15T13:56:56+08:00 | planned | in-progress | 进入第四轮：本文件证据节两处时间表述改到秒（原表述含本轮禁用词表一词）、进度口径句删前半句、模型表补 r1–r3 三行、统计口径工具调用改 toolCall 口径与第四轮注记、授权／进度／证据／状态事件同步；#28 记录第 179 行按事实改写为普通陈述，frontmatter updated_at 同步；不提交、不推送、不开／改 PR | 分支 docs/v1.0.6-final-backfill 工作区干净，HEAD 890615fba07894d5f200e6f8867923985357b456；Book Gate 本轮无新触发，各门禁状态不变 |
+| 2026-11-15T14:01:56+08:00 | in-progress | checking | 第四轮改动与检查完成：本文件两处时间表述改到秒、进度口径句删前半句、模型表补 r1–r3 三行、统计口径改 toolCall 口径与第四轮注记、授权／进度／证据同步；#28 记录第 179 行按事实改写为普通陈述、updated_at 同步；进入核对 | 进度节第四轮条目与证据节第四轮检查条；2026-11-15 14:01:29 +08:00 复跑：git diff -U0 全部新增行 17 行（含检查条）禁用词与本机路径前缀扫描零命中，本 PR 新增行零命中，本文件与 #28 记录全文扫描零命中，git diff --stat 仅两个文件（17 insertions(+), 9 deletions(-)） |
+| 2026-11-15T14:02:01+08:00 | checking | done | 第四轮验收：①本文件第 90、91 行两处时间表述改为「2026-11-15 13:29:33 +08:00 实跑」，全文对本轮禁用词表零命中；②进度口径句删去前半句，保留进度条目用实测时钟读数锚定；③模型表补 r1／r2／r3 三行，格式照 #26 记录模型表已有行；④统计口径工具调用改为「assistant 消息中 toolCall 项条数」，末句改为「第四轮（本轮）起止与计数只写在 PR 正文」；⑤授权节补 Lord 2026-11-15 13:46 依据（Reviewy 2026-11-15 13:40 对 d3d66d5 判 NOT CLEAN），进度节补第四轮说明（起止与计数只写 PR 正文），证据节补本轮检查条；⑥#28 记录第 179 行按事实改写为普通陈述（不写具体启用时刻），该文件仅此一行与 frontmatter updated_at 改动；⑦状态事件表只新增 done→planned、planned→in-progress、in-progress→checking、checking→done 四条，旧行未改；⑧不提交、不推送、不开／改 PR、不访问生产，密钥未写入任何文件 | 证据节第四轮检查条与 2026-11-15 14:01:29 +08:00 复扫；git diff --stat 仅本文件与 #28 记录两个文件；frontmatter 复解析 status 为 done、completed_at 与本条 at 一致（到秒规范化在落盘后即做） |
