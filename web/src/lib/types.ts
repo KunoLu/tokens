@@ -28,6 +28,7 @@ export const SUPPORTED_CLIENT_TYPES = [
   "kiro",
   "zed",
   "trae",
+  "trae-cli",
   "warp",
   "cline",
   "synthetic",
@@ -59,6 +60,8 @@ export const SUPPORTED_CLIENT_TYPES = [
   "unsloth",
   "hindsight",
   "craft-agent",
+  "qoder",
+  "kwwk",
 ] as const;
 
 export type CcMirrorClientType = `cc-mirror/${string}`;

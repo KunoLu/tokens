@@ -48,6 +48,7 @@ export const SOURCE_DISPLAY_NAMES: Record<ClientType, string> = {
   "antigravity-cli": "Antigravity CLI",
   zed: "Zed Agent",
   trae: "Trae",
+  "trae-cli": "TRAE CLI",
   warp: "Warp",
   cline: "Cline",
   synthetic: "Synthetic",
@@ -78,6 +79,8 @@ export const SOURCE_DISPLAY_NAMES: Record<ClientType, string> = {
   unsloth: "Unsloth",
   hindsight: "Hindsight",
   "craft-agent": "Craft Agent",
+  qoder: "Qoder",
+  kwwk: "kwwk",
 };
 
 // Client logos, served from this deployment rather than hotlinked.
@@ -117,6 +120,7 @@ export const SOURCE_LOGOS: Record<ClientType, string> = {
   "antigravity-cli": `${GITHUB_CDN_BASE}/client-antigravity.png`,
   zed: `${GITHUB_CDN_BASE}/client-zed.webp`,
   trae: `${GITHUB_CDN_BASE}/client-trae.png`,
+  "trae-cli": `${GITHUB_CDN_BASE}/client-trae.png`,
   warp: `${GITHUB_CDN_BASE}/client-warp.png`,
   cline: `${GITHUB_CDN_BASE}/client-cline.png`,
   synthetic: `${GITHUB_CDN_BASE}/client-synthetic.png`,
@@ -152,6 +156,8 @@ export const SOURCE_LOGOS: Record<ClientType, string> = {
   unsloth: `${GITHUB_CDN_BASE}/client-unsloth.png`,
   hindsight: `${GITHUB_CDN_BASE}/client-hindsight.png`,
   "craft-agent": `${GITHUB_CDN_BASE}/client-craft-agent.png`,
+  qoder: `${GITHUB_CDN_BASE}/client-generic.svg`,
+  kwwk: `${GITHUB_CDN_BASE}/client-kwwk.png`,
 };
 
 export const SOURCE_COLORS: Record<ClientType, string> = {
@@ -211,12 +217,15 @@ export const SOURCE_COLORS: Record<ClientType, string> = {
   unsloth: "#58CC02",
   hindsight: "#0891B2",
   "craft-agent": "#F97316",
+  "trae-cli": "#00BFA5",
+  qoder: "#2ADB5C",
+  kwwk: "#F5B800",
 };
 
 /**
  * Every client the CLI scans, in display order.
  *
- * Mirrors `define_clients!` in `cli/tokens-core/src/clients.rs` — 54 entries,
+ * Mirrors `define_clients!` in `cli/tokens-core/src/clients.rs` — 57 entries,
  * excluding the two filter-only aliases (`synthetic`, `9router`) that have no
  * scan path of their own. Kept as an explicit list rather than derived from
  * SOURCE_DISPLAY_NAMES, which also carries those aliases and legacy keys.
@@ -256,6 +265,7 @@ export const SUPPORTED_CLIENTS: readonly ClientType[] = [
   "kimchi",
   "kimi",
   "kiro",
+  "kwwk",
   "lmstudio",
   "mcode",
   "micode",
@@ -266,11 +276,13 @@ export const SUPPORTED_CLIENTS: readonly ClientType[] = [
   "opencodereview",
   "pi",
   "prime-agent",
+  "qoder",
   "qwen",
   "reasonix",
   "roocode",
   "senpi",
   "trae",
+  "trae-cli",
   "unsloth",
   "warp",
   "workbuddy",

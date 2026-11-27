@@ -84,6 +84,11 @@ describe("per-client parser revision caps", () => {
   for (const [client, cap] of [
     ["codex", 4],
     ["devin-cli", 2],
+    ["hermes", 2],
+    ["amp", 2],
+    ["qoder", 1],
+    ["kwwk", 1],
+    ["trae-cli", 1],
     ["claude", 1],
   ] as const) {
     test(`${client} accepts revision ${cap} and rejects ${cap + 1}`, () => {
@@ -94,25 +99,23 @@ describe("per-client parser revision caps", () => {
     });
   }
 
-  test("devin-cli revision 2 replaces a higher revision-1 total; revision 1 cannot", () => {
-    const existing = { "devin-cli": breakdownAt(1, 960_000_000) };
-    const clients = new Set(["devin-cli"]);
+  for (const client of ["devin-cli", "hermes", "amp"]) {
+    test(`${client} revision 2 corrects the day without letting an old replay restore it`, () => {
+      expect(validateSubmission(submissionAt(client, 1)).errors).toEqual([]);
+      const clients = new Set([client]);
+      const original = { [client]: breakdownAt(1, 3000) };
+      const merge = (existing: typeof original, revision: number, tokens: number) =>
+        mergeClientBreakdownsWithRegressionGuard(
+          existing, { [client]: breakdownAt(revision, tokens) }, clients
+        ).merged;
 
-    const sameRevision = mergeClientBreakdownsWithRegressionGuard(
-      existing,
-      { "devin-cli": breakdownAt(1, 196_000_000) },
-      clients
-    );
-    expect(sameRevision.merged["devin-cli"].tokens).toBe(960_000_000);
-
-    const corrected = mergeClientBreakdownsWithRegressionGuard(
-      existing,
-      { "devin-cli": breakdownAt(2, 196_000_000) },
-      clients
-    );
-    expect(corrected.merged["devin-cli"].tokens).toBe(196_000_000);
-    expect(corrected.merged["devin-cli"].provenance?.schemaVersion).toBe(2);
-  });
+      expect(merge(original, 1, 1000)[client].tokens).toBe(3000);
+      const corrected = merge(original, 2, 1000);
+      expect(corrected[client].tokens).toBe(1000);
+      expect(corrected[client].provenance?.schemaVersion).toBe(2);
+      expect(merge(corrected, 1, 3000)[client].tokens).toBe(1000);
+    });
+  }
 });
 
 function submission(extra: Record<string, unknown> = {}) {
