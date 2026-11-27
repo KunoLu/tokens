@@ -49,6 +49,7 @@ const CLIENT_ICON_SLUGS: Record<string, string> = {
   antigravity: "antigravity-color",
   "antigravity-cli": "antigravity-color",
   trae: "trae-color",
+  "trae-cli": "trae-color",
   cline: "cline",
   grok: "grok",
   micode: "xiaomimimo",
