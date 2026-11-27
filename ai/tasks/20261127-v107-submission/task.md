@@ -4,11 +4,11 @@ id: 20261127-v107-submission
 workflow_mode: strict
 mode_source: user
 mode_note: 用户通知按 v1.0.7 PRD 开工；§5 强制 strict。
-status: "checking"
+status: "done"
 branch: sync/v1.0.7-web-submission
 created_at: '2026-11-27T17:28:05.916116+08:00'
-updated_at: "2026-11-27T18:59:16.896826+08:00"
-completed_at: null
+updated_at: "2026-11-27T19:16:44.035323+08:00"
+completed_at: "2026-11-27T19:16:44.035323+08:00"
 "sync_scope": ["web/src/lib/validation", "web/features", "web/scripts", ".github/assets"]
 ---
 # v1.0.7 任务 1：网站提交兼容性
@@ -49,3 +49,4 @@ completed_at: null
 | 2026-11-27T17:43:08.863708+08:00 | in-progress | checking | omp：完成内审退回的两项修正，进入复审 | reports/embed-6d06c909.log；29 项重建、内容断言及 SHA256 一致；门禁计划前四项 passed |
 | 2026-11-27T18:58:44.026006+08:00 | checking | in-progress | omp：开始处理 agy 外审的一项 LOW：发布就绪门禁缺最终裁决 | HEAD a4880fd3c8559f91e2060d68134634fc3c3a2b78；CI 45983482370 全绿；reports/agy-a4880fd3-diff.log |
 | 2026-11-27T18:59:16.896826+08:00 | in-progress | checking | omp：完成发布就绪裁决与门禁记录修正，重新送审 | Release ready；生产代码未变；CI 45983482370；部署仍需单独授权 |
+| 2026-11-27T19:16:44.035323+08:00 | checking | done | omp：同一提交双审 CLEAN、CI 全绿，按 B 方案收尾 | {"clean_sha":"7a79ea37f4bd99762f0caa5c65f2d17fd3650b1b","ci_run":"45987679232"} |
