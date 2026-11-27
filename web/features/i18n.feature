@@ -53,6 +53,13 @@ Feature: 界面语言切换
       And 页面以简体中文渲染
       And "tt_locale" cookie 的值为 "zh-CN"
 
+    Scenario: 通过完整页面导航切换语言并保留筛选条件
+      Given 访客正在阅读带 period=week 筛选条件的排行榜
+      When 访客选择日本語
+      Then 浏览器重新加载日语排行榜
+      And 地址保留原有查询参数
+      And 页面的 lang 属性为 "ja"
+
     # 覆盖: tests/e2e/i18n-locale.spec.ts「切换到 English」。
     Scenario: 切换到 English
       Given 访客在 "/zh-CN/leaderboard"

@@ -8,6 +8,7 @@ import {
   normalizeClientBreakdownAliases,
   type ClientBreakdownData,
 } from "./db/helpers";
+import { formatWholePercents } from "./format";
 import { getSpeedTierRows, type SpeedUsage } from "./speedUsage";
 
 type Contribution = {
@@ -290,33 +291,43 @@ describe("speedUsage storage merges", () => {
 
 describe("speed tier rows", () => {
   test("no known speed yields no rows", () => {
-    expect(getSpeedTierRows(undefined, 100, 4)).toEqual([]);
-    expect(getSpeedTierRows([], 100, 4)).toEqual([]);
-    expect(getSpeedTierRows([{ speed: "fast", source: "reported", tokens: 0, messages: 0 }], 100, 4)).toEqual([]);
+    expect(getSpeedTierRows(undefined)).toEqual([]);
+    expect(getSpeedTierRows([])).toEqual([]);
+    expect(getSpeedTierRows([{ speed: "fast", source: "reported", tokens: 0, messages: 0 }])).toEqual([]);
   });
 
-  test("sums sources per speed in canonical order and adds the unknown remainder", () => {
-    const rows = getSpeedTierRows(
-      [
-        { speed: "ultrafast", source: "selected", tokens: 10, messages: 1 },
-        { speed: "fast", source: "selected", tokens: 20, messages: 1 },
-        { speed: "standard", source: "reported", tokens: 30, messages: 2 },
-        { speed: "fast", source: "reported", tokens: 25, messages: 1 },
-      ],
-      100,
-      6,
-    );
+  test("sums sources per speed in canonical order with no unknown row", () => {
+    const rows = getSpeedTierRows([
+      { speed: "ultrafast", source: "selected", tokens: 10, messages: 1 },
+      { speed: "fast", source: "selected", tokens: 20, messages: 1 },
+      { speed: "standard", source: "reported", tokens: 30, messages: 2 },
+      { speed: "fast", source: "reported", tokens: 25, messages: 1 },
+    ]);
     expect(rows).toEqual([
       { speed: "standard", sources: ["reported"], tokens: 30, messages: 2 },
       { speed: "fast", sources: ["reported", "selected"], tokens: 45, messages: 2 },
       { speed: "ultrafast", sources: ["selected"], tokens: 10, messages: 1 },
-      { speed: "unknown", sources: [], tokens: 15, messages: 1 },
     ]);
   });
 
-  test("a fully known model gets no unknown row", () => {
-    expect(getSpeedTierRows([{ speed: "standard", source: "reported", tokens: 100, messages: 4 }], 100, 4)).toEqual([
+  test("a single known speed yields one row", () => {
+    expect(getSpeedTierRows([{ speed: "standard", source: "reported", tokens: 100, messages: 4 }])).toEqual([
       { speed: "standard", sources: ["reported"], tokens: 100, messages: 4 },
     ]);
+  });
+
+  test("60 of 100 model tokens format as 60%, not a renormalized 100%", () => {
+    const totalTokens = 100;
+    const rows = getSpeedTierRows([
+      { speed: "fast", source: "reported", tokens: 60, messages: 2 },
+    ]);
+    expect(rows.map((row) => row.speed)).toEqual(["fast"]);
+    // Same share ProfileModels and the day tooltip pass in: tier tokens over
+    // model tokens. formatWholePercents rounds those parts to their own sum.
+    expect(
+      formatWholePercents(
+        rows.map((row) => (totalTokens > 0 ? (row.tokens / totalTokens) * 100 : 0)),
+      ),
+    ).toEqual(["60%"]);
   });
 });

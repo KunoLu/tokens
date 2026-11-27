@@ -41,7 +41,7 @@ fork's `1.0.x` line. The site has diverged:
 |---|---|---|
 | Auth | GitHub OAuth | Email + password (PBKDF2); no GitHub sign-in |
 | Organization | Single global leaderboard | Team / Group levels; Teamboard with team-single + group-multi filters |
-| UI copy | English only | Full English/中文 i18n with a language switcher |
+| UI copy | English, 简体中文, and 日本語 | English, 简体中文, and 日本語 |
 | Brand | Upstream blue | Brand purple `#7C3AED` |
 | Deployment | Cloudflare Workers + Neon Postgres via Hyperdrive | Self-hosted Node (`next start`) + your own Postgres, with production Docker assets |
 | Anti-cheat | Cross-device dedup, monotonicity checks, public Hall of Shame | Same guards; the public shame page is removed, bans still apply |
@@ -131,7 +131,7 @@ Separate from the Docker stack. Project `kunolu-tokens`, free
 [docs/deploy/vercel/README.en.md](./docs/deploy/vercel/README.en.md).
 
 ## Supported clients
-54 clients in the scanner catalog are detected automatically — if one is
+57 clients in the scanner catalog are detected automatically — if one is
 installed and has written sessions, it is counted. The docs page renders the
 live list from that catalog. Parser and pricing fixes are taken from upstream;
 this fork does not republish them as `27.x`.
@@ -148,6 +148,7 @@ this fork does not republish them as `27.x`.
 | [Copilot CLI](https://docs.github.com/en/copilot) | `~/.copilot/otel/*.jsonl` |
 | [Gemini CLI](https://github.com/google-gemini/gemini-cli) | `~/.gemini/tmp/*/chats/*.json` |
 | [Kimi CLI](https://github.com/MoonshotAI/kimi-cli) | `~/.kimi/sessions/` |
+| [Qoder / Qoder CN](https://qoder.com/) | `~/.qoder/projects/` and `~/.qoder-cn/projects/` (override with `QODER_CONFIG_DIR` / `QODERCN_CONFIG_DIR`), `~/.qoder{,-cn}/logs/sessions/**/segments/`, plus the IDE's `SharedClientCache/cache/db/local.db`. Both editions report as one `qoder` client |
 | [Qwen CLI](https://github.com/QwenLM/qwen-cli) | `~/.qwen/projects/` |
 | Reasonix | `~/.reasonix/stats/*.jsonl` (override via `REASONIX_STATE_HOME` or `REASONIX_HOME`) |
 | [Amp](https://ampcode.com/) | `~/.local/share/amp/threads/` |
@@ -160,11 +161,13 @@ this fork does not republish them as `27.x`.
 | [Goose](https://github.com/aaif-goose/goose) | `~/.local/share/goose/sessions/sessions.db` |
 | [Mux](https://github.com/coder/mux) | `~/.mux/sessions/` |
 | [Pi](https://github.com/badlogic/pi-mono) | `~/.pi/agent/sessions/`, `~/.omp/agent/sessions/` |
+| [kwwk](https://github.com/yellowplushq/kwwk) | `~/.kwwk/sessions/`. Programs embedding kwwk that keep a `.kwwk-sessions/` directory per task: add the parent of those task directories to `scanner.extraScanPaths.kwwk` (or `TOKENS_EXTRA_DIRS=kwwk:<dir>`); only session directories are read, not the code next to them |
 | [Zed Agent](https://zed.dev/docs/ai/agent-panel) | `~/.local/share/zed/threads/threads.db` |
 | Kiro | `~/.kiro/sessions/cli/`, `~/.local/share/kiro-cli/data.sqlite3` |
 | [Warp](https://www.warp.dev/) / Oz | `tokens warp sync` → `~/.config/tokens/warp-cache/usage.json` |
-| [Trae](https://www.trae.ai/) | `tokens trae sync` → `~/.config/tokens/trae-cache/sessions/` |
-| [Antigravity](https://antigravity.google/) | `tokens antigravity sync` → `~/.config/tokens/antigravity-cache/sessions/` |
+| [Trae](https://www.trae.ai/) | `tokens trae sync` → `~/.config/tokens/trae-cache/sessions/` (international account usage API). The Trae / Trae CN desktop apps keep chat in an encrypted `ModularData/ai-agent/database.db` and write no readable token counts |
+| [TRAE CLI](https://docs.trae.cn/cli_get-started-with-trae-cli) 2.0 | `~/.trae/cli/sessions/` and `~/.trae/cli/archived_sessions/` (override with `TRAE_HOME` / `TRAECLI_HOME`) |
+| [Antigravity](https://antigravity.google/) | `~/.gemini/antigravity/conversations/*.db`, `~/.gemini/antigravity-insiders/conversations/*.db` (current builds); older builds via `tokens antigravity sync` → `~/.config/tokens/antigravity-cache/sessions/` |
 | [OpenClaw](https://openclaw.ai/) | `~/.openclaw/agents/` |
 | [Codebuff](https://codebuff.com/) | `~/.config/manicode/` |
 | [Hermes](https://github.com/NousResearch/hermes-agent) | `$HERMES_HOME/state.db` |
@@ -173,9 +176,17 @@ this fork does not republish them as `27.x`.
 
 </details>
 
+`--client claude` means Claude Code. Chats in the Claude web, desktop and mobile
+apps, Projects included, are not counted: the apps keep no local per-message
+token counts, and tokens does not read your claude.ai account. Claude Code on
+the web is covered separately, see [Cloud agent sessions](./docs/cloud-sessions.md).
+
 Clients that expose usage only through an account API need a sync step first —
 `tokens cursor sync`, `tokens antigravity sync`, `tokens trae sync`,
 `tokens warp sync` — after which they submit like everything else.
+Antigravity needs that sync only on older builds: current Antigravity and
+Antigravity - Insiders conversation databases are read directly
+(`tokens antigravity status` shows which ones were found).
 
 Pricing comes from [LiteLLM](https://github.com/BerriAI/litellm),
 [OpenRouter](https://openrouter.ai) and

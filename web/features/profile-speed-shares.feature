@@ -12,11 +12,12 @@ Feature: 个人用量占比与推理速度
     And 文案使用当前中文或英文语言
 
   # Trace: speedUsage.test.ts — tier rows
-  Scenario: 有部分速度证据时显示未知余量
+  Scenario: 仅部分用量有速度证据时不展示未知余量
     Given 模型共使用 100 tokens 且仅 60 tokens 有已知速度
     When 用户查看模型速度明细
     Then 已知档位显示 60 tokens
-    And 未知档位显示剩余 40 tokens
+    And 不显示剩余 40 tokens 的未知速度行
+    And 模型总量仍为 100 tokens，已知速度占模型用量的 60%
     And 提示区分服务端报告与用户选择
 
   # Trace: speedUsage.test.ts — no known speed

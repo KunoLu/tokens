@@ -31,7 +31,7 @@ Fork 链路：[junhoyeo/tokscale](https://github.com/junhoyeo/tokscale) → [mis
 |---|---|---|
 | 认证 | GitHub OAuth | 邮箱 + 密码（PBKDF2）；无 GitHub 登录 |
 | 组织 | 单一全局榜 | Team / Group 两级；Teamboard 支持 Team 单选 + Group 多选筛选 |
-| 文案 | 仅英文 | 全站中英文 i18n，带语言切换 |
+| 文案 | English、简体中文、日本語 | English、简体中文、日本語 |
 | 品牌 | 上游蓝色 | 品牌紫 `#7C3AED` |
 | 部署 | Cloudflare Workers + Neon（经 Hyperdrive） | 自建 Node（`next start`）+ 自建 Postgres，带生产 Docker 资产 |
 | 反作弊 | 跨设备去重、单调性校验、公开 Hall of Shame | 同样保留校验与封禁；公示页已移除 |
@@ -102,7 +102,7 @@ curl -fsSL https://raw.githubusercontent.com/KunoLu/tokens/v1.0.6/pre-install-to
 
 ## 支持的客户端
 
-扫描目录里有 54 个客户端，装过并写过会话就会被统计。文档页的列表由该目录生成。解析器和定价修复从上游拣入，本仓不把它们重新发布成 `27.x`。
+扫描目录里有 57 个客户端，装过并写过会话就会被统计。文档页的列表由该目录生成。解析器和定价修复从上游拣入，本仓不把它们重新发布成 `27.x`。
 
 <details>
 <summary>各客户端的数据存放位置</summary>
@@ -116,6 +116,7 @@ curl -fsSL https://raw.githubusercontent.com/KunoLu/tokens/v1.0.6/pre-install-to
 | [Copilot CLI](https://docs.github.com/en/copilot) | `~/.copilot/otel/*.jsonl` |
 | [Gemini CLI](https://github.com/google-gemini/gemini-cli) | `~/.gemini/tmp/*/chats/*.json` |
 | [Kimi CLI](https://github.com/MoonshotAI/kimi-cli) | `~/.kimi/sessions/` |
+| [Qoder / Qoder CN](https://qoder.com/) | `~/.qoder/projects/` 与 `~/.qoder-cn/projects/`（可用 `QODER_CONFIG_DIR` / `QODERCN_CONFIG_DIR` 覆盖），`~/.qoder{,-cn}/logs/sessions/**/segments/`，以及 IDE 的 `SharedClientCache/cache/db/local.db`。两版都记在同一个 `qoder` 客户端下 |
 | [Qwen CLI](https://github.com/QwenLM/qwen-cli) | `~/.qwen/projects/` |
 | Reasonix | `~/.reasonix/stats/*.jsonl`（可用 `REASONIX_STATE_HOME` 或 `REASONIX_HOME` 覆盖） |
 | [Amp](https://ampcode.com/) | `~/.local/share/amp/threads/` |
@@ -128,11 +129,13 @@ curl -fsSL https://raw.githubusercontent.com/KunoLu/tokens/v1.0.6/pre-install-to
 | [Goose](https://github.com/aaif-goose/goose) | `~/.local/share/goose/sessions/sessions.db` |
 | [Mux](https://github.com/coder/mux) | `~/.mux/sessions/` |
 | [Pi](https://github.com/badlogic/pi-mono) | `~/.pi/agent/sessions/`、`~/.omp/agent/sessions/` |
+| [kwwk](https://github.com/yellowplushq/kwwk) | `~/.kwwk/sessions/`。嵌入 kwwk、且每个任务自带 `.kwwk-sessions/` 目录的程序：把这些任务目录的父目录加到 `scanner.extraScanPaths.kwwk`（或 `TOKENS_EXTRA_DIRS=kwwk:<dir>`）；只读会话目录，不读旁边的代码 |
 | [Zed Agent](https://zed.dev/docs/ai/agent-panel) | `~/.local/share/zed/threads/threads.db` |
 | Kiro | `~/.kiro/sessions/cli/`、`~/.local/share/kiro-cli/data.sqlite3` |
 | [Warp](https://www.warp.dev/) / Oz | `tokens warp sync` → `~/.config/tokens/warp-cache/usage.json` |
-| [Trae](https://www.trae.ai/) | `tokens trae sync` → `~/.config/tokens/trae-cache/sessions/` |
-| [Antigravity](https://antigravity.google/) | `tokens antigravity sync` → `~/.config/tokens/antigravity-cache/sessions/` |
+| [Trae](https://www.trae.ai/) | `tokens trae sync` → `~/.config/tokens/trae-cache/sessions/`（国际版账号用量 API）。Trae / Trae CN 桌面应用把聊天放在加密的 `ModularData/ai-agent/database.db`，不写可读的 token 计数 |
+| [TRAE CLI](https://docs.trae.cn/cli_get-started-with-trae-cli) 2.0 | `~/.trae/cli/sessions/` 与 `~/.trae/cli/archived_sessions/`（可用 `TRAE_HOME` / `TRAECLI_HOME` 覆盖） |
+| [Antigravity](https://antigravity.google/) | `~/.gemini/antigravity/conversations/*.db`、`~/.gemini/antigravity-insiders/conversations/*.db`（当前版本）；旧版本经 `tokens antigravity sync` → `~/.config/tokens/antigravity-cache/sessions/` |
 | [OpenClaw](https://openclaw.ai/) | `~/.openclaw/agents/` |
 | [Codebuff](https://codebuff.com/) | `~/.config/manicode/` |
 | [Hermes](https://github.com/NousResearch/hermes-agent) | `$HERMES_HOME/state.db` |
@@ -141,7 +144,9 @@ curl -fsSL https://raw.githubusercontent.com/KunoLu/tokens/v1.0.6/pre-install-to
 
 </details>
 
-只通过账号 API 暴露用量的客户端需要先做一次同步——`tokens cursor sync`、`tokens antigravity sync`、`tokens trae sync`、`tokens warp sync`——之后就和其它客户端一样提交。
+`--client claude` 指 Claude Code。Claude 网页、桌面和移动应用里的对话（含 Projects）不统计：这些应用不在本地保存逐条消息的 token 数，tokens 也不读取 claude.ai 账号。网页版 Claude Code 另计，见 [云端会话](./docs/cloud-sessions.md)。
+
+只通过账号 API 暴露用量的客户端需要先做一次同步——`tokens cursor sync`、`tokens antigravity sync`、`tokens trae sync`、`tokens warp sync`——之后就和其它客户端一样提交。Antigravity 只在旧版本上需要这次同步：当前 Antigravity 与 Antigravity - Insiders 的会话数据库会直接读取（`tokens antigravity status` 会显示找到了哪些）。
 
 定价数据来自 [LiteLLM](https://github.com/BerriAI/litellm)、[OpenRouter](https://openrouter.ai) 和 [models.dev](https://github.com/anomalyco/models.dev)，按模型取最优匹配费率。
 
