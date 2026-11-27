@@ -1,6 +1,6 @@
 "use client";
 
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import { LanguagesIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -37,7 +37,6 @@ export function LanguageSwitcher() {
   const t = useT();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const router = useRouter();
 
   const switchTo = (next: Locale) => {
     const { path } = stripLocale(pathname || "/");
@@ -49,7 +48,7 @@ export function LanguageSwitcher() {
     // cookie without a round trip.
     // eslint-disable-next-line react-hooks/immutability
     document.cookie = `${LOCALE_COOKIE}=${next}; path=/; max-age=${LOCALE_COOKIE_MAX_AGE}; samesite=lax`;
-    router.push(href);
+    window.location.assign(href);
   };
 
   return (

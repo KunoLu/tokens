@@ -70,6 +70,18 @@ test("切换到简体中文: 选择后地址变为 /zh-CN/leaderboard、cookie �
   await expect(nav.getByRole("link", { name: "文档" })).toBeVisible();
 });
 
+test("通过完整页面导航切换语言并保留筛选条件", async ({ page }) => {
+  await page.goto("/leaderboard?period=week");
+  const japanesePage = page.waitForRequest(
+    (request) => request.isNavigationRequest()
+      && request.frame() === page.mainFrame()
+      && new URL(request.url()).pathname === "/ja/leaderboard"
+  );
+  await Promise.all([japanesePage, switchLocale(page, "Language", "日本語")]);
+  await expect(page).toHaveURL(/\/ja\/leaderboard\?period=week$/);
+  await expect(page.locator("html")).toHaveAttribute("lang", "ja");
+});
+
 test("切换到 English: 中文前缀下选择 English 后回到无前缀地址、导航变英文", async ({
   page,
 }) => {

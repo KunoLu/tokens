@@ -21,6 +21,7 @@
 - [20261115-v106-changelog](20261115-v106-changelog/task.md)
 - [20261115-v106-docs-backfill](20261115-v106-docs-backfill/task.md)
 - [20261127-v107-submission](20261127-v107-submission/task.md)
+- [20261127-v107-web-ui-docs](20261127-v107-web-ui-docs/task.md)
 - [brand-sweep](archive/2026-Q3/brand-sweep/task.md)
 - [prod-docker-assets](archive/2026-Q3/prod-docker-assets/task.md)
 - [scripts-ref-and-automation](archive/2026-Q3/scripts-ref-and-automation/task.md)
