@@ -7,7 +7,7 @@ mode_note: 用户通知按 v1.0.7 PRD 开工；§5 强制 strict。
 status: "checking"
 branch: sync/v1.0.7-web-submission
 created_at: '2026-11-27T17:28:05.916116+08:00'
-updated_at: "2026-11-27T17:43:08.863708+08:00"
+updated_at: "2026-11-27T18:59:16.896826+08:00"
 completed_at: null
 "sync_scope": ["web/src/lib/validation", "web/features", "web/scripts", ".github/assets"]
 ---
@@ -21,7 +21,7 @@ completed_at: null
 - DDIA（设计前）：已有日用量的跨版本修正与重放；passed（confirmed）。
 - Legacy（行为修改前）：保留同版本防回退、未知版本拒绝；passed（characterized）。
 - Refactoring（生产修改前）：无需调整已有合并边界；passed（proceed）。
-- Release（验证后）：API 接收范围变化、旧服务回滚限制；planned。
+- Release（验证后）：API 接收范围变化、旧服务回滚限制；passed（ready，仅指本票网站运行改动的技术就绪，不代表已合入或已部署）。
 
 ### 门禁结论
 
@@ -29,7 +29,7 @@ completed_at: null
 - DDIA confirmed：`POST /api/submit` 先校验，再在既有事务内合并。同设备同日同客户端的较新修订可下调；同版本下调或旧修订重放不覆盖。读写路径、限流和数据表不变。不迁移、不批量覆写。回滚服务会再次拒收新协议，不会撤销已保存的修正。
 - Legacy characterized：基线仅允许 Hermes/Amp 修订 1，既有 Devin 测试覆盖较新修订的修正。新增契约测试涵盖清单与明细版本上限、同版本保护和旧版重放。规格先于实现；未单独执行修改前的 red 测试，不作为证据。
 - Refactoring proceed（normal）：沿用现有目录、版本表及合并函数。不新增接口、依赖、查询或重构。类型语言服务不可用，使用源码、契约测试及项目 typecheck 核对。
-- Release：本地验收通过；仍须本次提交双审 CLEAN 与同 SHA CI。提前部署需独立授权。部署后应关注提交拒绝及 regression guard 警告；回退只切版本，不恢复历次提交。
+- Release Readiness Review — ready。本地 Web 原生验收、Chrome 文档页及 Embed 重建均通过；生产代码所在树经 `a4880fd3c8559f91e2060d68134634fc3c3a2b78` 的 CI `45983482370` 验证，四项全绿。仅扩展已有提交校验和目录，不增加单次提交的查询、队列或外部请求；既有限流与事务不变。上线后关注拒收与 regression guard 警告；异常时回退站点版本，恢复旧协议上限，但不撤销已保存的修正。无迁移或回填，不需清理数据。本票技术就绪不代表版本发布；合入仍须待新 HEAD 双审与 CI 通过，部署另行确认。
 - BDD：`web/features/submission-client-revisions.feature`，中文场景、英文关键词。使用真实校验与合并逻辑；未对数据库或生产上报。可读性审核：守卫保持单一职责，未修改客户端认证、MCP opt-in、数据库或 CLI。
 
 ## 验收
@@ -47,3 +47,5 @@ completed_at: null
 | 2026-11-27T17:31:57.870247+08:00 | in-progress | checking | omp：完成本地验证，等待本次提交内审、CI 与外审 | reports/20261127-172953-web.md |
 | 2026-11-27T17:42:40.402361+08:00 | checking | in-progress | omp：收到内审 CHANGES REQUIRED，修订门禁状态与 Embed 生成证据 | 6d06c909；两项 LOW，生产协议审查无发现 |
 | 2026-11-27T17:43:08.863708+08:00 | in-progress | checking | omp：完成内审退回的两项修正，进入复审 | reports/embed-6d06c909.log；29 项重建、内容断言及 SHA256 一致；门禁计划前四项 passed |
+| 2026-11-27T18:58:44.026006+08:00 | checking | in-progress | omp：开始处理 agy 外审的一项 LOW：发布就绪门禁缺最终裁决 | HEAD a4880fd3c8559f91e2060d68134634fc3c3a2b78；CI 45983482370 全绿；reports/agy-a4880fd3-diff.log |
+| 2026-11-27T18:59:16.896826+08:00 | in-progress | checking | omp：完成发布就绪裁决与门禁记录修正，重新送审 | Release ready；生产代码未变；CI 45983482370；部署仍需单独授权 |
