@@ -9,6 +9,7 @@
   "top.amp.exportsFailed": "  Amp：{failed} 件のスレッドをエクスポートできませんでした。既存のキャッシュは保持されます：{error}",
   "top.amp.invalidState": "Amp の同期状態を読み込めないか、未対応の形式です。状態とキャッシュを保持したまま、状態を修復するか、対応する CLI を使用してください。",
   "top.amp.pendingExports": "既知のスレッド更新が {pending} 件残っています。`tokens amp sync` を再実行してください。その回に再検出したスレッドだけを再試行します。",
+  "top.amp.droppedPending": "検出されなくなったスレッドの再試行項目を {count} 件解除しました。保存済みの使用量は保持されています。",
   "top.amp.autoRefreshEnabled": "Amp の自動更新：有効。",
   "top.amp.autoRefreshDisabled": "Amp の自動更新：無効。有効にするには `tokens amp sync` を手動で完了してください。",
   "top.amp.lockFailed": "Amp の同期キャッシュをロックできませんでした。",

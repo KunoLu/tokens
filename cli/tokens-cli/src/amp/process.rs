@@ -169,18 +169,10 @@ mod platform {
     #[cfg(target_os = "linux")]
     pub(super) fn lock_group_ids() -> io::Result<MutexGuard<'static, ()>> {
         // A recycled PGID must not select a new Amp child during a group wait.
-        let mut guard = None;
-        wait_for_exit(|| match GROUP_IDS.try_lock() {
-            Ok(locked) => {
-                guard = Some(locked);
-                Ok(true)
-            }
-            Err(std::sync::TryLockError::WouldBlock) => Ok(false),
-            Err(std::sync::TryLockError::Poisoned(_)) => {
-                Err(io::Error::other("Amp process group lock poisoned"))
-            }
-        })?;
-        Ok(guard.expect("success acquires the group lock"))
+        // Queue time does not consume the group's own bounded reap budget.
+        GROUP_IDS
+            .lock()
+            .map_err(|_| io::Error::other("Amp process group lock poisoned"))
     }
 
     // Linux adoption is process-wide and restoring the flag cannot undo an
@@ -362,11 +354,14 @@ mod platform {
             wait_for_exit(|| {
                 // Do not signal if the kernel no longer recognizes our leader.
                 let exited = exit_status(child).inspect_err(|_| self.0 = None)?.is_some();
+                // Linux serializes group delivery with fork publication.
+                // copy_process either sees pending SIGKILL, inherits a
+                // delayed group signal, or publishes before group delivery.
                 signal_group(group)?;
                 Ok(exited)
             })?;
             let group_ids = lock_group_ids();
-            // Reap the leader by its handle even if the group lock timed out.
+            // Reap the leader by its handle even if the group lock was poisoned.
             // Once the leader can be reaped, never signal the numeric ID again.
             self.0 = None;
             child.try_wait()?.ok_or(io::ErrorKind::TimedOut)?;
@@ -764,6 +759,7 @@ mod tests {
         match mode.as_str() {
             "non-reaping-ancestor" => return non_reaping_ancestor(&dir),
             "capture-orphan" => return capture_orphan(&dir),
+            "queued-reap" => return queued_reap(&dir),
             "exit" => return,
             _ => {}
         }
@@ -880,6 +876,52 @@ mod tests {
         assert!(status.success(), "{status}");
         assert_stopped(dir.path());
         assert!(dir.path().join("wrapper-exiting").is_file());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_group_reap_budget_excludes_queue_delay() {
+        let dir = tempfile::tempdir().unwrap();
+        let status = fixture("queued-reap", dir.path())
+            .stdout(Stdio::null())
+            .stderr(Stdio::inherit())
+            .status()
+            .unwrap();
+        assert!(status.success(), "{status}");
+    }
+
+    #[cfg(target_os = "linux")]
+    fn queued_reap(dir: &Path) {
+        let supervisor = Supervisor::new().unwrap();
+        let (mut child, mut tree) =
+            platform::spawn(fixture("wrapper-closed", dir).stdout(Stdio::piped())).unwrap();
+        let mut stdout = child.stdout.take();
+        capture(
+            &supervisor,
+            &mut child,
+            &mut stdout,
+            Instant::now() + Duration::from_secs(3),
+            4096,
+        )
+        .unwrap();
+        drop(stdout);
+
+        let alive = File::options().write(true).open(dir.join("alive")).unwrap();
+        thread::scope(|scope| {
+            let gate = platform::lock_group_ids().unwrap();
+            let cleanup = scope.spawn(|| tree.cleanup(&mut child));
+            // The orphan releases its file lock when cleanup kills the group.
+            wait_for_exit(|| match fs2::FileExt::try_lock_exclusive(&alive) {
+                Ok(()) => Ok(true),
+                Err(err) if crate::commands::autosubmit::is_lock_contention(&err) => Ok(false),
+                Err(err) => Err(err),
+            })
+            .unwrap();
+            // Simulate a queue longer than the old timeout without depending on lock order.
+            thread::sleep(REAP_TIMEOUT + Duration::from_millis(250));
+            drop(gate);
+            cleanup.join().unwrap().unwrap();
+        });
     }
 
     #[cfg(target_os = "linux")]

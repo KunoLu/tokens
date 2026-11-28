@@ -3,7 +3,7 @@
   "cli.amp.status.about": "Show Amp sync status",
   "cli.amp.status.json.help": "Output as JSON",
   "cli.amp.sync.about": "Sync Amp threads from ampcode.com into local cache",
-  "cli.amp.sync.force.help": "Re-export every discovered thread, not only new or changed ones",
+  "cli.amp.sync.force.help": "Re-export all visible threads; on success, clear retries for threads no longer visible without deleting cached usage",
   "cli.amp.sync.json.help": "Output as JSON",
   "cli.antigravity.about": "Antigravity integration commands",
   "cli.antigravity.purge-cache.about": "Delete cached Antigravity usage artifacts",

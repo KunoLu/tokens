@@ -24,7 +24,9 @@
 //! watermark for each thread. Outside the search window an agent-only change
 //! can be missed if the list watermark is unchanged. Force re-exports
 //! discovered threads but cannot discover an old thread absent from both
-//! results.
+//! results. After successfully exporting every discovered thread, a manual
+//! force sync can clear retry entries for undiscovered threads. Their cached
+//! usage stays on disk, and a later discovery triggers another export.
 //!
 //! An export holds the requests of the thread's main agent only. Amp bills a
 //! thread's subagent (Task) and system-model requests (titles and the like) to
@@ -138,6 +140,8 @@ pub struct SyncAmpResult {
     pub failed: usize,
     /// Persisted updates still awaiting export, or unknown if state could not be read.
     pub pending: Option<usize>,
+    /// Invisible retry entries dropped by a successful manual force sync.
+    pub dropped_pending: usize,
     /// Whether a complete first sync has published valid state.
     pub auto_refresh_enabled: Option<bool>,
     pub error: Option<String>,
@@ -175,6 +179,12 @@ pub fn run_amp_sync(force: bool, json: bool) -> Result<()> {
             } else {
                 summary.yellow()
             }
+        );
+    }
+    if result.dropped_pending != 0 {
+        println!(
+            "{}",
+            tr!("top.amp.droppedPending", count = result.dropped_pending).yellow()
         );
     }
     if let Some(error) = result.error.as_deref() {
@@ -300,30 +310,11 @@ pub fn sync_amp_cache(force: bool) -> SyncAmpResult {
     sync_amp_cache_for_request(force, false)
 }
 
-fn sync_amp_cache_for_request(force: bool, allow_initial_sync: bool) -> SyncAmpResult {
-    let cache_dir = get_amp_cache_dir();
-    let sync = || -> Result<_> {
-        let lock = policy_lock(&cache_dir)?;
-        let threads = threads_dir(&cache_dir);
-        for dir in [&cache_dir, &threads] {
-            match fs::symlink_metadata(dir) {
-                Ok(meta) => anyhow::ensure!(meta.is_dir(), t!("top.amp.invalidState")),
-                Err(err) if err.kind() == ErrorKind::NotFound => {}
-                Err(err) => return Err(err.into()),
-            }
-        }
-        sync_amp_cache_with(&cache_dir, force, allow_initial_sync, || {
-            // Only after state validation and the automatic-refresh opt-in check.
-            // A legacy-only submit must not mark this configuration as cloud-backed.
-            if lock.metadata()?.len() == 0 {
-                lock.set_len(1)?;
-                lock.sync_data()?;
-            }
-            fs::create_dir_all(&threads)?;
-            find_amp_binary().ok_or_else(|| anyhow::anyhow!(t!("top.amp.cliNotFound")))
-        })
-    };
-    sync().unwrap_or_else(|error| SyncAmpResult {
+fn sync_amp_cache_for_request(force: bool, manual: bool) -> SyncAmpResult {
+    sync_amp_cache_with(&get_amp_cache_dir(), force, manual, || {
+        Amp::new(find_amp_binary().ok_or_else(|| anyhow::anyhow!(t!("top.amp.cliNotFound")))?)
+    })
+    .unwrap_or_else(|error| SyncAmpResult {
         error: Some(error.to_string()),
         ..SyncAmpResult::default()
     })
@@ -332,9 +323,18 @@ fn sync_amp_cache_for_request(force: bool, allow_initial_sync: bool) -> SyncAmpR
 fn sync_amp_cache_with(
     cache_dir: &Path,
     force: bool,
-    allow_initial_sync: bool,
-    prepare_amp: impl FnOnce() -> Result<PathBuf>,
+    manual: bool,
+    prepare_amp: impl FnOnce() -> Result<Amp>,
 ) -> Result<SyncAmpResult> {
+    let lock = policy_lock(cache_dir)?;
+    let dir = threads_dir(cache_dir);
+    for path in [cache_dir, dir.as_path()] {
+        match fs::symlink_metadata(path) {
+            Ok(meta) => anyhow::ensure!(meta.is_dir(), t!("top.amp.invalidState")),
+            Err(err) if err.kind() == ErrorKind::NotFound => {}
+            Err(err) => return Err(err.into()),
+        }
+    }
     let (state, initialized) = load_sync_state(cache_dir)?;
     let mut state = state.unwrap_or_else(|| AmpSyncState {
         version: STATE_VERSION,
@@ -347,7 +347,7 @@ fn sync_amp_cache_with(
         auto_refresh_enabled: Some(initialized),
         ..SyncAmpResult::default()
     };
-    if !allow_initial_sync && !initialized {
+    if !manual && !initialized {
         return Ok(result);
     }
 
@@ -362,10 +362,17 @@ fn sync_amp_cache_with(
         path: &working_path,
         result,
     };
-    let outcome = prepare_amp()
-        .and_then(Amp::new)
-        .and_then(|amp| sync_discovered_threads(&amp, cache_dir, force, initialized, &mut progress));
-    if let Err(error) = outcome {
+    let sync = || {
+        let amp = prepare_amp()?;
+        // Unavailable Amp must not mark a legacy-only configuration as cloud-backed.
+        if lock.metadata()?.len() == 0 {
+            lock.set_len(1)?;
+            lock.sync_data()?;
+        }
+        fs::create_dir_all(&dir)?;
+        sync_discovered_threads(&amp, cache_dir, &dir, force, manual, initialized, &mut progress)
+    };
+    if let Err(error) = sync() {
         progress.result.error = Some(error.to_string());
     }
     Ok(progress.result)
@@ -404,19 +411,20 @@ impl SyncProgress<'_> {
 fn sync_discovered_threads(
     amp: &Amp,
     cache_dir: &Path,
+    dir: &Path,
     force: bool,
+    manual: bool,
     initialized: bool,
     progress: &mut SyncProgress<'_>,
 ) -> Result<()> {
     let threads = find_threads(amp, progress)?;
-    let dir = threads_dir(cache_dir);
     let state = &progress.state;
     let exports: Vec<_> = threads
         .into_iter()
         .filter_map(|(id, (updated, _))| {
             (force
+                || state.pending.contains_key(&id)
                 || state.threads.get(&id).is_none_or(|known| updated > *known)
-                || state.pending.get(&id).is_some_and(|pending| updated >= *pending)
                 || !fs::symlink_metadata(dir.join(format!("{id}.json")))
                     .is_ok_and(|metadata| metadata.is_file()))
             .then_some((id, updated))
@@ -446,15 +454,16 @@ fn sync_discovered_threads(
                 }
                 let next = exports.lock().unwrap().next();
                 let Some((id, updated)) = next else { break };
-                let outcome = export_thread(amp, &dir, &id);
+                let outcome = export_thread(amp, dir, &id);
                 let SyncProgress { state, result, .. } = &mut **progress.lock().unwrap();
                 match outcome {
                     Ok(()) => {
-                        if state.pending.get(&id).is_some_and(|pending| updated >= *pending) {
-                            state.pending.remove(&id);
-                        }
-                        // A forced export or file repair with stale discovery
-                        // must not roll back the previous successful watermark.
+                        // Export fetches the current thread by ID, even when discovery
+                        // is stale. Confirm the newest observed watermark.
+                        let updated = state
+                            .pending
+                            .remove(&id)
+                            .map_or(updated, |pending| pending.max(updated));
                         state
                             .threads
                             .entry(id)
@@ -474,6 +483,18 @@ fn sync_discovered_threads(
     });
     let progress = progress.into_inner().unwrap();
     let stopped = amp.processes.stopped();
+    let dropped_pending = if force && manual && !stopped && progress.result.failed == 0 {
+        // Every discovered thread exported. Only unseen retries remain.
+        let pending = std::mem::take(&mut progress.state.pending);
+        let count = pending.len();
+        for id in pending.into_keys() {
+            // Keep cached usage but force a fresh export if the thread returns.
+            progress.state.threads.remove(&id);
+        }
+        count
+    } else {
+        0
+    };
     let complete = !stopped && progress.result.failed == 0 && progress.state.pending.is_empty();
     let partial = !stopped && progress.result.exported != 0;
     let record_sync = complete || (initialized && partial);
@@ -494,6 +515,7 @@ fn sync_discovered_threads(
         fs::rename(progress.path, state_path(cache_dir)).context(t!("top.amp.writeStateFailed"))?;
         progress.result.auto_refresh_enabled = Some(true);
     }
+    progress.result.dropped_pending = dropped_pending;
     progress.result.synced = complete || partial;
     Ok(())
 }
@@ -504,7 +526,8 @@ type DiscoveredThreads = BTreeMap<String, (DateTime<Utc>, Option<i64>)>;
 fn find_threads(amp: &Amp, progress: &mut SyncProgress<'_>) -> Result<DiscoveredThreads> {
     let mut threads = BTreeMap::new();
     let listed = list_threads(amp, &mut threads, progress);
-    threads.retain(|_, (_, count)| *count != Some(0));
+    // A stale list count must not hide a previously discovered unfinished thread.
+    threads.retain(|id, (_, count)| *count != Some(0) || progress.state.pending.contains_key(id));
     progress.result.threads = threads.len();
     listed?;
 
@@ -808,14 +831,20 @@ mod tests {
     const UPDATED: &str = "2025-01-03T00:00:00Z";
 
     #[cfg(unix)]
-    struct SyntheticAmp(tempfile::TempDir);
+    struct SyntheticAmp {
+        _config: tempfile::TempDir,
+        cache: PathBuf,
+    }
 
     #[cfg(unix)]
     impl SyntheticAmp {
         fn new() -> Self {
             use std::os::unix::fs::PermissionsExt;
 
-            let fixture = Self(tempfile::tempdir().unwrap());
+            let config = tempfile::tempdir().unwrap();
+            let cache = config.path().join("amp-cache");
+            fs::create_dir(&cache).unwrap();
+            let fixture = Self { _config: config, cache };
             let amp = fixture.dir().join("amp");
             fs::write(
                 &amp,
@@ -855,7 +884,7 @@ printf '%s\n' "$response"
         }
 
         fn dir(&self) -> &Path {
-            self.0.path()
+            &self.cache
         }
 
         fn response(&self, route: &str, response: Value) {
@@ -871,7 +900,7 @@ printf '%s\n' "$response"
         }
 
         fn sync(&self, force: bool, explicit: bool) -> SyncAmpResult {
-            sync_amp_cache_with(self.dir(), force, explicit, || Ok(self.dir().join("amp")))
+            sync_amp_cache_with(self.dir(), force, explicit, || Amp::new(self.dir().join("amp")))
                 .unwrap()
         }
     }
@@ -995,12 +1024,21 @@ printf '%s\n' "$response"
     #[test]
     fn invalid_state_never_grants_opt_in_or_is_overwritten() {
         let dir = tempfile::tempdir().unwrap();
-        let path = state_path(dir.path());
+        let cache = dir.path().join("amp-cache");
+        let path = state_path(&cache);
         let must_not_run =
-            || -> Result<PathBuf> { panic!("state must be checked before Amp is resolved") };
-        let result = sync_amp_cache_with(dir.path(), false, false, must_not_run).unwrap();
+            || -> Result<Amp> { panic!("state must be checked before Amp is prepared") };
+        let result = sync_amp_cache_with(&cache, false, false, must_not_run).unwrap();
         assert!(!result.synced);
         assert!(!path.exists());
+
+        fs::create_dir(&cache).unwrap();
+        let draft = initial_state_path(&cache);
+        fs::write(&draft, b"not JSON").unwrap();
+        assert!(sync_amp_cache_with(&cache, true, true, must_not_run).is_err());
+        assert_eq!(fs::read(&draft).unwrap(), b"not JSON");
+        fs::remove_file(draft).unwrap();
+
         for state in [
             r#"{"version":3,"syncedAt":"2026-11-19T05:20:21Z","threads":{}}"#,
             r#"{"version":1,"syncedAt":null,"threads":{}}"#,
@@ -1011,12 +1049,28 @@ printf '%s\n' "$response"
         ] {
             fs::write(&path, state).unwrap();
             for explicit in [false, true] {
-                let error =
-                    sync_amp_cache_with(dir.path(), true, explicit, must_not_run).unwrap_err();
+                let error = sync_amp_cache_with(&cache, true, explicit, must_not_run).unwrap_err();
                 assert!(!format!("{error:#}").contains("private-value"));
                 assert_eq!(fs::read_to_string(&path).unwrap(), state);
             }
         }
+        assert!(!threads_dir(&cache).exists());
+        assert_eq!(policy_lock(&cache).unwrap().metadata().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn failed_amp_preparation_keeps_legacy_policy_unmarked() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = dir.path().join("amp-cache");
+        let result = sync_amp_cache_with(&cache, false, true, || {
+            assert!(policy_lock(&cache).is_err());
+            anyhow::bail!("synthetic Amp preparation failure");
+        })
+        .unwrap();
+
+        assert_eq!(result.error.as_deref(), Some("synthetic Amp preparation failure"));
+        assert!(!cache.exists());
+        assert_eq!(policy_lock(&cache).unwrap().metadata().unwrap().len(), 0);
     }
 
     #[cfg(unix)]
@@ -1063,6 +1117,7 @@ printf '%s\n' "$response"
         assert_eq!(result["exported"], 0);
         assert_eq!(result["failed"], 0);
         assert_eq!(result["pending"], 1);
+        assert_eq!(result["droppedPending"], 0);
         assert_eq!(result["autoRefreshEnabled"], false);
         assert!(result["error"].as_str().unwrap().contains("amp threads search"));
         for name in ["search.before", "initial-state.json"] {
@@ -1143,7 +1198,7 @@ printf '%s\n' "$response"
 
     #[cfg(unix)]
     #[test]
-    fn stranded_update_remains_pending_until_that_watermark_exports() {
+    fn rediscovered_pending_retries_even_with_a_stale_list_watermark() {
         let amp = SyntheticAmp::new();
         amp.response("search", json!([{"id":"T-1","updatedAt":FIRST}]));
         amp.response("T-1", json!({"id":"T-1","messages":[]}));
@@ -1157,24 +1212,110 @@ printf '%s\n' "$response"
             assert_eq!(state["threads"]["T-1"], FIRST);
             assert_eq!(state["pending"]["T-1"], UPDATED);
         }
+        fs::remove_file(amp.dir().join("T-1.before")).unwrap();
 
         amp.response("search", json!([{"id":"T-2","updatedAt":FIRST}]));
         amp.response("T-2", json!({"id":"T-2","messages":[]}));
-        let result = amp.sync(true, true);
+        let result = amp.sync(true, false);
         assert_eq!((result.exported, result.failed), (1, 0));
         assert_eq!(result.pending, Some(1));
+        assert_eq!(result.dropped_pending, 0);
         assert_eq!(result.auto_refresh_enabled, Some(true));
+        assert!(!amp.dir().join("T-1.before").exists());
 
-        amp.response("search", json!([{"id":"T-1","updatedAt":FIRST}]));
+        amp.response("search", json!([]));
+        amp.response("list", json!([{"id":"T-1","updated":FIRST,"messageCount":0}]));
         amp.response("T-1", json!({"id":"T-1","messages":[]}));
-        assert_eq!(amp.sync(true, true).exported, 1);
-        assert_eq!(amp.read_json("state.json")["pending"]["T-1"], UPDATED);
-
-        amp.response("search", json!([{"id":"T-1","updatedAt":UPDATED}]));
         assert_eq!(amp.sync(false, false).exported, 1);
         let state = amp.read_json("state.json");
         assert_eq!(state["threads"]["T-1"], UPDATED);
         assert!(state.get("pending").is_none());
+        amp.response("list", json!([{"id":"T-1","updated":FIRST,"messageCount":1}]));
+        assert_eq!(amp.sync(false, false).exported, 0);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn manual_force_retains_unseen_pending_on_export_failure_and_reexports_on_return() {
+        let amp = SyntheticAmp::new();
+        amp.response(
+            "search",
+            json!([{"id":"T-1","updatedAt":FIRST}, {"id":"T-3","updatedAt":FIRST}]),
+        );
+        for id in ["T-1", "T-3"] {
+            amp.response(id, json!({"id":id,"messages":[]}));
+        }
+        assert_eq!(amp.sync(false, true).exported, 2);
+        let cache = threads_dir(amp.dir()).join("T-1.json");
+        let cached = fs::read(&cache).unwrap();
+
+        amp.response("search", json!([{"id":"T-1","updatedAt":UPDATED}]));
+        fs::remove_file(amp.dir().join("T-1.response")).unwrap();
+        assert_eq!(amp.sync(false, false).failed, 1);
+        fs::remove_file(amp.dir().join("T-1.before")).unwrap();
+
+        amp.response(
+            "search",
+            json!([{"id":"T-2","updatedAt":FIRST}, {"id":"T-4","updatedAt":FIRST}]),
+        );
+        amp.response("T-2", json!({"id":"T-2","messages":[]}));
+        let result = amp.sync(true, true);
+        assert_eq!((result.exported, result.failed, result.pending), (1, 1, Some(2)));
+        assert_eq!(result.dropped_pending, 0);
+        assert_eq!(amp.read_json("state.json")["pending"], json!({"T-1":UPDATED,"T-4":FIRST}));
+
+        amp.response("T-4", json!({"id":"T-4","messages":[]}));
+        let result = amp.sync(true, true);
+        assert!(result.synced);
+        assert_eq!((result.exported, result.pending, result.dropped_pending), (2, Some(0), 1));
+        assert_eq!(
+            amp.read_json("state.json")["threads"],
+            json!({"T-2":FIRST,"T-3":FIRST,"T-4":FIRST}),
+        );
+        assert!(!amp.dir().join("T-1.before").exists());
+        assert_eq!(fs::read(&cache).unwrap(), cached);
+
+        amp.response("search", json!([{"id":"T-1","updatedAt":FIRST}]));
+        amp.response("T-1", json!({"id":"T-1","messages":[]}));
+        assert_eq!(amp.sync(false, false).exported, 1);
+        assert_eq!(amp.read_json("state.json")["threads"]["T-1"], FIRST);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn manual_force_enables_first_sync_only_after_discovery_and_state_write_succeed() {
+        let amp = SyntheticAmp::new();
+        amp.response("search", json!([{"id":"T-1","updatedAt":UPDATED}]));
+        assert_eq!(amp.sync(false, true).failed, 1);
+        let draft = initial_state_path(amp.dir());
+        let original = fs::read(&draft).unwrap();
+
+        fs::remove_file(amp.dir().join("search.response")).unwrap();
+        let result = amp.sync(true, true);
+        assert!(result.error.as_deref().unwrap().contains("amp threads search"));
+        assert_eq!(result.dropped_pending, 0);
+        assert_eq!(fs::read(&draft).unwrap(), original);
+        assert!(!state_path(amp.dir()).exists());
+
+        amp.response("search", json!([]));
+        let blocked = draft.with_extension(format!("{}.tmp", std::process::id()));
+        fs::create_dir(&blocked).unwrap();
+        let result = amp.sync(true, true);
+        assert!(!result.synced);
+        assert!(result.error.is_some());
+        assert_eq!((result.pending, result.dropped_pending), (Some(1), 0));
+        assert_eq!(fs::read(&draft).unwrap(), original);
+        assert!(!state_path(amp.dir()).exists());
+        fs::remove_dir(blocked).unwrap();
+
+        let result = serde_json::to_value(amp.sync(true, true)).unwrap();
+        assert_eq!(result["synced"], true);
+        assert_eq!(result["exported"], 0);
+        assert_eq!(result["pending"], 0);
+        assert_eq!(result["droppedPending"], 1);
+        assert_eq!(result["autoRefreshEnabled"], true);
+        assert!(!draft.exists());
+        assert!(state_path(amp.dir()).is_file());
     }
 
     #[cfg(unix)]

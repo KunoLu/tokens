@@ -207,7 +207,10 @@ to page through listed threads. It also runs
 threads that the list can miss and get more up-to-date activity timestamps.
 It runs `amp threads export <thread-id>` for new or changed threads and for
 missing cache files. `tokens amp sync --force` re-exports all discovered
-threads.
+threads. Only after discovery and every export succeed does it clear retry
+entries for threads no longer visible. `droppedPending` reports how many.
+Their cached usage stays on disk; a later rediscovery triggers a fresh export.
+Ordinary sync keeps unresolved entries and never requests an undiscovered ID.
 
 Tokens does not read Amp credentials. The local `amp` CLI uses its own sign-in.
 The cache stores only usage metadata in

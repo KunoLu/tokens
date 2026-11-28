@@ -9,6 +9,7 @@
   "top.amp.exportsFailed": "  Amp：{failed} 个线程导出失败，已保留原有缓存：{error}",
   "top.amp.invalidState": "Amp 同步状态无法读取或格式不受支持。请保留状态与线程缓存，修复状态或使用兼容的 CLI。",
   "top.amp.pendingExports": "仍有 {pending} 个已知线程更新待导出。请再次运行 `tokens amp sync`；只能重试当次重新发现的线程。",
+  "top.amp.droppedPending": "已清除 {count} 个不可见线程的重试待办；已保存的用量文件未删除。",
   "top.amp.autoRefreshEnabled": "Amp 自动刷新：已启用。",
   "top.amp.autoRefreshDisabled": "Amp 自动刷新：未启用。请手动完成 `tokens amp sync` 以启用。",
   "top.amp.lockFailed": "无法锁定 Amp 同步缓存。",

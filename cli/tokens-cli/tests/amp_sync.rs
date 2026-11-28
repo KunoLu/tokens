@@ -715,3 +715,34 @@ fn legacy_replace_blocks_first_cloud_sync_until_the_submission_returns() {
     fixture.sync(&[], 2, 0);
     fixture.assert_calls(BOTH_EXPORTS);
 }
+
+#[test]
+fn amp_force_drops_only_invisible_retry_work_and_reexports_on_rediscovery() {
+    let fixture = AmpFixture::new();
+    fixture.sync(&[], 2, 0);
+    fixture.assert_calls(BOTH_EXPORTS);
+    let recent = fixture.cached_thread(RECENT);
+    let cached = fs::read(&recent).unwrap();
+    fixture.discovery(FIRST, UPDATED);
+    let failure = fixture.fail_export(RECENT);
+    fixture.sync(&[], 0, 1);
+    fixture.assert_calls(&["list", "search", RECENT]);
+
+    fixture.response("search", json!([]));
+    let kept = output_json(&fixture.run(&["amp", "sync", "--json"]));
+    assert_eq!(kept["pending"], 1);
+    fixture.assert_calls(&["list", "search"]);
+    let recovered = output_json(&fixture.run(&["amp", "sync", "--json", "--force"]));
+    assert_eq!(recovered["droppedPending"], 1);
+    assert_eq!(recovered["pending"], 0);
+    assert_eq!(fs::read(&recent).unwrap(), cached);
+    fixture.assert_calls(&["list", "search", LISTED]);
+
+    fs::remove_file(failure).unwrap();
+    fixture.discovery(FIRST, FIRST);
+    fixture.response(RECENT, thread(RECENT, 41));
+    fixture.sync(&[], 1, 0);
+    fixture.assert_calls(&["list", "search", RECENT]);
+    let refreshed: Value = serde_json::from_slice(&fs::read(&recent).unwrap()).unwrap();
+    assert_eq!(refreshed["usageLedger"]["events"][0]["tokens"]["output"], 41);
+}

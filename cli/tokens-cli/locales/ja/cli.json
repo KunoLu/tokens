@@ -3,7 +3,7 @@
   "cli.amp.status.about": "Amp の同期状態を表示します",
   "cli.amp.status.json.help": "JSON で出力します",
   "cli.amp.sync.about": "ampcode.com の Amp スレッドをローカルキャッシュに同期します",
-  "cli.amp.sync.force.help": "新規・変更分だけでなく、検出したすべてのスレッドを再エクスポートします",
+  "cli.amp.sync.force.help": "検出した全スレッドを再エクスポートし、成功時に未検出スレッドの再試行項目を解除します。使用量のキャッシュは削除しません",
   "cli.amp.sync.json.help": "JSON で出力します",
   "cli.antigravity.about": "Antigravity 連携コマンド",
   "cli.antigravity.purge-cache.about": "キャッシュされた Antigravity 使用量の成果物を削除します",

@@ -398,7 +398,7 @@ enum HindsightSubcommand {
 enum AmpSubcommand {
     #[command(about = "Sync Amp threads from ampcode.com into local cache")]
     Sync {
-        #[arg(long, help = "Re-export every discovered thread, not only new or changed ones")]
+        #[arg(long, help = "Re-export all visible threads; on success, clear retries for threads no longer visible without deleting cached usage")]
         force: bool,
         #[arg(long, help = "Output as JSON")]
         json: bool,
