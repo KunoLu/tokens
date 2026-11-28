@@ -225,11 +225,11 @@ fn print_amp_refresh_status(enabled: bool, pending: usize) {
 }
 
 /// A legacy-only replacement keeps the first cloud sync out until upload finishes.
-pub fn guard_replacement_cache() -> Result<fs::File> {
+pub(super) fn guard_replacement_cache() -> Result<PolicyLock> {
     let dir = get_amp_cache_dir();
     let lock = policy_lock(&dir).map_err(|_| anyhow::anyhow!(t!("cli.submit.ampReplaceIncomplete")))?;
     anyhow::ensure!(
-        lock.metadata()?.len() == 0
+        lock.file.metadata()?.len() == 0
             && fs::symlink_metadata(&dir).is_err_and(|err| err.kind() == ErrorKind::NotFound),
         t!("cli.submit.ampReplaceIncomplete")
     );
@@ -374,9 +374,9 @@ fn sync_amp_cache_with(
     let sync = || {
         let amp = prepare_amp()?;
         // Unavailable Amp must not mark a legacy-only configuration as cloud-backed.
-        if lock.metadata()?.len() == 0 {
-            lock.set_len(1)?;
-            lock.sync_data()?;
+        if lock.file.metadata()?.len() == 0 {
+            lock.file.set_len(1)?;
+            lock.file.sync_data()?;
         }
         fs::create_dir_all(&dir)?;
         sync_discovered_threads(&amp, cache_dir, &dir, force, manual, initialized, &mut progress)
@@ -744,7 +744,19 @@ fn run_amp(amp: &Amp, operation: &str, args: &[&str], timeout: Duration) -> Resu
         .map_err(anyhow::Error::msg)
 }
 
-fn policy_lock(cache_dir: &Path) -> Result<fs::File> {
+pub(super) struct PolicyLock {
+    file: fs::File,
+}
+
+impl Drop for PolicyLock {
+    fn drop(&mut self) {
+        // flock is tied to the open file description. A concurrent fork can
+        // still hold a duplicate until exec, even with close-on-exec set.
+        let _ = fs2::FileExt::unlock(&self.file);
+    }
+}
+
+fn policy_lock(cache_dir: &Path) -> Result<PolicyLock> {
     let config = cache_dir.parent().context(t!("top.amp.lockFailed"))?;
     fs::create_dir_all(config).context(t!("top.amp.lockFailed"))?;
     let path = config.join(".amp-cloud.lock");
@@ -763,7 +775,7 @@ fn policy_lock(cache_dir: &Path) -> Result<fs::File> {
     let lock = options.open(path).context(t!("top.amp.lockFailed"))?;
     anyhow::ensure!(lock.metadata()?.is_file(), t!("top.amp.lockFailed"));
     match fs2::FileExt::try_lock_exclusive(&lock) {
-        Ok(()) => Ok(lock),
+        Ok(()) => Ok(PolicyLock { file: lock }),
         Err(error) if crate::commands::autosubmit::is_lock_contention(&error) => {
             anyhow::bail!(t!("top.amp.syncInProgress"))
         }
@@ -1062,7 +1074,7 @@ printf '%s\n' "$response"
             }
         }
         assert!(!threads_dir(&cache).exists());
-        assert_eq!(policy_lock(&cache).unwrap().metadata().unwrap().len(), 0);
+        assert_eq!(policy_lock(&cache).unwrap().file.metadata().unwrap().len(), 0);
     }
 
     #[test]
@@ -1077,7 +1089,7 @@ printf '%s\n' "$response"
 
         assert_eq!(result.error.as_deref(), Some("synthetic Amp preparation failure"));
         assert!(!cache.exists());
-        assert_eq!(policy_lock(&cache).unwrap().metadata().unwrap().len(), 0);
+        assert_eq!(policy_lock(&cache).unwrap().file.metadata().unwrap().len(), 0);
     }
 
     #[cfg(unix)]
@@ -1396,10 +1408,15 @@ printf '%s\n' "$response"
         let dir = tempfile::tempdir().unwrap();
         let cache = dir.path().join("amp-cache");
         let guard = policy_lock(&cache).unwrap();
+        // Keep the same open file description alive past the guard, as a
+        // parallel fork can do before its close-on-exec descriptors are closed.
+        let inherited = guard.file.try_clone().unwrap();
         assert!(policy_lock(&cache).is_err());
         assert!(!cache.exists());
         drop(guard);
-        assert_eq!(policy_lock(&cache).unwrap().metadata().unwrap().len(), 0);
+        let next = policy_lock(&cache).unwrap();
+        assert_eq!(next.file.metadata().unwrap().len(), 0);
+        drop(inherited);
     }
 
     #[test]
