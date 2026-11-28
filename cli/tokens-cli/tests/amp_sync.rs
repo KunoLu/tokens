@@ -732,6 +732,14 @@ fn amp_force_drops_only_invisible_retry_work_and_reexports_on_rediscovery() {
     let kept = output_json(&fixture.run(&["amp", "sync", "--json"]));
     assert_eq!(kept["pending"], 1);
     fixture.assert_calls(&["list", "search"]);
+    let listed_failure = fixture.fail_export(LISTED);
+    let blocked = output_json(&fixture.run(&["amp", "sync", "--json", "--force"]));
+    assert_eq!(blocked["pending"], 2);
+    assert_eq!(blocked["droppedPending"], 0);
+    assert_eq!(blocked["failed"], 1);
+    assert_eq!(fs::read(&recent).unwrap(), cached);
+    fixture.assert_calls(&["list", "search", LISTED]);
+    fs::remove_file(listed_failure).unwrap();
     let recovered = output_json(&fixture.run(&["amp", "sync", "--json", "--force"]));
     assert_eq!(recovered["droppedPending"], 1);
     assert_eq!(recovered["pending"], 0);
@@ -739,7 +747,11 @@ fn amp_force_drops_only_invisible_retry_work_and_reexports_on_rediscovery() {
     fixture.assert_calls(&["list", "search", LISTED]);
 
     fs::remove_file(failure).unwrap();
-    fixture.discovery(FIRST, FIRST);
+    // The returned ID is visible but list still reports its stale zero message count.
+    fixture.response("list", json!([
+        {"id":LISTED, "updated":FIRST, "messageCount":2},
+        {"id":RECENT, "updated":FIRST, "messageCount":0}
+    ]));
     fixture.response(RECENT, thread(RECENT, 41));
     fixture.sync(&[], 1, 0);
     fixture.assert_calls(&["list", "search", RECENT]);

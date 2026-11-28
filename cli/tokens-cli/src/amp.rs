@@ -55,7 +55,7 @@ const LIST_TIMEOUT: Duration = Duration::from_secs(120);
 const EXPORT_TIMEOUT: Duration = Duration::from_secs(300);
 const MAX_STDOUT_MIB: usize = 32;
 const EXPORT_WORKERS: usize = 4;
-const STATE_VERSION: u32 = 2;
+const STATE_VERSION: u32 = 3;
 
 pub fn get_amp_cache_dir() -> PathBuf {
     crate::paths::get_config_dir().join("amp-cache")
@@ -89,14 +89,23 @@ fn state_file_exists(path: &Path) -> bool {
 struct AmpSyncState {
     version: u32,
     synced_at: Option<DateTime<Utc>>,
-    /// Thread id -> latest update time confirmed by a successful export.
-    threads: BTreeMap<String, DateTime<Utc>>,
+    /// Last successful export watermark. A null entry only requests a fresh
+    /// export if the ID reappears; it is not active work or proof of coverage.
+    threads: BTreeMap<String, Option<DateTime<Utc>>>,
     /// Thread id -> latest observed or requested export still outstanding.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pending: BTreeMap<String, DateTime<Utc>>,
 }
 
 impl AmpSyncState {
+    fn eligible(&self, id: &str, count: Option<i64>) -> bool {
+        count != Some(0) || self.pending.contains_key(id) || matches!(self.threads.get(id), Some(None))
+    }
+
+    fn needs_export(&self, id: &str, updated: DateTime<Utc>) -> bool {
+        self.threads.get(id).copied().flatten().is_none_or(|known| updated > known)
+    }
+
     fn record_pending(&mut self, id: &str, updated: DateTime<Utc>) -> bool {
         if let Some(pending) = self.pending.get_mut(id) {
             if updated <= *pending {
@@ -393,11 +402,11 @@ impl SyncProgress<'_> {
 
     fn observe<'a>(
         &mut self,
-        observations: impl Iterator<Item = (&'a str, DateTime<Utc>)>,
+        observations: impl Iterator<Item = (&'a str, DateTime<Utc>, Option<i64>)>,
     ) -> Result<()> {
         let mut recorded = false;
-        for (id, updated) in observations {
-            if self.state.threads.get(id).is_none_or(|known| updated > *known) {
+        for (id, updated, count) in observations {
+            if self.state.eligible(id, count) && self.state.needs_export(id, updated) {
                 recorded |= self.state.record_pending(id, updated);
             }
         }
@@ -424,7 +433,7 @@ fn sync_discovered_threads(
         .filter_map(|(id, (updated, _))| {
             (force
                 || state.pending.contains_key(&id)
-                || state.threads.get(&id).is_none_or(|known| updated > *known)
+                || state.needs_export(&id, updated)
                 || !fs::symlink_metadata(dir.join(format!("{id}.json")))
                     .is_ok_and(|metadata| metadata.is_file()))
             .then_some((id, updated))
@@ -464,11 +473,8 @@ fn sync_discovered_threads(
                             .pending
                             .remove(&id)
                             .map_or(updated, |pending| pending.max(updated));
-                        state
-                            .threads
-                            .entry(id)
-                            .and_modify(|known| *known = (*known).max(updated))
-                            .or_insert(updated);
+                        let known = state.threads.entry(id).or_default();
+                        *known = Some(known.map_or(updated, |previous| previous.max(updated)));
                         result.exported += 1;
                     }
                     Err(error) => {
@@ -488,8 +494,8 @@ fn sync_discovered_threads(
         let pending = std::mem::take(&mut progress.state.pending);
         let count = pending.len();
         for id in pending.into_keys() {
-            // Keep cached usage but force a fresh export if the thread returns.
-            progress.state.threads.remove(&id);
+            // Retain only the rediscovery obligation, never poll this invisible ID.
+            progress.state.threads.insert(id, None);
         }
         count
     } else {
@@ -527,7 +533,7 @@ fn find_threads(amp: &Amp, progress: &mut SyncProgress<'_>) -> Result<Discovered
     let mut threads = BTreeMap::new();
     let listed = list_threads(amp, &mut threads, progress);
     // A stale list count must not hide a previously discovered unfinished thread.
-    threads.retain(|id, (_, count)| *count != Some(0) || progress.state.pending.contains_key(id));
+    threads.retain(|id, (_, count)| progress.state.eligible(id, *count));
     progress.result.threads = threads.len();
     listed?;
 
@@ -535,7 +541,7 @@ fn find_threads(amp: &Amp, progress: &mut SyncProgress<'_>) -> Result<Discovered
     let checkpoint = progress.observe(
         recent
             .iter()
-            .map(|thread| (thread.id.as_str(), thread.updated_at)),
+            .map(|thread| (thread.id.as_str(), thread.updated_at, None)),
     );
     for thread in recent {
         threads
@@ -586,8 +592,7 @@ fn list_threads(
         // Commit valid observations before asking Amp for another page or search.
         let checkpoint = progress.observe(
             page.iter()
-                .filter(|thread| thread.message_count != Some(0))
-                .map(|thread| (thread.id.as_str(), thread.updated)),
+                .map(|thread| (thread.id.as_str(), thread.updated, thread.message_count)),
         );
         let last_page = page.len() < LIST_PAGE_SIZE;
         offset += page.len();
@@ -797,9 +802,10 @@ fn read_state(path: &Path, committed: bool) -> Result<Option<AmpSyncState>> {
     }
     let bytes = fs::read(path).map_err(|_| invalid())?;
     let state: AmpSyncState = serde_json::from_slice(&bytes).map_err(|_| invalid())?;
+    let supported_legacy = (state.version == 2 || (committed && state.version == 1 && state.pending.is_empty()))
+        && state.threads.values().all(Option::is_some);
     anyhow::ensure!(
-        (state.version == STATE_VERSION
-            || (committed && state.version == 1 && state.pending.is_empty()))
+        (state.version == STATE_VERSION || supported_legacy)
             && (!committed || state.synced_at.is_some())
             && state
                 .threads
@@ -1040,7 +1046,8 @@ printf '%s\n' "$response"
         fs::remove_file(draft).unwrap();
 
         for state in [
-            r#"{"version":3,"syncedAt":"2026-11-19T05:20:21Z","threads":{}}"#,
+            r#"{"version":4,"syncedAt":"2026-11-19T05:20:21Z","threads":{}}"#,
+            r#"{"version":2,"syncedAt":"2026-11-19T05:20:21Z","threads":{"T-1":null}}"#,
             r#"{"version":1,"syncedAt":null,"threads":{}}"#,
             r#"{"version":1,"syncedAt":"2026-11-19T05:20:21Z","threads":{"T-1":"private-value"}}"#,
             r#"{"version":1,"syncedAt":"2026-11-19T05:20:21Z","threads":{"../private-value":"2026-11-19T05:20:21Z"}}"#,
@@ -1270,7 +1277,7 @@ printf '%s\n' "$response"
         assert_eq!((result.exported, result.pending, result.dropped_pending), (2, Some(0), 1));
         assert_eq!(
             amp.read_json("state.json")["threads"],
-            json!({"T-2":FIRST,"T-3":FIRST,"T-4":FIRST}),
+            json!({"T-1":null,"T-2":FIRST,"T-3":FIRST,"T-4":FIRST}),
         );
         assert!(!amp.dir().join("T-1.before").exists());
         assert_eq!(fs::read(&cache).unwrap(), cached);

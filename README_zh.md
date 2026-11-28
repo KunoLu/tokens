@@ -156,6 +156,7 @@ curl -fsSL https://raw.githubusercontent.com/KunoLu/tokens/v1.0.6/pre-install-to
 
 同步用 `amp threads list --json --include-archived --limit 500 --offset <offset>` 分页读取列表。它还用 `amp threads search author:me --json --limit 100` 补充列表可能漏掉的近期活跃线程，并获取更新的活动时间戳。新建、变更或缺少缓存文件的线程通过 `amp threads export <thread-id>` 导出。`tokens amp sync --force` 会重新导出所有找到的线程。
 普通同步保留待办，不按未重新发现的旧 ID 请求导出。手动 `--force` 仅在完整发现且所有可见线程都导出成功后，清除不可见线程的重试待办，用 `droppedPending` 报告数量。不删已有用量；以后再次发现该线程仍会重新导出。可用此方式完成因线程离开搜索窗口而中断的首次启用。
+同步可读取 v1/v2 的旧水位，下次写状态时保存为 v3。v3 记住已清待办的 ID，不主动查询；再次发现时，即使列表仍报告零条消息也会重新导出。请一并保留状态与缓存。
 
 Tokens 不读取 Amp 凭据；本机 `amp` CLI 使用自己的登录状态。`<Tokens 配置目录>/amp-cache/threads/T-<id>.json` 只保存用量元数据，不写入提示词、回复、工具输出或线程标题。macOS 和 Linux 的配置目录通常为 `~/.config/tokens`，可用 `TOKENS_CONFIG_DIR` 覆盖；`tokens amp status` 显示实际缓存路径。
 

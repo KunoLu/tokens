@@ -211,6 +211,9 @@ threads. Only after discovery and every export succeed does it clear retry
 entries for threads no longer visible. `droppedPending` reports how many.
 Their cached usage stays on disk; a later rediscovery triggers a fresh export.
 Ordinary sync keeps unresolved entries and never requests an undiscovered ID.
+The sync state reads earlier v1/v2 watermarks and writes v3 on the next state
+update. V3 remembers a cleared ID without polling it, so even a stale zero
+message count on rediscovery cannot hide it. Keep this state with the cache.
 
 Tokens does not read Amp credentials. The local `amp` CLI uses its own sign-in.
 The cache stores only usage metadata in
