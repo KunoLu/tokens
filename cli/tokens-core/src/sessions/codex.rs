@@ -601,6 +601,7 @@ fn parse_codex_reader<R: BufRead>(
     fallback_timestamp: i64,
     start_offset: u64,
     mut state: CodexParseState,
+    history_turn: Option<fn(&str) -> bool>,
 ) -> ParsedCodexFile {
     let uncompressed_path = uncompressed_rollout_path(path);
     let session_id = session_id_from_path(&uncompressed_path);
@@ -897,6 +898,13 @@ fn parse_codex_reader<R: BufRead>(
                     handled = true;
                 }
 
+                if entry.entry_type == "history_mutation"
+                    && history_turn.is_some_and(|is_human| is_human(trimmed))
+                {
+                    state.pending_turn_start = true;
+                    handled = true;
+                }
+
                 // Process token_count events
                 if is_token_count {
                     let Some(info) = payload.info else {
@@ -1078,42 +1086,46 @@ fn parse_codex_reader<R: BufRead>(
                         message.is_turn_start = true;
                         state.pending_turn_start = false;
                     }
-                    message.dedup_key = Some(if let Some((_, response_key, _)) = compaction {
-                        response_key
+                    let identity = if let Some((_, response_key, _)) = compaction {
+                        TokenCountIdentity::Exact(response_key)
                     } else {
                         let meta_owner = state.session_id_from_meta.as_deref();
                         let owner = meta_owner.or(filename_thread).unwrap_or_else(|| {
                             path_scope.get_or_init(|| rollout_path_scope(&uncompressed_path))
                         });
-                        if parsed_timestamp.is_some() || total_usage.is_some() {
-                            // Cumulative history can be replayed under sibling
-                            // forks. Timestamp alone is not replay evidence:
-                            // scope last-only increments to the actual thread.
-                            let scope = if total_usage.is_some() {
-                                state.session_forked_from_id.as_deref().unwrap_or(owner)
-                            } else {
-                                owner
-                            };
-                            codex_token_count_dedup_key(
-                                &message,
-                                model.as_deref().unwrap_or("unknown"),
-                                scope,
-                                total_usage,
-                                parsed_timestamp.unwrap_or(timestamp),
-                            )
+                        if let Some(totals) = total_usage {
+                            TokenCountIdentity::Cumulative {
+                                scope: Cow::Borrowed(
+                                    state.session_forked_from_id.as_deref().unwrap_or(owner),
+                                ),
+                                totals,
+                            }
+                        } else if let Some(ended_at) = parsed_timestamp {
+                            TokenCountIdentity::TimedLast {
+                                owner: Cow::Borrowed(owner),
+                                turn: payload
+                                    .turn_id
+                                    .as_deref()
+                                    .filter(|id| !id.is_empty())
+                                    .or(state.current_turn_id.as_deref())
+                                    .unwrap_or_default()
+                                    .into(),
+                                ended_at,
+                            }
                         } else {
                             // Position distinguishes repeated increments.
                             // Without metadata, matching positions in files
                             // with the same name need not hold the same row.
                             let row_start = consumed_offset - bytes_read as u64;
-                            if meta_owner.is_some() {
+                            let key = if meta_owner.is_some() {
                                 format!("codex:token_count-offset:{owner}:{row_start}")
                             } else {
                                 let hash = Sha256::digest(trimmed.as_bytes());
                                 format!("codex:token_count-offset:{owner}:{row_start}:{hash:x}")
-                            }
+                            };
+                            TokenCountIdentity::Exact(key)
                         }
-                    });
+                    };
                     message.set_workspace(
                         state.session_workspace_key.clone(),
                         state.session_workspace_label.clone(),
@@ -1127,12 +1139,18 @@ fn parse_codex_reader<R: BufRead>(
                         }
                     }
                     if model.is_some() {
+                        message.dedup_key = Some(identity.into_key(&message));
                         messages.push(message);
                         if parsed_timestamp.is_none() {
                             fallback_timestamp_indices.push(messages.len() - 1);
                         }
                     } else {
-                        pending_model_messages.push((message, parsed_timestamp.is_none()));
+                        pending_model_messages.push(PendingModelMessage {
+                            message,
+                            identity: identity.into_owned(),
+                            used_fallback_timestamp: parsed_timestamp.is_none(),
+                            infer_provider: state.session_provider.is_none(),
+                        });
                     }
                     handled = true;
                 }
@@ -1482,56 +1500,111 @@ fn duration_between_ms(start_ms: Option<i64>, end_ms: Option<i64>) -> Option<i64
     (duration > 0).then_some(duration)
 }
 
-fn codex_token_count_dedup_key(
-    message: &UnifiedMessage,
-    model: &str,
-    upstream_session_id: &str,
-    total_usage: Option<CodexTotals>,
-    event_timestamp: i64,
-) -> String {
-    if let Some(total) = total_usage {
-        // Codex fork/subagent logs can replay the same upstream token_count
-        // history into many child files with child-local timestamps. The
-        // cumulative total is the stable upstream identity; timestamp is only
-        // a fallback when older rows do not carry totals.
-        return format!(
-            "codex:token_count-total:{}:{}:{}:{}:{}:{}:{}:{}",
-            upstream_session_id,
-            message.provider_id,
-            model,
-            total.input,
-            total.output,
-            total.cached,
-            total.cache_write,
-            total.reasoning
-        );
+/// Request evidence captured at the accounting event, before report timestamps
+/// or later model metadata can change which thread and turn a row belongs to.
+enum TokenCountIdentity<'a> {
+    Exact(String),
+    Cumulative {
+        scope: Cow<'a, str>,
+        totals: CodexTotals,
+    },
+    TimedLast {
+        owner: Cow<'a, str>,
+        turn: Cow<'a, str>,
+        ended_at: i64,
+    },
+}
+
+impl TokenCountIdentity<'_> {
+    fn into_owned(self) -> TokenCountIdentity<'static> {
+        match self {
+            Self::Exact(key) => TokenCountIdentity::Exact(key),
+            Self::Cumulative { scope, totals } => TokenCountIdentity::Cumulative {
+                scope: Cow::Owned(scope.into_owned()),
+                totals,
+            },
+            Self::TimedLast {
+                owner,
+                turn,
+                ended_at,
+            } => TokenCountIdentity::TimedLast {
+                owner: Cow::Owned(owner.into_owned()),
+                turn: Cow::Owned(turn.into_owned()),
+                ended_at,
+            },
+        }
     }
 
-    format!(
-        "codex:token_count:{upstream_session_id}:{event_timestamp}:{}:{}:{}:{}:{}:{}:{}",
-        message.provider_id,
-        model,
-        message.tokens.input,
-        message.tokens.output,
-        message.tokens.cache_read,
-        message.tokens.cache_write,
-        message.tokens.reasoning
-    )
+    fn into_key(self, message: &UnifiedMessage) -> String {
+        let provider = &message.provider_id;
+        let model = &message.model_id;
+        match self {
+            Self::Exact(key) => key,
+            // Forks can replay one cumulative snapshot at many local times.
+            Self::Cumulative { scope, totals } => format!(
+                "codex:token_count-total:{}:{scope}:{}:{provider}:{}:{}:{}:{}:{}:{model}",
+                scope.len(),
+                provider.len(),
+                totals.input,
+                totals.output,
+                totals.cached,
+                totals.cache_write,
+                totals.reasoning,
+            ),
+            Self::TimedLast {
+                owner,
+                turn,
+                ended_at,
+            } => {
+                let tokens = &message.tokens;
+                format!(
+                    "codex:token_count:{}:{owner}:{ended_at}:{}:{turn}:{}:{provider}:{}:{}:{}:{}:{}:{model}",
+                    owner.len(),
+                    turn.len(),
+                    provider.len(),
+                    tokens.input,
+                    tokens.output,
+                    tokens.cache_read,
+                    tokens.cache_write,
+                    tokens.reasoning,
+                )
+            }
+        }
+    }
+}
+
+struct PendingModelMessage {
+    message: UnifiedMessage,
+    identity: TokenCountIdentity<'static>,
+    used_fallback_timestamp: bool,
+    infer_provider: bool,
 }
 
 fn flush_pending_model_messages(
-    pending_model_messages: &mut Vec<(UnifiedMessage, bool)>,
+    pending_model_messages: &mut Vec<PendingModelMessage>,
     messages: &mut Vec<UnifiedMessage>,
     fallback_timestamp_indices: &mut Vec<usize>,
     model: &str,
 ) {
-    for (mut message, used_fallback_timestamp) in pending_model_messages.drain(..) {
-        if !used_fallback_timestamp {
-            message.dedup_key = Some(codex_token_count_dedup_key(
-                &message, model, &message.session_id, None, message.timestamp,
-            ));
+    let inferred_provider = OnceCell::new();
+    for PendingModelMessage {
+        mut message,
+        identity,
+        used_fallback_timestamp,
+        infer_provider,
+    } in pending_model_messages.drain(..)
+    {
+        if model != "unknown" {
+            message.model_id.replace_range(.., model);
+            if infer_provider {
+                let provider =
+                    inferred_provider.get_or_init(|| inferred_provider_from_model(model));
+                if let Some(provider) = provider {
+                    message.provider_id.replace_range(.., provider);
+                }
+            }
         }
-        message.model_id = model.to_string();
+        message.dedup_key = Some(identity.into_key(&message));
         messages.push(message);
         if used_fallback_timestamp {
             fallback_timestamp_indices.push(messages.len() - 1);
@@ -1540,7 +1613,7 @@ fn flush_pending_model_messages(
 }
 
 fn flush_pending_model_messages_as_unknown(
-    pending_model_messages: &mut Vec<(UnifiedMessage, bool)>,
+    pending_model_messages: &mut Vec<PendingModelMessage>,
     messages: &mut Vec<UnifiedMessage>,
     fallback_timestamp_indices: &mut Vec<usize>,
     unresolved_model_events: &mut bool,
@@ -1613,6 +1686,7 @@ fn parse_codex_archive(
     fallback_timestamp: i64,
     start_offset: u64,
     state: CodexParseState,
+    history_turn: Option<fn(&str) -> bool>,
 ) -> ParsedCodexFile {
     let unusable = |state: CodexParseState| ParsedCodexFile {
         messages: Vec::new(),
@@ -1639,7 +1713,7 @@ fn parse_codex_archive(
         inner: decoder.take(MAX_CODEX_ARCHIVE_BYTES + 1),
         failed: false,
     });
-    let parsed = parse_codex_reader(&mut reader, path, fallback_timestamp, 0, state);
+    let parsed = parse_codex_reader(&mut reader, path, fallback_timestamp, 0, state, history_turn);
     if reader.get_ref().failed {
         tracing::warn!(path = %path.display(), "Skipping corrupt or truncated Codex archive");
         return unusable(initial_state);
@@ -1695,9 +1769,18 @@ pub(crate) fn parse_codex_file_incremental(
     start_offset: u64,
     state: CodexParseState,
 ) -> ParsedCodexFile {
+    parse_rollout(path, start_offset, state, None)
+}
+
+pub(super) fn parse_rollout(
+    path: &Path,
+    start_offset: u64,
+    state: CodexParseState,
+    history_turn: Option<fn(&str) -> bool>,
+) -> ParsedCodexFile {
     let fallback_timestamp = file_modified_timestamp_ms(path);
     if is_zst_path(path) {
-        return parse_codex_archive(path, fallback_timestamp, start_offset, state);
+        return parse_codex_archive(path, fallback_timestamp, start_offset, state, history_turn);
     }
 
     let mut file = match std::fs::File::open(path) {
@@ -1728,7 +1811,14 @@ pub(crate) fn parse_codex_file_incremental(
     }
 
     let reader = BufReader::new(file);
-    parse_codex_reader(reader, path, fallback_timestamp, start_offset, state)
+    parse_codex_reader(
+        reader,
+        path,
+        fallback_timestamp,
+        start_offset,
+        state,
+        history_turn,
+    )
 }
 
 fn extract_model(payload: &CodexPayload) -> Option<String> {
@@ -2039,12 +2129,18 @@ mod tests {
         );
         let path = Path::new("session.jsonl");
         for fixture in [CODEX_COMPACTION_FIXTURE, empty_last.as_str()] {
-            let full =
-                parse_codex_reader(Cursor::new(fixture), path, 0, 0, CodexParseState::default());
+            let full = parse_codex_reader(
+                Cursor::new(fixture),
+                path,
+                0,
+                0,
+                CodexParseState::default(),
+                None,
+            );
             let mut state = CodexParseState::default();
             let mut messages = Vec::new();
             for line in fixture.split_inclusive('\n') {
-                let parsed = parse_codex_reader(Cursor::new(line), path, 0, 0, state);
+                let parsed = parse_codex_reader(Cursor::new(line), path, 0, 0, state, None);
                 messages.extend(parsed.messages);
                 state = bincode::deserialize(&bincode::serialize(&parsed.state).unwrap()).unwrap();
             }
@@ -2411,6 +2507,7 @@ mod tests {
             0,
             0,
             CodexParseState::default(),
+            None,
         );
 
         assert!(!parsed.parse_succeeded);

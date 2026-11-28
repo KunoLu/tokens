@@ -39,6 +39,7 @@ fn qoder_test_command(test: &str, home: &Path) -> Command {
     let mut command = Command::new(std::env::current_exe().expect("locate Qoder test binary"));
     command
         .args(["--exact", test, "--format", "pretty"])
+        .current_dir(home)
         .env(QODER_TEST_CHILD, test)
         .env("TOKENS_CONFIG_DIR", home.join("tokens-config"))
         .env("HOME", home)
@@ -139,10 +140,17 @@ fn qoder_observation_dir() -> PathBuf {
     tokens_core::paths::get_cache_dir().join("source-message-cache-v2/qoder")
 }
 
+fn qoder_observation_entries() -> impl Iterator<Item = PathBuf> {
+    qoder_observation_dir()
+        .read_dir()
+        .into_iter()
+        .flatten()
+        .map(|entry| entry.unwrap().path())
+        .filter(|path| path.extension().is_some_and(|ext| ext == "bin"))
+}
+
 fn has_qoder_cache_entry() -> bool {
-    qoder_observation_dir().read_dir().is_ok_and(|mut entries| {
-        entries.any(|entry| entry.unwrap().path().extension().is_some_and(|ext| ext == "bin"))
-    })
+    qoder_observation_entries().next().is_some()
 }
 
 fn total_tokens(messages: &[UnifiedMessage]) -> i64 {
@@ -159,6 +167,8 @@ fn buckets(messages: &[UnifiedMessage]) -> (i64, i64, i64, i64) {
         )
     })
 }
+
+const ANONYMOUS_ONE_REQUEST: &str = r#"{"type":"assistant","timestamp":"2026-11-07T10:00:01Z","message":{"model":"qmodel","usage":{"input_tokens":17}}}"#;
 
 const INTL_ONE_REQUEST: &str = concat!(
     r#"{"type":"runtime-config","sessionId":"sess-intl","model":"qmodel","timestamp":1794041573406}"#,
@@ -1106,6 +1116,222 @@ async fn test_qoder_ide_uses_symlink_target_wal() {
 }
 
 #[tokio::test]
+async fn test_qoder_jsonl_relative_and_absolute_cache_paths_agree() {
+    const TEST: &str = "test_qoder_jsonl_relative_and_absolute_cache_paths_agree";
+    if !is_qoder_test_child(TEST) {
+        let profile = common::temp_home();
+        let projects = profile.path().join(".qoder/projects");
+        std::fs::create_dir_all(&projects).unwrap();
+        run_qoder_test_child(qoder_test_command(TEST, profile.path()).current_dir(projects));
+        return;
+    }
+    let projects = std::env::current_dir().unwrap();
+    let home = common::temp_home();
+    let options_for = |root| {
+        let mut options = qoder_options(home.path());
+        options
+            .scanner_settings
+            .extra_scan_paths
+            .insert("qoder".into(), vec![root]);
+        options
+    };
+    for (case, (slug, first)) in [("-relative", 0), ("-absolute", 1)].into_iter().enumerate() {
+        let absolute = projects.join(slug);
+        write_jsonl(&absolute.join("session.jsonl"), &[ANONYMOUS_ONE_REQUEST]);
+        let subagent = absolute.join("session/subagents/agent-fixture.jsonl");
+        write_jsonl(&subagent, &[ANONYMOUS_ONE_REQUEST]);
+        std::fs::write(
+            subagent.with_extension("meta.json"),
+            r#"{"agentType":"code-reviewer"}"#,
+        )
+        .unwrap();
+
+        let options = [options_for(PathBuf::from(slug)), options_for(absolute)];
+        let scan =
+            |index: usize| parse_local_unified_messages_with_pricing(options[index].clone(), None);
+        let cold = scan(first).await.unwrap();
+        let shards: Vec<_> = qoder_observation_entries().collect();
+        assert_eq!(shards.len(), 2 * (case + 1));
+        let mark = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+        for shard in &shards {
+            std::fs::OpenOptions::new()
+                .write(true)
+                .open(shard)
+                .unwrap()
+                .set_modified(mark)
+                .unwrap();
+        }
+
+        let warm = scan(1 - first).await.unwrap();
+        let uncached = |index: usize| {
+            parse_local_unified_messages_with_pricing_uncached(options[index].clone(), None)
+        };
+        let expected = uncached(1).await.unwrap();
+        assert_eq!(expected.len(), 2);
+        assert_eq!(total_tokens(&expected), 34);
+        assert!(expected
+            .iter()
+            .all(|message| message.workspace_key.as_deref() == Some(slug)));
+        assert!(expected
+            .iter()
+            .any(|message| message.agent.as_deref() == Some("Code Reviewer")));
+        assert_eq!(warm, expected);
+        assert_eq!(cold, expected);
+        assert_eq!(uncached(0).await.unwrap(), expected);
+        assert_eq!(qoder_observation_entries().count(), shards.len());
+        assert!(shards
+            .iter()
+            .all(|shard| shard.metadata().unwrap().modified().unwrap() == mark));
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn test_qoder_cache_prunes_broken_links_not_inaccessible_targets() {
+    use std::os::unix::fs::{symlink, PermissionsExt};
+
+    if rerun_with_isolated_cache("test_qoder_cache_prunes_broken_links_not_inaccessible_targets") {
+        return;
+    }
+    let home = common::temp_home();
+    let target = home.path().join("targets/projects/-target/actual.jsonl");
+    let link = home.path().join(".qoder/projects/-alias/linked.jsonl");
+    write_jsonl(&target, &[ANONYMOUS_ONE_REQUEST]);
+    std::fs::create_dir_all(link.parent().unwrap()).unwrap();
+    symlink(&target, &link).unwrap();
+
+    let live = assert_qoder_cache_parity(home.path(), None).await;
+    assert_eq!(live.len(), 1);
+    assert_eq!(live[0].workspace_key.as_deref(), Some("-alias"));
+    assert_eq!(live[0].session_id, "linked");
+    let shards: Vec<_> = qoder_observation_entries().collect();
+    assert_eq!(shards.len(), 1);
+    let shard = &shards[0];
+    let scan = || parse_local_unified_messages_with_pricing(qoder_options(home.path()), None);
+
+    let parent = target.parent().unwrap();
+    let permissions = parent.metadata().unwrap().permissions();
+    std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o600)).unwrap();
+    let stat = link.metadata();
+    let inaccessible = scan().await;
+    std::fs::set_permissions(parent, permissions).unwrap();
+    if let Err(error) = stat {
+        assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
+        assert!(inaccessible.unwrap().is_empty());
+    } else {
+        // A privileged test runner can still traverse the directory.
+        assert_eq!(inaccessible.unwrap(), live);
+    }
+    assert!(shard.is_file());
+
+    std::fs::remove_file(target).unwrap();
+    assert!(link.symlink_metadata().unwrap().is_symlink());
+    assert_eq!(link.metadata().unwrap_err().kind(), std::io::ErrorKind::NotFound);
+    assert!(scan().await.unwrap().is_empty());
+    assert!(!shard.exists());
+    assert!(link.symlink_metadata().unwrap().is_symlink());
+}
+
+// Map genuine shards to their fixture files so the test can remove sources
+// beyond both the old directory-order limit and the first name-ordered page.
+fn qoder_observation_name(path: &Path) -> String {
+    use sha2::{Digest, Sha256};
+
+    let path = std::path::absolute(path).unwrap();
+    #[cfg(windows)]
+    let digest = {
+        use std::os::windows::ffi::OsStrExt;
+        let mut digest = Sha256::new();
+        for unit in path.as_os_str().encode_wide() {
+            digest.update(unit.to_le_bytes());
+        }
+        digest.finalize()
+    };
+    #[cfg(not(windows))]
+    let digest = Sha256::digest(path.as_os_str().as_encoded_bytes());
+    format!("observations-{digest:x}.bin")
+}
+
+#[tokio::test]
+async fn test_qoder_cache_sweep_advances_across_processes() {
+    const TEST: &str = "test_qoder_cache_sweep_advances_across_processes";
+    const SWEEP_ONLY: &str = "TOKENS_QODER_TEST_SWEEP_ONLY";
+    if rerun_with_isolated_cache(TEST) {
+        return;
+    }
+    let home = common::temp_home();
+    let scan = || parse_local_unified_messages_with_pricing(qoder_options(home.path()), None);
+    if std::env::var_os(SWEEP_ONLY).is_some() {
+        assert!(scan().await.unwrap().is_empty());
+        return;
+    }
+
+    let profile = PathBuf::from(std::env::var_os("HOME").expect("fixture home"));
+    let sweep = || {
+        let mut command = qoder_test_command(TEST, &profile);
+        command.env(SWEEP_ONLY, "1");
+        command
+    };
+    let projects = home.path().join(".qoder").join("projects").join("-repo");
+    let sources: Vec<_> = (0..264)
+        .map(|index| {
+            let path = projects.join(format!("sess-{index}.jsonl"));
+            write_jsonl(&path, &[INTL_ONE_REQUEST]);
+            path
+        })
+        .collect();
+    assert_eq!(total_tokens(&scan().await.unwrap()), 1340);
+    let shards: Vec<_> = qoder_observation_entries().collect();
+    assert_eq!(shards.len(), sources.len());
+    let last_name = shards.iter().max().unwrap();
+    let past_old_limit = shards.iter().skip(258).find(|path| *path != last_name).unwrap();
+    for shard in [last_name, past_old_limit] {
+        let name = shard.file_name().unwrap().to_str().unwrap();
+        let source = sources
+            .iter()
+            .find(|path| qoder_observation_name(path) == name)
+            .unwrap();
+        std::fs::remove_file(source).unwrap();
+    }
+
+    run_qoder_test_child(&mut sweep());
+    assert!(last_name.is_file(), "the first page cannot reach the last shard");
+
+    let lock = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(qoder_observation_dir().join("observations.lock"))
+        .unwrap();
+    fs2::FileExt::lock_exclusive(&lock).unwrap();
+    std::thread::scope(|scope| {
+        let (done, finished) = std::sync::mpsc::channel();
+        let sweep = &sweep;
+        scope.spawn(move || {
+            run_qoder_test_child(&mut sweep());
+            let _ = done.send(());
+        });
+        let skipped = finished.recv_timeout(std::time::Duration::from_secs(5));
+        drop(lock);
+        assert!(skipped.is_ok(), "cleanup must not wait for a publisher");
+    });
+    assert!(
+        last_name.is_file(),
+        "cleanup must not prune under a publisher's lock"
+    );
+
+    std::thread::scope(|scope| {
+        scope.spawn(|| run_qoder_test_child(&mut sweep()));
+        scope.spawn(|| run_qoder_test_child(&mut sweep()));
+    });
+    assert!(!last_name.exists());
+    assert!(!past_old_limit.exists());
+    assert_eq!(qoder_observation_entries().count(), shards.len() - 2);
+    for path in shards.iter().filter(|path| *path != last_name && *path != past_old_limit) {
+        assert!(path.is_file(), "keep live sources outside the current scan");
+    }
+}
+
+#[tokio::test]
 async fn test_qoder_cache_removes_only_owned_orphans() {
     if rerun_with_isolated_cache("test_qoder_cache_removes_only_owned_orphans") {
         return;
@@ -1117,22 +1343,16 @@ async fn test_qoder_cache_removes_only_owned_orphans() {
         write_ide_request(path, "orphan", "{}", r#"{"prompt_tokens":17}"#);
     }
 
-    let entries = || {
-        qoder_observation_dir()
-            .read_dir()
-            .unwrap()
-            .map(|entry| entry.unwrap().path())
-            .filter(|path| path.extension().is_some_and(|ext| ext == "bin"))
-            .collect::<Vec<_>>()
-    };
     let scan = |home: &Path| parse_local_unified_messages_with_pricing(qoder_options(home), None);
     assert_eq!(total_tokens(&scan(home.path()).await.unwrap()), 17);
-    let orphan = entries().pop().unwrap();
+    let orphan = qoder_observation_entries().next().unwrap();
     assert_eq!(total_tokens(&scan(other_home.path()).await.unwrap()), 17);
-    let retained = entries().into_iter().find(|path| path != &orphan).unwrap();
+    let retained = qoder_observation_entries().find(|path| path != &orphan).unwrap();
 
     let foreign = qoder_observation_dir().join("00.bin");
     let legacy = qoder_observation_dir().join(format!("observations-{}.bin", "0".repeat(64)));
+    let misnamed = qoder_observation_dir().join(format!("observations-{}.bin", "1".repeat(64)));
+    std::fs::copy(&orphan, &misnamed).unwrap();
     std::fs::write(&foreign, b"another cache").unwrap();
     std::fs::write(&legacy, b"\x01\x05\x09legacy observation without a path").unwrap();
     std::fs::remove_file(&db).unwrap();
@@ -1140,6 +1360,7 @@ async fn test_qoder_cache_removes_only_owned_orphans() {
     assert!(!orphan.exists());
     assert!(retained.exists(), "a live source outside this scan must be kept");
     assert_eq!(std::fs::read(foreign).unwrap(), b"another cache");
+    assert!(misnamed.is_file(), "the name must match the stored source path");
     assert_eq!(
         std::fs::read(legacy).unwrap(),
         b"\x01\x05\x09legacy observation without a path"

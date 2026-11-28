@@ -11,8 +11,9 @@ use bincode::Options;
 use rusqlite::{ffi, Connection};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::collections::BinaryHeap;
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, BufRead, BufReader, BufWriter, Write};
+use std::io::{self, BufRead, BufReader, BufWriter, Read, Seek, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
@@ -21,6 +22,9 @@ use std::sync::OnceLock;
 const VERSION: [u32; 3] = [2, QODER_PARSER_BASE_VERSION, CACHE_FORMAT_VERSION];
 const MAX_HEADER_BYTES: u64 = 128 * 1024;
 const MAX_SWEEP_ENTRIES: usize = 256;
+const ENTRY_PREFIX: &str = "observations-";
+const ENTRY_SUFFIX: &str = ".bin";
+const ENTRY_NAME_LEN: usize = ENTRY_PREFIX.len() + 64 + ENTRY_SUFFIX.len();
 
 #[derive(PartialEq, Eq, Serialize, Deserialize)]
 enum ObservationFingerprint {
@@ -71,7 +75,7 @@ impl QoderSourceCache {
             if !is_regular_file(&lock_path) {
                 continue;
             }
-            let Ok(lock) = OpenOptions::new().read(true).write(true).open(lock_path) else {
+            let Ok(mut lock) = OpenOptions::new().read(true).write(true).open(lock_path) else {
                 continue;
             };
             if fs2::FileExt::try_lock_exclusive(&lock).is_err() {
@@ -80,26 +84,58 @@ impl QoderSourceCache {
             let Ok(entries) = dir.read_dir() else {
                 continue;
             };
-            for entry in entries.take(MAX_SWEEP_ENTRIES).flatten() {
-                let path = entry.path();
-                let name = entry.file_name();
-                let name = name.to_str().unwrap_or_default();
-                if !name.starts_with("observations-")
-                    || !name.ends_with(".bin")
-                    || name.len() != "observations-".len() + 64 + ".bin".len()
-                    || !entry.file_type().is_ok_and(|ty| ty.is_file())
+            // Directory order is unspecified. Keep the next page by name, not
+            // by offset, so removals and different enumeration orders cannot
+            // skip a shard. Each pass lists names but opens at most one page.
+            // The publishing lock also stores the last name across processes.
+            let mut cursor = [0; ENTRY_NAME_LEN];
+            let has_cursor = lock.read_exact(&mut cursor).is_ok();
+            let after = if has_cursor { cursor.as_slice() } else { &[] };
+            let mut page = BinaryHeap::with_capacity(MAX_SWEEP_ENTRIES);
+            for entry in entries.flatten() {
+                let Ok(name) = entry.file_name().into_string() else {
+                    continue;
+                };
+                let bytes = name.as_bytes();
+                if bytes <= after
+                    || bytes.len() != ENTRY_NAME_LEN
+                    || !bytes.starts_with(ENTRY_PREFIX.as_bytes())
+                    || !bytes.ends_with(ENTRY_SUFFIX.as_bytes())
                 {
                     continue;
                 }
+                if page.len() < MAX_SWEEP_ENTRIES {
+                    page.push(name);
+                } else if let Some(mut last) = page.peek_mut() {
+                    if name < *last {
+                        *last = name;
+                    }
+                }
+            }
+            for name in &page {
+                let path = dir.join(name);
+                if !is_regular_file(&path) {
+                    continue;
+                }
                 if let Ok(Some((_, _, source))) = open_header(&path) {
-                    let source_path = source.to_path_buf();
-                    if source_path.is_absolute()
-                        && entry_name(&source) == name
-                        && is_missing(&source_path)
+                    if entry_name(&source).as_str() != name {
+                        continue;
+                    }
+                    let source = source.to_path_buf();
+                    // Follow source links, but keep shards on permission and other errors.
+                    if source.is_absolute()
+                        && source
+                            .metadata()
+                            .is_err_and(|error| error.kind() == io::ErrorKind::NotFound)
                     {
                         let _ = fs::remove_file(&path);
                     }
                 }
+            }
+            if let Some(last) = page.peek().filter(|_| page.len() == MAX_SWEEP_ENTRIES) {
+                let _ = lock.rewind().and_then(|()| lock.write_all(last.as_bytes()));
+            } else if has_cursor {
+                let _ = lock.set_len(0);
             }
         }
     }
@@ -145,12 +181,10 @@ impl QoderSourceCache {
         &self,
         path: &Path,
         source: QoderSource,
-        parse: impl FnOnce() -> (Vec<QoderObservation>, bool),
+        parse: impl FnOnce(&Path, QoderSource) -> (Vec<QoderObservation>, bool),
     ) -> Vec<QoderObservation> {
-        let Ok(absolute_path) = std::path::absolute(path) else {
-            return parse().0;
-        };
-        let entry = self.entry(&absolute_path, source);
+        debug_assert!(path.is_absolute());
+        let entry = self.entry(path, source);
         let cached = match entry.open() {
             Some((reader, ObservationFingerprint::Jsonl(fingerprint))) => {
                 Some((reader, fingerprint))
@@ -169,10 +203,10 @@ impl QoderSourceCache {
                 fingerprint
             }
             (Some(FingerprintStatus::Changed(fingerprint)), _) => fingerprint,
-            _ => return parse().0,
+            _ => return parse(path, source).0,
         };
 
-        let (observations, complete) = parse();
+        let (observations, complete) = parse(path, source);
         if complete && !observations.is_empty() {
             let fingerprint = ObservationFingerprint::Jsonl(fingerprint);
             self.save(source, &entry, &fingerprint, &observations, || {
@@ -262,7 +296,7 @@ impl Entry {
 fn entry_name(source_path: &CachedPath) -> String {
     let mut digest = Sha256::new();
     source_path.update_digest(&mut digest);
-    format!("observations-{:x}.bin", digest.finalize())
+    format!("{ENTRY_PREFIX}{:x}{ENTRY_SUFFIX}", digest.finalize())
 }
 
 fn is_real_dir(path: &Path) -> bool {

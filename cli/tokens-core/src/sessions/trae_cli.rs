@@ -55,13 +55,18 @@ const TRAE_CLI_AGENT: &str = "TRAE CLI";
 
 pub fn parse_trae_cli_file(path: &Path) -> Vec<UnifiedMessage> {
     parse_token_counts(path).map_or_else(
-        || parse_token_usage_records(path, None, Some).unwrap_or_default(),
+        || parse_token_usage_records(path, None, |key, _| Some(key)).unwrap_or_default(),
         |(messages, _)| messages,
     )
 }
 
 fn parse_token_counts(path: &Path) -> Option<(Vec<UnifiedMessage>, u64)> {
-    let parsed = codex::parse_codex_file_incremental(path, 0, CodexParseState::default());
+    let parsed = codex::parse_rollout(
+        path,
+        0,
+        CodexParseState::default(),
+        Some(history_mutation_line_has_human_turn),
+    );
     if parsed.messages.is_empty() && !parsed.has_explicit_zero_token_count {
         return None;
     }
@@ -93,30 +98,52 @@ impl RolloutCopies<'_> {
                 fallbacks.push(path);
             }
         }
-        if fallbacks.is_empty() {
-            return messages;
-        }
-
-        // Each snapshot file already chose token_count over the response
-        // records it contains. Its overlapping copies must make that same
-        // choice. A response only present in a divergent copy stays counted.
-        let mut covered = HashSet::new();
-        for (path, consumed_offset) in authoritative {
-            let mut keys = Vec::new();
-            let parsed = parse_token_usage_records(path, Some(consumed_offset), |key| {
-                keys.push(key);
-                None
-            });
-            if parsed.is_some() {
-                covered.extend(keys);
+        let mut turn_keys = HashSet::new();
+        if !fallbacks.is_empty() {
+            // Each snapshot file already chose token_count over the response
+            // records it contains. Its overlapping copies must make that same
+            // choice. A response only present in a divergent copy stays counted.
+            let mut covered = HashSet::new();
+            for (path, consumed_offset) in authoritative {
+                let mut keys = Vec::new();
+                let parsed = parse_token_usage_records(path, Some(consumed_offset), |key, _| {
+                    keys.push(key);
+                    None
+                });
+                if parsed.is_some() {
+                    covered.extend(keys);
+                }
+            }
+            for path in fallbacks {
+                let mut covered_turns = Vec::new();
+                if let Some(rows) = parse_token_usage_records(path, None, |key, is_turn| {
+                    if !covered.contains(&key) {
+                        return Some(key);
+                    }
+                    if is_turn {
+                        covered_turns.push(key);
+                    }
+                    None
+                }) {
+                    messages.extend(rows);
+                    turn_keys.extend(covered_turns);
+                }
             }
         }
-        for path in fallbacks {
-            if let Some(rows) = parse_token_usage_records(path, None, |key| {
-                (!covered.contains(&key)).then_some(key)
-            }) {
-                messages.extend(rows);
-            }
+        // Carry turn evidence across exact duplicates before the lane picks
+        // one accounting row. Ordinary snapshots without a response identity
+        // get their marker from their own transcript, not an amount/time match.
+        turn_keys.extend(
+            messages
+                .iter()
+                .filter(|message| message.is_turn_start)
+                .filter_map(|message| message.dedup_key.clone()),
+        );
+        for message in &mut messages {
+            message.is_turn_start |= message
+                .dedup_key
+                .as_ref()
+                .is_some_and(|key| turn_keys.contains(key));
         }
         messages
     }
@@ -226,13 +253,21 @@ fn history_mutation_has_human_turn(payload: &Value) -> bool {
     })
 }
 
-/// Read owned per-response records. The caller chooses whether to report a
-/// record or use its key as evidence of overlap. A failed archive supplies
-/// neither usable rows nor coverage.
+fn history_mutation_line_has_human_turn(line: &str) -> bool {
+    serde_json::from_str::<Value>(line)
+        .ok()
+        .as_ref()
+        .and_then(|entry| entry.get("payload"))
+        .is_some_and(history_mutation_has_human_turn)
+}
+
+/// Read owned per-response records. A caller can preserve evidence of overlap
+/// or a human turn without emitting another accounting row. A failed archive
+/// supplies neither usable rows nor evidence.
 fn parse_token_usage_records(
     path: &Path,
     snapshot_end: Option<u64>,
-    mut select_key: impl FnMut(String) -> Option<String>,
+    mut select_key: impl FnMut(String, bool) -> Option<String>,
 ) -> Option<Vec<UnifiedMessage>> {
     let is_archive = is_zst_path(path);
     // Live rollouts can append between passes. Do not let a response beyond
@@ -383,7 +418,7 @@ fn parse_token_usage_records(
                     }
                 };
                 let is_turn_start = std::mem::take(&mut pending_turn_start);
-                let Some(key) = select_key(key) else {
+                let Some(key) = select_key(key, is_turn_start) else {
                     continue;
                 };
                 let timestamp = entry

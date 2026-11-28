@@ -908,16 +908,17 @@ fn parse_pi_format_file_inner(
                 // recorded usage: an unreadable or zero sibling cannot shift
                 // this key, and repeated identical summaries retain multiplicity.
                 let t = &unified.tokens;
-                let buckets = [t.input, t.output, t.cache_read, t.cache_write];
-                let occurrence = compaction_occurrences
-                    .entry((recorded_timestamp, buckets))
-                    .or_insert(0usize);
-                *occurrence += 1;
-                let id = &unified.session_id;
-                unified.dedup_key = Some(format!(
-                    "{namespace}:compaction:{id}:{recorded_timestamp:?}:{}:{}:{}:{}:{occurrence}",
-                    t.input, t.output, t.cache_read, t.cache_write
-                ));
+                let group = format!(
+                    "{:?}:{recorded_timestamp:?}:{:?}:{:?}:{}:{}:{}:{}",
+                    unified.session_id, unified.model_id, unified.provider_id,
+                    t.input, t.output, t.cache_read, t.cache_write,
+                );
+                let mut slot = match compaction_occurrences.entry(group) {
+                    std::collections::hash_map::Entry::Occupied(slot) => slot,
+                    std::collections::hash_map::Entry::Vacant(slot) => slot.insert_entry(0usize),
+                };
+                *slot.get_mut() += 1;
+                unified.dedup_key = Some(format!("{namespace}:compaction:{}:{}", slot.key(), slot.get()));
             } else if options.cross_session_dedup {
                 let clean_response_key = response_id
                     .filter(|id| {

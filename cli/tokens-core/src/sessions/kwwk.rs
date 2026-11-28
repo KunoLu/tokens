@@ -190,6 +190,27 @@ mod tests {
     }
 
     #[test]
+    fn equal_counts_for_different_compaction_models_survive_complementary_copies() {
+        let header = SESSION.lines().next().unwrap();
+        let copy = |sonnet, opus| session_file(&format!(
+            "{header}\n{{\"type\":\"compaction\",\"timestamp\":1,\"model\":\"sonnet\",\"usage\":{{\"input\":{sonnet}}}}}\n\
+             {{\"type\":\"compaction\",\"timestamp\":1,\"model\":\"opus\",\"usage\":{{\"input\":{opus}}}}}\n"
+        ));
+        let a = copy(3, 0);
+        let b = copy(0, 3);
+        for files in [[&a, &b, &a], [&b, &a, &b]] {
+            let mut seen = HashSet::new();
+            let mut by_model: Vec<_> = files.into_iter()
+                .flat_map(|file| parse_kwwk_file(file.path()))
+                .filter(|row| crate::should_keep_deduped_message(&mut seen, row))
+                .map(|row| (row.model_id, row.tokens.input))
+                .collect();
+            by_model.sort_unstable();
+            assert_eq!(by_model, [("opus".to_owned(), 3), ("sonnet".to_owned(), 3)]);
+        }
+    }
+
+    #[test]
     fn removing_a_malformed_marker_does_not_recount_later_usage() {
         let header = SESSION.lines().next().unwrap();
         let marker = r#"{"type":"compaction","timestamp":1,"usage":{"input":3}}"#;

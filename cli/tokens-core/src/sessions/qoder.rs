@@ -96,7 +96,8 @@ use std::path::{Path, PathBuf};
 /// - Version 4: measured time and model evidence across all sources.
 /// - Version 5: independent provider evidence and complete Qoder observation snapshots.
 /// - Version 6: reject incomplete JSONL prefixes and unverified SQLite cache entries.
-pub const QODER_PARSER_BASE_VERSION: u32 = 6;
+/// - Version 7: share the absolute JSONL path between parsing and caching.
+pub const QODER_PARSER_BASE_VERSION: u32 = 7;
 
 /// Public client id. Both editions report under it.
 pub const CLIENT_ID: &str = "qoder";
@@ -1647,10 +1648,14 @@ pub(crate) fn parse_qoder_lane(
                     None => scan_qoder_ide_db(path, source).messages,
                 };
             }
-            let parse = || scan_qoder_jsonl_file(path, source);
+            // Use one path for the cache key, sidecar fingerprint and parse.
+            // Canonicalization would lose the link's project and sidecar paths.
+            let Ok(absolute) = std::path::absolute(path) else {
+                return scan_qoder_jsonl_file(path, source).0;
+            };
             match &cache {
-                Some(cache) => cache.load_or_parse(path, source, parse),
-                None => parse().0,
+                Some(cache) => cache.load_or_parse(&absolute, source, scan_qoder_jsonl_file),
+                None => scan_qoder_jsonl_file(&absolute, source).0,
             }
         })
         .collect();

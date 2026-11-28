@@ -47,11 +47,17 @@ fn write_jsonl(path: &Path, lines: &[&str]) {
     std::fs::write(path, lines.join("\n") + "\n").unwrap();
 }
 
+fn write_archive(path: &Path, lines: &[&str]) {
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let content = lines.join("\n") + "\n";
+    std::fs::write(path, zstd::encode_all(content.as_bytes(), 1).unwrap()).unwrap();
+}
+
 fn total_tokens(messages: &[UnifiedMessage]) -> i64 {
     messages.iter().map(|message| message.tokens.total()).sum()
 }
 
-async fn assert_lane_totals(home: &Path, client: ClientId, expected: &[i64]) {
+async fn assert_lane_usage(home: &Path, client: ClientId, expected: &[i64], turns: usize) {
     let options = options(home, client.as_str());
     let parsed = parse_local_clients(options.clone()).unwrap();
     assert_eq!(parsed.counts.get(client) as usize, expected.len());
@@ -78,6 +84,11 @@ async fn assert_lane_totals(home: &Path, client: ClientId, expected: &[i64]) {
         .collect();
     unified_totals.sort_unstable();
     assert_eq!(unified_totals, expected, "streaming report lane");
+    assert_eq!(
+        messages.iter().filter(|message| message.is_turn_start).count(),
+        turns,
+        "hourly turn evidence"
+    );
 }
 
 #[tokio::test]
@@ -428,6 +439,111 @@ fn codex_compaction_matches_empty_total_without_establishing_a_baseline() {
 }
 
 #[tokio::test]
+async fn codex_preserves_request_evidence_when_the_model_arrives_later() {
+    const META: &str = r#"{"type":"session_meta","payload":{"id":"model-evidence"}}"#;
+    const MODEL: &str = r#"{"type":"turn_context","payload":{"turn_id":"turn-1","model":"claude-sonnet-4-6"}}"#;
+    const PROMPT: &str = r#"{"timestamp":"2026-09-01T10:00:01Z","type":"event_msg","payload":{"type":"user_message","message":"Inspect the parser."}}"#;
+    const COMPACTION: &[&str] = &[
+        r#"{"type":"token_usage_record","payload":{"response_id":"summary","usage":{"input_tokens":500,"cached_input_tokens":200,"output_tokens":40}}}"#,
+        r#"{"type":"compacted","payload":{}}"#,
+        r#"{"timestamp":"2026-09-01T10:00:04Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{},"last_token_usage":{}}}}"#,
+    ];
+    const SNAPSHOT: &[&str] = &[
+        r#"{"timestamp":"2026-09-01T10:00:04Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":20,"output_tokens":2}}}}"#,
+    ];
+
+    let home = common::temp_home();
+    let live = home.path().join(".codex/sessions/rollout-live.jsonl");
+    let archive = home
+        .path()
+        .join(".codex/archived_sessions/rollout-copy.jsonl.zst");
+    let lines = |events: &'static [&'static str], delayed: bool| {
+        let mut lines = vec![META];
+        if !delayed {
+            lines.push(MODEL);
+        }
+        lines.push(PROMPT);
+        lines.extend_from_slice(events);
+        if delayed {
+            lines.push(MODEL);
+        }
+        lines
+    };
+    for (events, tokens) in [(COMPACTION, 540), (SNAPSHOT, 22)] {
+        for (live_delayed, archive_delayed) in [(true, true), (true, false), (false, true)] {
+            write_jsonl(&live, &lines(events, live_delayed));
+            write_archive(&archive, &lines(events, archive_delayed));
+            let live_rows = parse_codex_file(&live);
+            let archive_rows = parse_codex_file(&archive);
+            assert_eq!(live_rows[0].dedup_key, archive_rows[0].dedup_key);
+            for rows in [&live_rows, &archive_rows] {
+                assert_eq!(rows.len(), 1);
+                assert_eq!(rows[0].model_id, "claude-sonnet-4-6");
+                assert_eq!(rows[0].provider_id, "anthropic");
+            }
+            assert_lane_usage(home.path(), ClientId::Codex, &[tokens], 1).await;
+        }
+    }
+}
+
+#[tokio::test]
+async fn codex_preserves_distinct_turns_with_the_same_last_only_end_time() {
+    const META: &str = r#"{"type":"session_meta","payload":{"id":"same-millisecond"}}"#;
+    const CONTEXT: &str = r#"{"timestamp":"2026-09-01T10:00:01Z","type":"turn_context","payload":{"turn_id":"turn-1"}}"#;
+    const MODEL: &str = r#"{"type":"turn_context","payload":{"turn_id":"turn-1","model":"gpt-5-codex"}}"#;
+    const PROMPT: &str = r#"{"timestamp":"2026-09-01T10:00:01Z","type":"event_msg","payload":{"type":"user_message","message":"Inspect the parser."}}"#;
+    const USAGE: &str = r#"{"timestamp":"2026-09-01T10:00:04.123Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":20,"output_tokens":2}}}}"#;
+
+    let second_context = CONTEXT.replace("turn-1", "turn-2").replace("10:00:01", "10:00:02");
+    let second_model = MODEL.replace("turn-1", "turn-2");
+    let second_prompt = PROMPT.replace("10:00:01", "10:00:02");
+    let known = [
+        META,
+        CONTEXT,
+        MODEL,
+        PROMPT,
+        USAGE,
+        second_context.as_str(),
+        second_model.as_str(),
+        second_prompt.as_str(),
+        USAGE,
+    ];
+    let delayed = [
+        META,
+        CONTEXT,
+        PROMPT,
+        USAGE,
+        MODEL,
+        second_context.as_str(),
+        second_prompt.as_str(),
+        USAGE,
+        second_model.as_str(),
+    ];
+    let home = common::temp_home();
+    let live = home.path().join(".codex/sessions/rollout-live.jsonl");
+    let archive = home
+        .path()
+        .join(".codex/archived_sessions/rollout-copy.jsonl.zst");
+    for (live_lines, archive_lines) in [
+        (&known, &known),
+        (&known, &delayed),
+        (&delayed, &known),
+        (&delayed, &delayed),
+    ] {
+        write_jsonl(&live, live_lines);
+        write_archive(&archive, archive_lines);
+        assert_lane_usage(home.path(), ClientId::Codex, &[22, 22], 2).await;
+    }
+
+    let later = USAGE.replace("04.123Z", "04.124Z");
+    let mut later_lines = known.to_vec();
+    later_lines.push(later.as_str());
+    write_jsonl(&live, &later_lines);
+    write_archive(&archive, &later_lines);
+    assert_lane_usage(home.path(), ClientId::Codex, &[22, 22, 22], 2).await;
+}
+
+#[tokio::test]
 async fn codex_dedups_untimed_copies_without_merging_distinct_calls() {
     let home = common::temp_home();
     let live = home
@@ -461,7 +577,7 @@ async fn trae_copy_dialects_conserve_single_source_usage() {
     const EMPTY_MARKER: &str = r#"{"timestamp":"2026-09-01T10:00:04Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{},"last_token_usage":{}}}}"#;
     const ZERO_MARKER: &str = r#"{"timestamp":"2026-09-01T10:00:04Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":0},"last_token_usage":{}}}}"#;
 
-    for (record, suffix, archive_tokens, live_tokens) in [
+    for (record, suffix, fallback_tokens, snapshot_tokens) in [
         (
             RESPONSE,
             [TOKEN_COUNT].as_slice(),
@@ -476,48 +592,61 @@ async fn trae_copy_dialects_conserve_single_source_usage() {
         ),
         (RESPONSE, [ZERO_MARKER].as_slice(), [17].as_slice(), [].as_slice()),
     ] {
-        let home = common::temp_home();
-        let live = home
-            .path()
-            .join(".trae/cli/sessions/2026/09/01/rollout-live.jsonl");
-        let archive = home
-            .path()
-            .join(".trae/cli/archived_sessions/rollout-prefix.jsonl.zst");
-        let mut prefix = HISTORY_MUTATION_ROLLOUT[..3].to_vec();
-        prefix.push(record);
-        std::fs::create_dir_all(archive.parent().unwrap()).unwrap();
-        std::fs::write(
-            &archive,
-            zstd::encode_all((prefix.join("\n") + "\n").as_bytes(), 1).unwrap(),
-        )
-        .unwrap();
-        assert_lane_totals(home.path(), ClientId::TraeCli, archive_tokens).await;
+        for authoritative_is_archive in [false, true] {
+            let home = common::temp_home();
+            let live = home
+                .path()
+                .join(".trae/cli/sessions/2026/09/01/rollout-live.jsonl");
+            let archive = home
+                .path()
+                .join(".trae/cli/archived_sessions/rollout-copy.jsonl.zst");
+            let (authoritative, fallback) = if authoritative_is_archive {
+                (&archive, &live)
+            } else {
+                (&live, &archive)
+            };
+            let write = |path: &Path, lines: &[&str]| {
+                if path == archive.as_path() {
+                    write_archive(path, lines);
+                } else {
+                    write_jsonl(path, lines);
+                }
+            };
+            let mut prefix = HISTORY_MUTATION_ROLLOUT[..3].to_vec();
+            prefix.push(record);
+            write(fallback, &prefix);
+            assert_lane_usage(home.path(), ClientId::TraeCli, fallback_tokens, 1).await;
 
-        let mut current = prefix.clone();
-        current.extend_from_slice(suffix);
-        write_jsonl(&live, &current);
-        assert_lane_totals(home.path(), ClientId::TraeCli, live_tokens).await;
-        if record == COMPACTION {
-            assert_eq!(
-                parse_trae_cli_file(&live)[0].dedup_key,
-                parse_trae_cli_file(&archive)[0].dedup_key
-            );
-        }
+            let mut current = prefix.clone();
+            current.extend_from_slice(suffix);
+            write(authoritative, &current);
+            let turns = usize::from(!snapshot_tokens.is_empty());
+            assert_lane_usage(home.path(), ClientId::TraeCli, snapshot_tokens, turns).await;
+            if record == COMPACTION {
+                assert_eq!(
+                    parse_trae_cli_file(authoritative)[0].dedup_key,
+                    parse_trae_cli_file(fallback)[0].dedup_key
+                );
+                // Exact response evidence can carry the turn even when the
+                // copy with the accounting snapshot omitted the human event.
+                current.remove(2);
+                write(authoritative, &current);
+                assert_lane_usage(home.path(), ClientId::TraeCli, snapshot_tokens, 1).await;
+                current.insert(2, HISTORY_MUTATION_ROLLOUT[2]);
+                write(authoritative, &current);
+            }
 
-        if suffix == [TOKEN_COUNT] {
-            // A separate response in an archive branch is not covered by
-            // live, even with the same thread, time and usage.
-            let independent = RESPONSE.replace("regular", "independent");
-            prefix.push(independent.as_str());
-            std::fs::write(
-                &archive,
-                zstd::encode_all((prefix.join("\n") + "\n").as_bytes(), 1).unwrap(),
-            )
-            .unwrap();
-            assert_lane_totals(home.path(), ClientId::TraeCli, &[17, 17]).await;
+            if suffix == [TOKEN_COUNT] {
+                // A separate response in an archive branch is not covered by
+                // live, even with the same thread, time and usage.
+                let independent = RESPONSE.replace("regular", "independent");
+                prefix.push(independent.as_str());
+                write(fallback, &prefix);
+                assert_lane_usage(home.path(), ClientId::TraeCli, &[17, 17], 1).await;
+            }
+            std::fs::remove_file(fallback).unwrap();
+            assert_lane_usage(home.path(), ClientId::TraeCli, snapshot_tokens, turns).await;
         }
-        std::fs::remove_file(&archive).unwrap();
-        assert_lane_totals(home.path(), ClientId::TraeCli, live_tokens).await;
     }
 }
 
@@ -547,12 +676,12 @@ async fn codex_keeps_independent_timed_and_untimed_increments() {
             TIMED,
         ],
     );
-    assert_lane_totals(home.path(), ClientId::Codex, &[22, 22]).await;
+    assert_lane_usage(home.path(), ClientId::Codex, &[22, 22], 0).await;
 
     let distinct = UNTIMED.replace("\"input_tokens\":20", "\"input_tokens\":30");
     write_jsonl(&live, &[CONTEXT, UNTIMED]);
     write_jsonl(&archived, &[CONTEXT, distinct.as_str()]);
-    assert_lane_totals(home.path(), ClientId::Codex, &[22, 32]).await;
+    assert_lane_usage(home.path(), ClientId::Codex, &[22, 32], 0).await;
 }
 
 #[tokio::test]
@@ -567,7 +696,7 @@ async fn trae_same_name_is_not_a_rollout_identity() {
     let lines = &HISTORY_MUTATION_ROLLOUT[1..];
     write_jsonl(&live, lines);
     write_jsonl(&archive, lines);
-    assert_lane_totals(home.path(), ClientId::TraeCli, &[112, 112]).await;
+    assert_lane_usage(home.path(), ClientId::TraeCli, &[112, 112], 2).await;
 }
 
 #[test]
