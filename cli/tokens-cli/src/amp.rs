@@ -181,6 +181,45 @@ pub fn run_amp_sync(force: bool, json: bool) -> Result<()> {
     Ok(())
 }
 
+/// Hold the writer lock until the caller has scanned its authoritative input.
+/// A successful discovery cannot vouch for an older, now-unlisted thread.
+pub fn guard_replacement_cache(refreshed: bool) -> Result<Option<fs::File>> {
+    let cache_dir = get_amp_cache_dir();
+    if !refreshed && !cache_dir.try_exists()? {
+        // A legacy-only submit must not create any cloud sync files. The
+        // caller checks that no first sync started while it scanned.
+        return Ok(None);
+    }
+    let lock = acquire_sync_lock(&cache_dir)?;
+    let state = load_state(&cache_dir)?;
+    let incomplete = || anyhow::anyhow!(t!("cli.submit.ampReplaceIncomplete"));
+    if state.is_some() != refreshed {
+        return Err(incomplete());
+    }
+    let mut expected = state.map_or_else(BTreeMap::new, |state| state.threads);
+    match fs::read_dir(threads_dir(&cache_dir)) {
+        Ok(entries) => {
+            for entry in entries {
+                let entry = entry?;
+                let name = entry.file_name();
+                let Some(id) = name.to_str().and_then(|name| name.strip_suffix(".json"))
+                    .filter(|id| is_thread_id(id)) else { continue };
+                if expected.remove(id).is_none()
+                    || !tokens_core::sessions::amp::is_valid_cached_thread(&entry.path())
+                {
+                    return Err(incomplete());
+                }
+            }
+        }
+        Err(error) if error.kind() == ErrorKind::NotFound => {}
+        Err(error) => return Err(error.into()),
+    }
+    if !expected.is_empty() {
+        return Err(incomplete());
+    }
+    Ok(Some(lock))
+}
+
 pub fn run_amp_status(json: bool) -> Result<()> {
     let cache_dir = get_amp_cache_dir();
     let state = load_state(&cache_dir)?;
@@ -282,6 +321,7 @@ fn sync_amp_cache_with(
         return Ok(SyncAmpResult::default());
     }
     let amp = amp_binary().ok_or_else(|| anyhow::anyhow!(t!("top.amp.cliNotFound")))?;
+    let amp = Amp::new(amp)?;
     let threads = find_threads(&amp)?;
 
     let watermarks = state.map_or_else(BTreeMap::new, |state| state.threads);
@@ -292,7 +332,8 @@ fn sync_amp_cache_with(
         .filter(|(id, updated)| {
             force
                 || watermarks.get(id) != Some(updated)
-                || !dir.join(format!("{id}.json")).is_file()
+                || !fs::symlink_metadata(dir.join(format!("{id}.json")))
+                    .is_ok_and(|metadata| metadata.is_file())
         })
         .collect();
 
@@ -310,6 +351,9 @@ fn sync_amp_cache_with(
     std::thread::scope(|scope| {
         for _ in 0..worker_count {
             scope.spawn(|| loop {
+                if amp.processes.stopped() {
+                    break;
+                }
                 let next = pending.lock().unwrap().next();
                 let Some((id, updated)) = next else { break };
                 let outcome = export_thread(&amp, &dir, &id);
@@ -329,6 +373,10 @@ fn sync_amp_cache_with(
             });
         }
     });
+    anyhow::ensure!(
+        !amp.processes.stopped(),
+        tr!("top.amp.runFailed", command = "amp threads export")
+    );
     let (watermarks, mut result) = progress.into_inner().unwrap();
     if result.failed > 0 && result.exported == 0 {
         return Ok(result);
@@ -348,7 +396,7 @@ fn sync_amp_cache_with(
 
 /// Every thread to keep in the cache, with the update time that marks a
 /// change (see the module docs for why it comes from two commands).
-fn find_threads(amp: &Path) -> Result<BTreeMap<String, DateTime<Utc>>> {
+fn find_threads(amp: &Amp) -> Result<BTreeMap<String, DateTime<Utc>>> {
     let mut threads = list_threads(amp)?;
     threads.extend(
         search_recent_threads(amp)?
@@ -358,7 +406,7 @@ fn find_threads(amp: &Path) -> Result<BTreeMap<String, DateTime<Utc>>> {
     Ok(threads)
 }
 
-fn search_recent_threads(amp: &Path) -> Result<Vec<SearchedThread>> {
+fn search_recent_threads(amp: &Amp) -> Result<Vec<SearchedThread>> {
     let limit = SEARCH_LIMIT.to_string();
     let args = ["author:me", "--json", "--limit", &limit];
     let output = run_amp(amp, "search", &args, LIST_TIMEOUT)?;
@@ -370,7 +418,7 @@ fn search_recent_threads(amp: &Path) -> Result<Vec<SearchedThread>> {
     Ok(threads)
 }
 
-fn list_threads(amp: &Path) -> Result<BTreeMap<String, DateTime<Utc>>> {
+fn list_threads(amp: &Amp) -> Result<BTreeMap<String, DateTime<Utc>>> {
     let mut threads = BTreeMap::new();
     let mut offset = 0usize;
     let limit = LIST_PAGE_SIZE.to_string();
@@ -394,7 +442,16 @@ fn list_threads(amp: &Path) -> Result<BTreeMap<String, DateTime<Utc>>> {
         offset += page.len();
         let before = threads.len();
         for thread in page {
-            threads.insert(thread.id, (thread.updated, thread.message_count));
+            let candidate = (thread.updated, thread.message_count);
+            threads.entry(thread.id)
+                .and_modify(|current: &mut (DateTime<Utc>, Option<i64>)| {
+                    if candidate.0 > current.0
+                        || (candidate.0 == current.0 && current.1 == Some(0) && candidate.1 != Some(0))
+                    {
+                        *current = candidate;
+                    }
+                })
+                .or_insert(candidate);
         }
         anyhow::ensure!(last_page || threads.len() > before, unexpected_output("list"));
         if last_page {
@@ -405,7 +462,7 @@ fn list_threads(amp: &Path) -> Result<BTreeMap<String, DateTime<Utc>>> {
     }
 }
 
-fn export_thread(amp: &Path, dir: &Path, thread_id: &str) -> Result<()> {
+fn export_thread(amp: &Amp, dir: &Path, thread_id: &str) -> Result<()> {
     let contents =
         usage_only_thread(thread_id, &run_amp(amp, "export", &[thread_id], EXPORT_TIMEOUT)?)?;
     crate::commands::usage::helpers::atomic_write_secret(
@@ -520,11 +577,24 @@ fn find_amp_in_dirs(dirs: impl Iterator<Item = PathBuf>) -> Option<PathBuf> {
         })
 }
 
+struct Amp {
+    path: PathBuf,
+    processes: process::Supervisor,
+}
+
+impl Amp {
+    fn new(path: PathBuf) -> Result<Self> {
+        let processes = process::Supervisor::new()
+            .map_err(|_| anyhow::anyhow!(tr!("top.amp.runFailed", command = "amp threads")))?;
+        Ok(Self { path, processes })
+    }
+}
+
 /// Return complete stdout only after a successful exit; never capture stderr.
-fn run_amp(amp: &Path, operation: &str, args: &[&str], timeout: Duration) -> Result<Vec<u8>> {
+fn run_amp(amp: &Amp, operation: &str, args: &[&str], timeout: Duration) -> Result<Vec<u8>> {
     use process::CaptureError;
 
-    let mut command = Command::new(amp);
+    let mut command = Command::new(&amp.path);
     command
         .args(["threads", operation])
         .args(args)
@@ -533,8 +603,9 @@ fn run_amp(amp: &Path, operation: &str, args: &[&str], timeout: Duration) -> Res
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
 
-    process::bounded_output(&mut command, timeout, MAX_STDOUT_MIB * 1024 * 1024).map_err(|error| {
-        anyhow::Error::msg(match error {
+    amp.processes
+        .bounded_output(&mut command, timeout, MAX_STDOUT_MIB * 1024 * 1024)
+        .map_err(|error| match error {
             CaptureError::Run => tr!(
                 "top.amp.runFailed",
                 command = format_args!("amp threads {operation}")
@@ -556,7 +627,7 @@ fn run_amp(amp: &Path, operation: &str, args: &[&str], timeout: Duration) -> Res
                 status = status
             ),
         })
-    })
+        .map_err(anyhow::Error::msg)
 }
 
 fn acquire_sync_lock(cache_dir: &Path) -> Result<fs::File> {
@@ -785,19 +856,19 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
 
         let dir = tempfile::tempdir().unwrap();
-        let amp = dir.path().join("synthetic-amp");
+        let amp = Amp::new(dir.path().join("synthetic-amp")).unwrap();
         for (completion, timeout) in [
             ("exit 7", Duration::from_secs(1)),
             ("/bin/sleep 1 &\nexit 0", Duration::from_millis(150)),
         ] {
             fs::write(
-                &amp,
+                &amp.path,
                 format!(
                     "#!/bin/sh\nprintf 'private stderr' >&2\nprintf '%s' '{{\"id\":\"T-1\",\"messages\":[]}}'\n{completion}\n"
                 ),
             )
             .unwrap();
-            fs::set_permissions(&amp, fs::Permissions::from_mode(0o700)).unwrap();
+            fs::set_permissions(&amp.path, fs::Permissions::from_mode(0o700)).unwrap();
             let error = run_amp(&amp, "export", &["T-1"], timeout).unwrap_err();
             assert!(!format!("{error:#}").contains("private stderr"));
         }

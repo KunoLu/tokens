@@ -200,7 +200,7 @@
   "cli.submit.about": "向 Tokens 社交平台提交用量数据",
   "cli.submit.activeDays": "    活跃天数：{days}",
   "cli.submit.ampSyncFailedCached": "  Amp 同步失败；改用缓存数据：{error}",
-  "cli.submit.ampSynced": "  Amp：已同步 {exported} 个新增或有变化的 thread",
+  "cli.submit.ampSynced": "  Amp：成功导出 {exported} 个线程",
   "cli.submit.antigravityDiscoveryFailed": "  Antigravity 发现失败：{error}",
   "cli.submit.antigravityDiscoveryFailedCached": "  Antigravity 发现失败；改用缓存数据：{error}",
   "cli.submit.antigravityPartial": "  Antigravity 同步不完整：已刷新 {sessions} 个会话，{retained} 个保留自缓存，{failed} 个失败：{error}",

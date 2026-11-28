@@ -1,5 +1,6 @@
 use std::io::{self, Read};
 use std::process::{Child, ChildStdout, Command, ExitStatus};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -15,25 +16,56 @@ pub(super) enum CaptureError {
     Exit(ExitStatus),
 }
 
-pub(super) fn bounded_output(
-    command: &mut Command,
-    timeout: Duration,
-    limit: usize,
-) -> Result<Vec<u8>, CaptureError> {
-    let deadline = Instant::now() + timeout;
-    let (mut child, mut tree) = platform::spawn(command).map_err(|_| CaptureError::Run)?;
-    let mut stdout = child.stdout.take();
-    let result = capture(&mut child, &mut stdout, deadline, limit);
+pub(super) struct Supervisor {
+    cleanup_failed: AtomicBool,
+    #[cfg(unix)]
+    signals: platform::Signals,
+}
 
-    // Even a successful wrapper can leave descendants that closed stdout.
-    let stopped = tree.terminate(&mut child).and_then(|()| {
-        wait_for_exit(|| Ok(child.try_wait()?.is_some() && tree.is_idle(stdout.as_ref())?))
-    });
-    stopped.map_err(|_| CaptureError::Run)?;
-    result
+impl Supervisor {
+    pub(super) fn new() -> io::Result<Self> {
+        Ok(Self {
+            cleanup_failed: AtomicBool::new(false),
+            #[cfg(unix)]
+            signals: platform::Signals::new()?,
+        })
+    }
+
+    pub(super) fn stopped(&self) -> bool {
+        #[cfg(unix)]
+        if self.signals.cancelled() {
+            return true;
+        }
+        self.cleanup_failed.load(Ordering::Acquire)
+    }
+
+    pub(super) fn bounded_output(
+        &self,
+        command: &mut Command,
+        timeout: Duration,
+        limit: usize,
+    ) -> Result<Vec<u8>, CaptureError> {
+        if self.stopped() {
+            return Err(CaptureError::Run);
+        }
+        let deadline = Instant::now() + timeout;
+        let (mut child, mut tree) = platform::spawn(command).map_err(|_| CaptureError::Run)?;
+        let mut stdout = child.stdout.take();
+        let result = capture(self, &mut child, &mut stdout, deadline, limit);
+        drop(stdout);
+
+        // Even a successful wrapper can leave descendants that closed stdout.
+        if tree.cleanup(&mut child).is_err() {
+            // An unconfirmed slot must not start another Amp command.
+            self.cleanup_failed.store(true, Ordering::Release);
+            return Err(CaptureError::Run);
+        }
+        result
+    }
 }
 
 fn capture(
+    supervisor: &Supervisor,
     child: &mut Child,
     stdout: &mut Option<ChildStdout>,
     deadline: Instant,
@@ -48,6 +80,9 @@ fn capture(
     // Nonblocking reads keep the same deadline for the process and every
     // inherited writer, without a reader thread to cancel or join.
     loop {
+        if supervisor.stopped() {
+            return Err(CaptureError::Run);
+        }
         if Instant::now() >= deadline {
             return Err(CaptureError::TimedOut);
         }
@@ -104,8 +139,103 @@ fn wait_for_exit(mut done: impl FnMut() -> io::Result<bool>) -> io::Result<()> {
 #[cfg(unix)]
 mod platform {
     use super::*;
+    use std::mem::MaybeUninit;
     use std::os::fd::AsRawFd;
     use std::os::unix::process::{CommandExt, ExitStatusExt};
+    use std::ptr::{null, null_mut};
+    use std::sync::atomic::AtomicI32;
+    use std::sync::{Mutex, MutexGuard};
+
+    const CANCEL_SIGNALS: [libc::c_int; 4] = [libc::SIGINT, libc::SIGTERM, libc::SIGHUP, libc::SIGQUIT];
+    static SIGNAL_SCOPE: Mutex<()> = Mutex::new(());
+    static CANCELLED_BY: AtomicI32 = AtomicI32::new(0);
+
+    pub(super) struct Signals {
+        previous: [Option<libc::sigaction>; CANCEL_SIGNALS.len()],
+        _exclusive: MutexGuard<'static, ()>,
+    }
+
+    impl Signals {
+        pub(super) fn new() -> io::Result<Self> {
+            let exclusive = SIGNAL_SCOPE.lock().unwrap_or_else(|error| error.into_inner());
+            ensure_group_observable()?;
+            let child_action = signal_action(libc::SIGCHLD)?;
+            if child_action.sa_sigaction != libc::SIG_DFL
+                || child_action.sa_flags & libc::SA_NOCLDWAIT != 0
+            {
+                // The group leader must not be reaped outside its Child handle.
+                return Err(io::ErrorKind::Unsupported.into());
+            }
+
+            CANCELLED_BY.store(0, Ordering::Relaxed);
+            let mut signals = Self {
+                previous: [None; CANCEL_SIGNALS.len()],
+                _exclusive: exclusive,
+            };
+            // SAFETY: The initialized handler, flags and mask are valid for sigaction.
+            let mut action: libc::sigaction = unsafe { std::mem::zeroed() };
+            action.sa_sigaction = note_cancellation as *const () as libc::sighandler_t;
+            action.sa_flags = libc::SA_RESTART;
+            unsafe { libc::sigemptyset(&mut action.sa_mask) };
+            for (signal, previous) in CANCEL_SIGNALS.into_iter().zip(&mut signals.previous) {
+                let old = signal_action(signal)?;
+                if old.sa_sigaction != libc::SIG_DFL {
+                    continue; // Respect inherited SIG_IGN and preexisting handlers.
+                }
+                // SAFETY: This scope exclusively owns the CLI's Amp signal registrations.
+                if unsafe { libc::sigaction(signal, &action, null_mut()) } == -1 {
+                    return Err(io::Error::last_os_error());
+                }
+                *previous = Some(old);
+            }
+            Ok(signals)
+        }
+
+        pub(super) fn cancelled(&self) -> bool {
+            CANCELLED_BY.load(Ordering::Relaxed) != 0
+        }
+    }
+
+    impl Drop for Signals {
+        fn drop(&mut self) {
+            for (signal, previous) in CANCEL_SIGNALS.into_iter().zip(&self.previous) {
+                if let Some(previous) = previous {
+                    // SAFETY: Previously read disposition for this same signal.
+                    if unsafe { libc::sigaction(signal, previous, null_mut()) } == -1 {
+                        // Do not keep running with a stale process-wide handler.
+                        std::process::exit(1);
+                    }
+                }
+            }
+            let signal = CANCELLED_BY.swap(0, Ordering::Relaxed);
+            if signal != 0 {
+                // All export workers have joined. Restore ordinary signal exit semantics.
+                // SAFETY: We unblock only the recorded signal, now at its default disposition.
+                unsafe {
+                    let mut mask = MaybeUninit::uninit();
+                    libc::sigemptyset(mask.as_mut_ptr());
+                    libc::sigaddset(mask.as_mut_ptr(), signal);
+                    libc::pthread_sigmask(libc::SIG_UNBLOCK, mask.as_ptr(), null_mut());
+                    libc::raise(signal);
+                }
+                std::process::exit(128 + signal);
+            }
+        }
+    }
+
+    extern "C" fn note_cancellation(signal: libc::c_int) {
+        let _ = CANCELLED_BY.compare_exchange(0, signal, Ordering::Relaxed, Ordering::Relaxed);
+    }
+
+    fn signal_action(signal: libc::c_int) -> io::Result<libc::sigaction> {
+        let mut action = MaybeUninit::uninit();
+        // SAFETY: A null input queries the old action into valid output storage.
+        if unsafe { libc::sigaction(signal, null(), action.as_mut_ptr()) } == -1 {
+            return Err(io::Error::last_os_error());
+        }
+        // SAFETY: sigaction initialized the output.
+        Ok(unsafe { action.assume_init() })
+    }
 
     pub(super) struct Tree(Option<libc::pid_t>);
 
@@ -116,56 +246,136 @@ mod platform {
     }
 
     impl Tree {
-        pub(super) fn terminate(&mut self, child: &mut Child) -> io::Result<()> {
-            match self.signal_group() {
-                Err(err) if err.kind() == io::ErrorKind::PermissionDenied => {
-                    // Darwin returns EPERM if only the zombie leader remains.
-                    // After reaping, probe for absence, but never signal a pid
-                    // that the OS is now free to reuse.
-                    if child.try_wait()?.is_some() {
-                        if let Some(group) = self.0.take() {
-                            // SAFETY: Signal 0 checks only whether the group exists.
-                            if unsafe { libc::killpg(group, 0) } == -1
-                                && io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH)
-                            {
-                                return Ok(());
-                            }
-                        }
-                    }
-                    Err(err)
-                }
-                result => result,
-            }
-        }
-
-        fn signal_group(&mut self) -> io::Result<()> {
-            if let Some(group) = self.0 {
-                // SAFETY: The group is private to the command. The leader has
-                // not been reaped, so its pid cannot identify another group.
-                if unsafe { libc::killpg(group, libc::SIGKILL) } == -1 {
-                    let error = io::Error::last_os_error();
-                    if error.raw_os_error() != Some(libc::ESRCH) {
-                        return Err(error);
-                    }
-                }
-                self.0 = None;
-            }
+        pub(super) fn cleanup(&mut self, child: &mut Child) -> io::Result<()> {
+            let group = self.0.expect("cleanup runs once");
+            let idle = wait_for_exit(|| {
+                signal_group(group)?;
+                Ok(exit_status(child)?.is_some() && group_is_idle(group)?)
+            });
+            // Never signal the numeric group ID again once the leader can be reaped.
+            self.0 = None;
+            let reaped = child.try_wait();
+            idle?;
+            reaped?.ok_or(io::ErrorKind::TimedOut)?;
             Ok(())
-        }
-
-        pub(super) fn is_idle(&self, stdout: Option<&ChildStdout>) -> io::Result<bool> {
-            // HUP confirms all inherited writers closed, even with unread bytes.
-            match stdout {
-                Some(pipe) => Ok(poll_stdout(pipe, Duration::ZERO)? & libc::POLLHUP != 0),
-                None => Ok(true),
-            }
         }
     }
 
     impl Drop for Tree {
         fn drop(&mut self) {
-            let _ = self.signal_group();
+            if let Some(group) = self.0 {
+                let _ = signal_group(group);
+            }
         }
+    }
+
+    fn signal_group(group: libc::pid_t) -> io::Result<()> {
+        // SAFETY: The owned leader has not been reaped, so its PID still pins the group ID.
+        if unsafe { libc::killpg(group, libc::SIGKILL) } == -1 {
+            let error = io::Error::last_os_error();
+            // Darwin can report EPERM for a zombie-only group. Neither error proves idleness.
+            if !matches!(error.raw_os_error(), Some(libc::ESRCH | libc::EPERM)) {
+                return Err(error);
+            }
+        }
+        Ok(())
+    }
+
+    // Process groups cannot contain programs that deliberately leave the group.
+    // Linux/Android also require procfs visibility in the caller's PID namespace.
+    fn ensure_group_observable() -> io::Result<()> {
+        if cfg!(any(target_os = "linux", target_os = "android")) {
+            let own_pid = std::fs::read_link("/proc/self")?;
+            if own_pid.to_str().and_then(|pid| pid.parse().ok()) != Some(std::process::id()) {
+                return Err(io::ErrorKind::Unsupported.into());
+            }
+        } else if !cfg!(target_vendor = "apple") {
+            return Err(io::ErrorKind::Unsupported.into());
+        }
+        Ok(())
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    fn group_is_idle(group: libc::pid_t) -> io::Result<bool> {
+        let mut stat = [0; 256];
+        for entry in std::fs::read_dir("/proc")? {
+            let entry = entry?;
+            let name = entry.file_name();
+            let Ok(pid) = name.to_str().unwrap_or_default().parse::<libc::pid_t>() else {
+                continue;
+            };
+            if pid == group {
+                continue; // waitid already confirmed the leader exited.
+            }
+            // SAFETY: getpgid only queries the PID found in procfs.
+            let pgid = unsafe { libc::getpgid(pid) };
+            if pgid == -1 {
+                let error = io::Error::last_os_error();
+                if error.raw_os_error() == Some(libc::ESRCH) {
+                    continue;
+                }
+                return Err(error);
+            }
+            if pgid != group {
+                continue;
+            }
+            let mut path = entry.path();
+            path.push("stat");
+            let n = match std::fs::File::open(path).and_then(|mut file| file.read(&mut stat)) {
+                Ok(n) => n,
+                Err(error) if matches!(error.raw_os_error(), Some(libc::ENOENT | libc::ESRCH)) => {
+                    continue;
+                }
+                Err(error) => return Err(error),
+            };
+            // The command name can itself contain spaces and parentheses.
+            let end = stat[..n]
+                .iter()
+                .rposition(|&byte| byte == b')')
+                .ok_or(io::ErrorKind::InvalidData)?;
+            let mut fields = stat[end + 1..n].split(|&byte| byte == b' ').skip(1);
+            if !matches!(fields.next(), Some(b"Z" | b"X" | b"x")) {
+                return Ok(false);
+            }
+            // A zombie thread-group leader can still have live threads. Field 20 is num_threads.
+            if fields.nth(16).ok_or(io::ErrorKind::InvalidData)? != b"1" {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
+    #[cfg(target_vendor = "apple")]
+    fn group_is_idle(group: libc::pid_t) -> io::Result<bool> {
+        let mut pids = [0; 2];
+        // SAFETY: The writable PID buffer is sized in bytes. Clear errno to distinguish
+        // an empty list from an error; both can return zero.
+        let count = unsafe {
+            *libc::__error() = 0;
+            libc::proc_listpgrppids(
+                group,
+                pids.as_mut_ptr().cast(),
+                std::mem::size_of_val(&pids) as libc::c_int,
+            )
+        };
+        if count <= 0 {
+            let error = io::Error::last_os_error();
+            return match error.raw_os_error() {
+                Some(libc::ESRCH) => Ok(true),
+                Some(0) if count == 0 => Ok(true),
+                _ => Err(error),
+            };
+        }
+        // Trust only the snapshot, not separate PID queries that could miss a
+        // fork between the snapshot and the query. Two slots expose any member
+        // besides the pinned leader even if the snapshot is truncated.
+        // If a zombie is still listed, the reap deadline bounds the wait.
+        Ok(count == 1 && pids[0] == group)
+    }
+
+    #[cfg(not(any(target_vendor = "apple", target_os = "linux", target_os = "android")))]
+    fn group_is_idle(_group: libc::pid_t) -> io::Result<bool> {
+        Err(io::ErrorKind::Unsupported.into())
     }
 
     pub(super) fn prepare_stdout(stdout: &ChildStdout) -> io::Result<()> {
@@ -225,7 +435,7 @@ mod platform {
         Ok(())
     }
 
-    fn poll_stdout(stdout: &ChildStdout, delay: Duration) -> io::Result<libc::c_short> {
+    fn poll_stdout(stdout: &ChildStdout, delay: Duration) -> io::Result<()> {
         let mut fd = libc::pollfd {
             fd: stdout.as_raw_fd(),
             events: libc::POLLIN,
@@ -238,7 +448,7 @@ mod platform {
                 return Err(error);
             }
         }
-        Ok(fd.revents)
+        Ok(())
     }
 }
 
@@ -306,12 +516,13 @@ mod platform {
             Ok(Self(job))
         }
 
-        pub(super) fn terminate(&mut self, _child: &mut Child) -> io::Result<()> {
+        pub(super) fn cleanup(&mut self, child: &mut Child) -> io::Result<()> {
             // SAFETY: The non-inheritable, owned job handle is still live.
-            check(unsafe { TerminateJobObject(self.0.as_raw_handle(), 1) })
+            check(unsafe { TerminateJobObject(self.0.as_raw_handle(), 1) })?;
+            wait_for_exit(|| Ok(child.try_wait()?.is_some() && self.is_idle()?))
         }
 
-        pub(super) fn is_idle(&self, _stdout: Option<&ChildStdout>) -> io::Result<bool> {
+        fn is_idle(&self) -> io::Result<bool> {
             let mut accounting: JOBOBJECT_BASIC_ACCOUNTING_INFORMATION = unsafe { std::mem::zeroed() };
             // SAFETY: The job is live and `accounting` matches the information class.
             check(unsafe {
@@ -416,6 +627,8 @@ mod tests {
 
     const MODE: &str = "TOKENS_TEST_AMP_PROCESS_MODE";
     const DIR: &str = "TOKENS_TEST_AMP_PROCESS_DIR";
+    #[cfg(unix)]
+    const CANCEL_DIRS: [&str; 2] = ["first", "second"];
 
     fn fixture(mode: &str, dir: &Path) -> Command {
         let mut command = Command::new(std::env::current_exe().unwrap());
@@ -444,10 +657,41 @@ mod tests {
     fn fixture_process() {
         let mode = std::env::var(MODE).unwrap();
         let dir = std::path::PathBuf::from(std::env::var_os(DIR).unwrap());
+        #[cfg(unix)]
+        if mode == "supervisor" {
+            for signal in [libc::SIGINT, libc::SIGTERM] {
+                // SAFETY: Only this isolated fixture's dispositions are changed.
+                assert_ne!(unsafe { libc::signal(signal, libc::SIG_DFL) }, libc::SIG_ERR);
+            }
+            let supervisor = Supervisor::new().unwrap();
+            thread::scope(|scope| {
+                for subdir in CANCEL_DIRS {
+                    let dir = dir.join(subdir);
+                    fs::create_dir(&dir).unwrap();
+                    let supervisor = &supervisor;
+                    scope.spawn(move || {
+                        let mut command = fixture("wrapper", &dir);
+                        let error = supervisor
+                            .bounded_output(
+                                command.stdout(Stdio::piped()),
+                                Duration::from_secs(3),
+                                4096,
+                            )
+                            .unwrap_err();
+                        assert!(matches!(error, CaptureError::Run), "{error:?}");
+                    });
+                }
+            });
+            return;
+        }
         let ready = dir.join("ready");
-        if mode == "wrapper" {
+        if matches!(mode.as_str(), "wrapper" | "wrapper-closed") {
             fixture("hold", &dir)
-                .stdout(Stdio::inherit())
+                .stdout(if mode == "wrapper" {
+                    Stdio::inherit()
+                } else {
+                    Stdio::null()
+                })
                 .spawn()
                 .unwrap();
             let deadline = Instant::now() + Duration::from_secs(2);
@@ -482,16 +726,14 @@ mod tests {
 
     #[test]
     fn timeout_stops_child_and_inherited_stdout_writer() {
+        let supervisor = Supervisor::new().unwrap();
         for mode in ["hold", "wrapper"] {
             let dir = tempfile::tempdir().unwrap();
             let mut command = fixture(mode, dir.path());
             let started = Instant::now();
-            let error = bounded_output(
-                command.stdout(Stdio::piped()),
-                Duration::from_millis(750),
-                4096,
-            )
-            .unwrap_err();
+            let error = supervisor
+                .bounded_output(command.stdout(Stdio::piped()), Duration::from_millis(750), 4096)
+                .unwrap_err();
             assert!(matches!(error, CaptureError::TimedOut), "{error:?}");
             assert!(started.elapsed() < Duration::from_secs(3));
             if mode == "wrapper" {
@@ -505,11 +747,66 @@ mod tests {
     fn stdout_overflow_stops_child_before_its_deadline() {
         let dir = tempfile::tempdir().unwrap();
         let mut command = fixture("oversize", dir.path());
+        let supervisor = Supervisor::new().unwrap();
         let started = Instant::now();
-        let error = bounded_output(command.stdout(Stdio::piped()), Duration::from_secs(3), 4096)
+        let error = supervisor
+            .bounded_output(command.stdout(Stdio::piped()), Duration::from_secs(3), 4096)
             .unwrap_err();
         assert!(matches!(error, CaptureError::OutputTooLarge), "{error:?}");
         assert!(started.elapsed() < Duration::from_secs(2));
         assert_stopped(dir.path());
+    }
+
+    #[test]
+    fn closed_stdout_does_not_release_a_descendant_holding_a_lock() {
+        let dir = tempfile::tempdir().unwrap();
+        let supervisor = Supervisor::new().unwrap();
+        let mut command = fixture("wrapper-closed", dir.path());
+        supervisor
+            .bounded_output(command.stdout(Stdio::piped()), Duration::from_secs(3), 4096)
+            .unwrap();
+        assert_stopped(dir.path());
+        assert!(dir.path().join("wrapper-exiting").is_file());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn external_cancellation_reaps_all_active_groups_before_exit() {
+        use std::os::unix::process::{CommandExt, ExitStatusExt};
+
+        for signal in [libc::SIGINT, libc::SIGTERM] {
+            let dir = tempfile::tempdir().unwrap();
+            let mut child = fixture("supervisor", dir.path())
+                .process_group(0)
+                .stdout(Stdio::null())
+                .spawn()
+                .unwrap();
+            let outcome = (|| -> io::Result<ExitStatus> {
+                wait_for_exit(|| {
+                    Ok(CANCEL_DIRS
+                        .iter()
+                        .all(|subdir| dir.path().join(subdir).join("ready").is_file()))
+                })?;
+                // SAFETY: This targets only the unreaped fixture's private foreground group.
+                if unsafe { libc::killpg(child.id() as libc::pid_t, signal) } == -1 {
+                    return Err(io::Error::last_os_error());
+                }
+                let mut status = None;
+                wait_for_exit(|| {
+                    status = child.try_wait()?;
+                    Ok(status.is_some())
+                })?;
+                Ok(status.unwrap())
+            })();
+            let status = outcome.unwrap_or_else(|error| {
+                let _ = child.kill();
+                let _ = child.wait();
+                panic!("isolated supervisor did not stop: {error}");
+            });
+            assert_eq!(status.signal(), Some(signal));
+            for subdir in CANCEL_DIRS {
+                assert_stopped(&dir.path().join(subdir));
+            }
+        }
     }
 }

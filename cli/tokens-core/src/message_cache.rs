@@ -1586,7 +1586,8 @@ fn parser_version(client: ClientId) -> u32 {
         // The same version also drops an upstream org prefix from the model
         // (`zai-org/GLM-5.3-Flash` -> `GLM-5.3-Flash`); both shipped together.
         // v3 keeps malformed trailing-slash model names rather than an empty id.
-        ClientId::Amp => 3,
+        // v4 falls back to the stem for blank IDs and ignores unmetered usage.
+        ClientId::Amp => 4,
         // The remaining clients parse their own formats and have never
         // shipped a parser-only change that leaves byte-identical input
         // parsing differently, so all of them are at version 1. Repeating
@@ -4318,8 +4319,38 @@ mod tests {
     }
 
     #[test]
-    fn test_amp_parser_version_invalidates_empty_model_ids() {
-        assert_eq!(parser_version(ClientId::Amp), 3);
+    #[serial_test::serial]
+    fn test_amp_parser_version_invalidates_v3_warm_entries() {
+        let home = TempDir::new().unwrap();
+        let _cache_env = sandbox_cache_env(home.path());
+        let source = home.path().join("T-reparse.json");
+        std::fs::write(
+            &source,
+            br#"{"id":"","messages":[{"role":"assistant","usage":{"model":"claude-sonnet-4-0","inputTokens":7}}]}"#,
+        )
+        .unwrap();
+        let current = CacheIdentity::for_client(ClientId::Amp);
+        assert_eq!(current.parser_version, 4);
+        let stale = CacheIdentity {
+            namespace: current.namespace,
+            parser_version: 3,
+        };
+        let mut messages = crate::sessions::amp::parse_amp_file(&source);
+        assert_eq!(messages[0].session_id, "T-reparse");
+        messages[0].session_id.clear();
+        let entry = CachedSourceEntry::new(
+            stale,
+            &source,
+            SourceFingerprint::from_path(&source).unwrap(),
+            messages,
+            Vec::new(),
+            None,
+        );
+        let shard = cache_shard_path(current, &source);
+        ensure_cache_dir(shard.parent().unwrap()).unwrap();
+        write_shard_with_limit(&shard, stale, &[entry], MAX_CACHE_SHARD_BYTES).unwrap();
+
+        assert!(SourceMessageCache::load().get(current, &source).is_none());
     }
 
     #[test]

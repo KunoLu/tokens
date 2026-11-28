@@ -3053,7 +3053,8 @@ fn run_submit_command(
         .is_none_or(|s| s.iter().any(|src| src == "amp"));
     // Only after an explicit `tokens amp sync`: submit never starts reading
     // the account's threads on ampcode.com on its own.
-    if include_amp && amp::has_amp_sync_state() {
+    let refresh_amp = include_amp && amp::has_amp_sync_state();
+    if refresh_amp {
         say!("{}", t!("cli.submit.syncingAmp").bright_black());
         let sync_result = amp::sync_amp_cache(false);
         if replacement.is_some() && (!sync_result.synced || sync_result.failed != 0) {
@@ -3084,6 +3085,13 @@ fn run_submit_command(
             );
         }
     }
+    let replacing_amp = include_amp && replacement.is_some();
+    let amp_replacement_guard = if replacing_amp {
+        amp::guard_replacement_cache(refresh_amp)
+            .map_err(|_| anyhow::anyhow!(t!("cli.submit.ampReplaceIncomplete")))?
+    } else {
+        None
+    };
 
     if explicit_cursor_filter || explicit_warp_filter || explicit_hindsight_filter {
         let cursor_setup_warnings = setup_warnings(&clients);
@@ -3115,6 +3123,12 @@ fn run_submit_command(
             .await
         })
         .map_err(|e| anyhow::anyhow!(e))?;
+    if replacing_amp && amp_replacement_guard.is_none()
+        && amp::get_amp_cache_dir().try_exists().unwrap_or(true)
+    {
+        anyhow::bail!(t!("cli.submit.ampReplaceIncomplete"));
+    }
+    drop(amp_replacement_guard);
 
     // Preserve local-calendar contributions here. The API validator owns the
     // UTC+ timezone buffer; client-side UTC capping silently drops current-day

@@ -17,7 +17,7 @@
   "top.amp.statusTitle": "Amp threads on ampcode.com",
   "top.amp.syncFailed": "  Amp sync failed: {error}",
   "top.amp.syncHint": "  Run `tokens amp sync` to count threads stored on ampcode.com.",
-  "top.amp.synced": "  Amp: {threads} threads synced ({exported} new or changed)",
+  "top.amp.synced": "  Amp: discovered {threads} threads; successfully exported {exported}",
   "top.amp.threadsLabel": "Threads:",
   "top.amp.unexpectedOutput": "`{command}` returned an unexpected payload",
   "top.amp.writeStateFailed": "Could not write the Amp sync state",

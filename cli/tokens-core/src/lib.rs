@@ -18703,13 +18703,16 @@ mod tests {
         std::fs::create_dir_all(&synced).unwrap();
 
         for (root, name, id, input) in [
+            (&local, "T-blank-id", Some(" \t\u{2003} "), 90),
+            (&local, "T-empty-id", Some(""), 91),
             (&local, "T-renamed", Some("T-shared"), 900),
             (&local, "T-same-name", Some("legacy-thread"), 10),
             (&local, "T-legacy", Some("T-legacy"), 70),
             (&local, "T-no-id", None, 80),
-            (&local, "T-fallback", None, 901),
+            (&local, "T-fallback", Some(""), 901),
             (&local, "T-broken", Some("T-broken"), 50),
             (&local, "T-empty", Some("T-empty"), 75),
+            (&local, "T-model-only", Some("T-model-only"), 77),
             (&synced, "T-synced-copy", Some("T-shared"), 20),
             (&synced, "T-same-name", Some("T-same-name"), 30),
             (&synced, "T-cloud", Some("T-cloud"), 40),
@@ -18745,13 +18748,28 @@ mod tests {
         }
         std::fs::write(synced.join("T-broken.json"), b"{").unwrap();
         std::fs::write(synced.join("T-empty.json"), br#"{"id":"T-empty","messages":[]}"#).unwrap();
+        std::fs::write(
+            synced.join("T-model-only.json"),
+            br#"{
+                "id":"T-model-only",
+                "messages":[{"role":"assistant","usage":{"model":"claude-sonnet-4-0","credits":null}}],
+                "usageLedger":{"events":[
+                    {"model":"claude-sonnet-4-0"},
+                    {"model":"claude-sonnet-4-0","tokens":{"input":null}}
+                ]}
+            }"#,
+        )
+        .unwrap();
 
         let expected = [
+            ("T-blank-id", 90),
             ("T-broken", 50_i64),
             ("T-cloud", 40),
             ("T-empty", 75),
+            ("T-empty-id", 91),
             ("T-fallback", 60),
             ("T-legacy", 70),
+            ("T-model-only", 77),
             ("T-no-id", 80),
             ("T-same-name", 30),
             ("T-shared", 20),

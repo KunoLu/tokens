@@ -32,7 +32,7 @@ pub struct AmpUsageEvent {
     pub to_message_id: Option<i64>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 pub struct AmpTokens {
     pub input: Option<i64>,
     pub output: Option<i64>,
@@ -161,15 +161,18 @@ fn parse_amp_ledger_records(
         .into_iter()
         .filter_map(|event| {
             let model = event.model?;
+            let tokens = event.tokens.unwrap_or_default();
+            if event.credits.is_none()
+                && tokens.input.is_none()
+                && tokens.output.is_none()
+                && tokens.cache_read_input_tokens.is_none()
+                && tokens.cache_creation_input_tokens.is_none()
+            {
+                return None;
+            }
             let explicit_timestamp = parse_amp_timestamp(event.timestamp);
             let timestamp =
                 fallback_amp_timestamp(explicit_timestamp, thread_created_ms, file_mtime_ms);
-            let tokens = event.tokens.unwrap_or(AmpTokens {
-                input: Some(0),
-                output: Some(0),
-                cache_read_input_tokens: Some(0),
-                cache_creation_input_tokens: Some(0),
-            });
 
             Some(AmpUsageRecord {
                 model,
@@ -214,6 +217,14 @@ fn parse_amp_message_records(
 
             let usage = msg.usage?;
             let model = usage.model?;
+            if usage.credits.is_none()
+                && usage.input_tokens.is_none()
+                && usage.output_tokens.is_none()
+                && usage.cache_read_input_tokens.is_none()
+                && usage.cache_creation_input_tokens.is_none()
+            {
+                return None;
+            }
             let message_id = msg.message_id.unwrap_or(0).max(0);
             // Without a recorded time, messages are spaced a second apart from
             // the thread's creation, which books a thread that ran for days on
@@ -297,9 +308,32 @@ fn merge_amp_records(
     }
 }
 
+fn read_amp_thread(path: &Path) -> Option<AmpThread> {
+    let mut bytes = read_file_or_none(path)?;
+    if bytes.iter().copied().find(|b| !b.is_ascii_whitespace()) != Some(b'{') {
+        return None;
+    }
+    simd_json::from_slice(&mut bytes).ok()
+}
+
+/// Check a synced thread without counting usage. An empty thread is valid,
+/// but a cache entry must name itself explicitly, not rely on the stem fallback.
+pub fn is_valid_cached_thread(path: &Path) -> bool {
+    let Some(id) = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .and_then(|name| name.strip_suffix(".json"))
+        .filter(|id| is_thread_id(id))
+    else {
+        return false;
+    };
+    std::fs::symlink_metadata(path).is_ok_and(|metadata| metadata.is_file())
+        && read_amp_thread(path).is_some_and(|thread| thread.id.as_deref() == Some(id))
+}
+
 /// Parse an Amp thread JSON file
 pub fn parse_amp_file(path: &Path) -> Vec<UnifiedMessage> {
-    let Some(content) = read_file_or_none(path) else {
+    let Some(thread) = read_amp_thread(path) else {
         return Vec::new();
     };
 
@@ -311,17 +345,12 @@ pub fn parse_amp_file(path: &Path) -> Vec<UnifiedMessage> {
         .map(|d| d.as_millis() as i64)
         .unwrap_or(0);
 
-    let mut bytes = content;
-    let thread: AmpThread = match simd_json::from_slice(&mut bytes) {
-        Ok(t) => t,
-        Err(_) => return Vec::new(),
-    };
-
-    let thread_id = thread.id.as_deref().unwrap_or_else(|| {
-        path.file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("unknown")
-    });
+    let thread_id = thread
+        .id
+        .as_deref()
+        .filter(|id| !id.trim().is_empty())
+        .or_else(|| path.file_stem().and_then(|stem| stem.to_str()))
+        .unwrap_or("unknown");
 
     let thread_created_ms = thread.created.unwrap_or(0);
     let mut ledger_records =
@@ -386,7 +415,7 @@ pub(crate) fn mark_preferred_sources<T>(
 
 #[cfg(test)]
 mod tests {
-    use super::parse_amp_file;
+    use super::{is_valid_cached_thread, parse_amp_file};
     use std::path::Path;
 
     fn write_amp_thread(path: &Path, content: &str) {
@@ -408,6 +437,56 @@ mod tests {
             .unwrap()
             .format("%Y-%m-%d")
             .to_string()
+    }
+
+    #[test]
+    fn test_parse_amp_keeps_explicit_zero_usage() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("T-zero.json");
+        for fields in [
+            r#""messages":[{"role":"assistant","usage":{"model":"claude-sonnet-4-0","inputTokens":0}}]"#,
+            r#""messages":[{"role":"assistant","usage":{"model":"claude-sonnet-4-0","credits":0}}]"#,
+            r#""usageLedger":{"events":[{"model":"claude-sonnet-4-0","tokens":{"cacheReadInputTokens":0}}]}"#,
+            r#""usageLedger":{"events":[{"model":"claude-sonnet-4-0","credits":0}]}"#,
+        ] {
+            write_amp_thread(&path, &format!(r#"{{"id":"T-zero",{fields}}}"#));
+            let messages = parse_amp_file(&path);
+            assert_eq!(messages.len(), 1, "{fields}");
+            assert_eq!(messages[0].tokens, crate::TokenBreakdown::default());
+            assert_eq!(messages[0].cost, 0.0);
+        }
+    }
+
+    #[test]
+    fn test_amp_cache_check_distinguishes_empty_threads_from_damage() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("T-empty.json");
+        assert!(!is_valid_cached_thread(&path));
+        for payload in [
+            "",
+            r#"{"id":"T-empty","messages":["#,
+            r#"{"id":"T-empty","messages":[]} {}"#,
+            r#"{"id":"T-empty","messages":[{"usage":{"outputTokens":"wrong type"}}]}"#,
+            r#"["T-empty",null,[],null]"#,
+            r#"{"messages":[]}"#,
+            r#"{"id":"","messages":[]}"#,
+            r#"{"id":" ","messages":[]}"#,
+            r#"{"id":"T-other","messages":[]}"#,
+        ] {
+            write_amp_thread(&path, payload);
+            assert!(!is_valid_cached_thread(&path), "{payload}");
+        }
+        write_amp_thread(&path, r#"{"id":"T-empty","messages":[]}"#);
+        assert!(parse_amp_file(&path).is_empty());
+        assert!(is_valid_cached_thread(&path));
+
+        #[cfg(unix)]
+        {
+            let target = dir.path().join("target");
+            std::fs::rename(&path, &target).unwrap();
+            std::os::unix::fs::symlink(&target, &path).unwrap();
+            assert!(!is_valid_cached_thread(&path));
+        }
     }
 
     #[test]

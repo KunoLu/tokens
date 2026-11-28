@@ -201,7 +201,7 @@
   "cli.submit.activeDays": "    Active days: {days}",
   "cli.submit.ampReplaceIncomplete": "--replace refused: Amp did not refresh completely. Retry after a successful Amp sync.",
   "cli.submit.ampSyncFailedCached": "  Amp sync failed; using cached data: {error}",
-  "cli.submit.ampSynced": "  Amp: {exported} new or changed threads synced",
+  "cli.submit.ampSynced": "  Amp: successfully exported {exported} threads",
   "cli.submit.antigravityDiscoveryFailed": "  Antigravity discovery failed: {error}",
   "cli.submit.antigravityDiscoveryFailedCached": "  Antigravity discovery failed; using cached data: {error}",
   "cli.submit.antigravityPartial": "  Antigravity sync was partial: {sessions} session{session_suffix} refreshed, {retained} retained from cache, {failed} failed: {error}",

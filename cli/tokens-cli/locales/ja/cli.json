@@ -200,7 +200,7 @@
   "cli.submit.about": "使用量データを Tokens ソーシャルプラットフォームへ送信します",
   "cli.submit.activeDays": "    アクティブ日数：{days}",
   "cli.submit.ampSyncFailedCached": "  Amp の同期に失敗しました。キャッシュデータを使用します：{error}",
-  "cli.submit.ampSynced": "  Amp：新規・変更されたスレッド {exported} 件を同期しました",
+  "cli.submit.ampSynced": "  Amp：{exported} 件のスレッドをエクスポートしました",
   "cli.submit.antigravityDiscoveryFailed": "  Antigravity の検出に失敗しました：{error}",
   "cli.submit.antigravityDiscoveryFailedCached": "  Antigravity の検出に失敗しました。キャッシュデータを使用します：{error}",
   "cli.submit.antigravityPartial": "  Antigravity の同期は一部のみです：セッション {sessions} 件を更新、{retained} 件はキャッシュから保持、{failed} 件が失敗：{error}",

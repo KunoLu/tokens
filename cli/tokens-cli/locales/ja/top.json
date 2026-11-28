@@ -17,7 +17,7 @@
   "top.amp.statusTitle": "ampcode.com の Amp スレッド",
   "top.amp.syncFailed": "  Amp の同期に失敗しました：{error}",
   "top.amp.syncHint": "  ampcode.com に保存されたスレッドを集計するには `tokens amp sync` を実行してください。",
-  "top.amp.synced": "  Amp：スレッド {threads} 件を同期しました（新規・変更 {exported} 件）",
+  "top.amp.synced": "  Amp：検出したスレッドは {threads} 件、エクスポート成功は {exported} 件です",
   "top.amp.threadsLabel": "スレッド：",
   "top.amp.unexpectedOutput": "`{command}` が想定外の内容を返しました",
   "top.amp.writeStateFailed": "Amp の同期状態を書き込めませんでした",
