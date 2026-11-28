@@ -687,6 +687,9 @@ fn legacy_replace_blocks_first_cloud_sync_until_the_submission_returns() {
                 other => panic!("did not receive the legacy replacement: {other:?}"),
             }
         };
+        // BSD may inherit O_NONBLOCK from the listener. Read the request with
+        // the socket timeout rather than racing the client's first write.
+        socket.set_nonblocking(false).unwrap();
         socket.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
         let mut request = BufReader::new(&socket);
         let mut line = String::new();
