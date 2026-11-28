@@ -119,7 +119,7 @@ curl -fsSL https://raw.githubusercontent.com/KunoLu/tokens/v1.0.6/pre-install-to
 | [Qoder / Qoder CN](https://qoder.com/) | `~/.qoder/projects/` 与 `~/.qoder-cn/projects/`（可用 `QODER_CONFIG_DIR` / `QODERCN_CONFIG_DIR` 覆盖），`~/.qoder{,-cn}/logs/sessions/**/segments/`，以及 IDE 的 `SharedClientCache/cache/db/local.db`。两版都记在同一个 `qoder` 客户端下 |
 | [Qwen CLI](https://github.com/QwenLM/qwen-cli) | `~/.qwen/projects/` |
 | Reasonix | `~/.reasonix/stats/*.jsonl`（可用 `REASONIX_STATE_HOME` 或 `REASONIX_HOME` 覆盖） |
-| [Amp](https://ampcode.com/) | `~/.local/share/amp/threads/` |
+| [Amp](https://ampcode.com/) | `tokens amp sync` → `~/.config/tokens/amp-cache/threads/`；旧版 Amp 写入 `~/.local/share/amp/threads/` |
 | [Droid](https://factory.ai/) | `~/.factory/sessions/` |
 | [Cline](https://github.com/cline/cline) | VS Code globalStorage tasks，或 Cline CLI/桌面端在 `~/.cline/data/sessions/` |
 | [Roo Code](https://github.com/RooCodeInc/Roo-Code) | VS Code globalStorage tasks |
@@ -149,6 +149,24 @@ curl -fsSL https://raw.githubusercontent.com/KunoLu/tokens/v1.0.6/pre-install-to
 只通过账号 API 暴露用量的客户端需要先做一次同步——`tokens cursor sync`、`tokens antigravity sync`、`tokens trae sync`、`tokens warp sync`——之后就和其它客户端一样提交。Antigravity 只在旧版本上需要这次同步：当前 Antigravity 与 Antigravity - Insiders 的会话数据库会直接读取（`tokens antigravity status` 会显示找到了哪些）。
 
 定价数据来自 [LiteLLM](https://github.com/BerriAI/litellm)、[OpenRouter](https://openrouter.ai) 和 [models.dev](https://github.com/anomalyco/models.dev)，按模型取最优匹配费率。
+
+### Amp 线程同步
+
+新版 Amp 将线程保存在 ampcode.com，包括在 Amp 云端运行的线程。安装并登录本机 `amp` CLI 后，运行 `tokens amp sync` 主动启用同步。`tokens amp status` 显示检测到的可执行文件、缓存路径、已缓存线程数和上次同步时间，不运行 `amp`，也不访问 Amp。两个命令都支持 `--json`。
+
+同步用 `amp threads list --json --include-archived --limit 500 --offset <offset>` 分页读取列表。它还用 `amp threads search author:me --json --limit 100` 补充列表可能漏掉的近期活跃线程，并获取更新的活动时间戳。新建、变更或缺少缓存文件的线程通过 `amp threads export <thread-id>` 导出。`tokens amp sync --force` 会重新导出所有找到的线程。
+普通同步保留待办，不按未重新发现的旧 ID 请求导出。手动 `--force` 仅在完整发现且所有可见线程都导出成功后，清除不可见线程的重试待办，用 `droppedPending` 报告数量。不删已有用量；以后再次发现该线程仍会重新导出。可用此方式完成因线程离开搜索窗口而中断的首次启用。
+同步可读取 v1/v2 的旧水位，下次写状态时保存为 v3。v3 记住已清待办的 ID，不主动查询；再次发现时，即使列表仍报告零条消息也会重新导出。请一并保留状态与缓存。
+
+Tokens 不读取 Amp 凭据；本机 `amp` CLI 使用自己的登录状态。`<Tokens 配置目录>/amp-cache/threads/T-<id>.json` 只保存用量元数据，不写入提示词、回复、工具输出或线程标题。macOS 和 Linux 的配置目录通常为 `~/.config/tokens`，可用 `TOKENS_CONFIG_DIR` 覆盖；`tokens amp status` 显示实际缓存路径。
+
+手动同步写入 `<Tokens 配置目录>/amp-cache/state.json` 后，只要提交包含 Amp，`tokens submit` 和 `tokens serve` 就会增量刷新。首次同步中断或仅部分成功时，请手动再次运行 `tokens amp sync`；仅有线程文件不会启用自动刷新。普通提交在刷新失败时沿用旧缓存。
+`amp status --json` 分别报告未导出的已知更新数 `pending` 和自动刷新状态 `autoRefreshEnabled`。
+
+包含 Amp 的 `--replace` 仅支持纯旧版本地历史。当前配置曾启动云同步或存在 `amp-cache` 时，即使 `--force` 成功也拒绝覆盖：导出不能证明所有曾上报的日期都在。请使用不带 `--replace` 的普通提交。扫描器也读取 `~/.local/share/amp/threads/`（或 `$XDG_DATA_HOME/amp/threads/`）里的旧版文件。两处均有同一线程的可用计量时，只统计同步副本。
+
+Amp 导出仅包含主代理请求，不含子代理（`Task`）请求，也不含生成标题等系统模型请求。上游一次抽样中，同步的 token 总量比 `amp usage` 约少 15%，这不是固定差值。首次同步还可能漏掉不在 `threads list` 中的旧线程：`threads search` 只返回最近活跃的 100 条。
+增量同步也受此窗口影响：如果只有代理回复、列表时间未变，且该线程已经不在最近 100 条中，就可能漏刷。可用 `--force` 重新导出列表中能找到的线程，但它无法找回未被发现的线程。
 
 ## 仓库结构
 

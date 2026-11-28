@@ -92,6 +92,7 @@ pub struct CrushDbSource {
 #[derive(Debug)]
 pub struct ScanResult {
     pub files: [Vec<PathBuf>; ClientId::COUNT],
+    amp_synced_count: usize,
     /// All OpenCode SQLite databases discovered under the data dir.
     ///
     /// Includes the default `opencode.db` (used by `latest`/`beta` channels
@@ -143,6 +144,7 @@ impl Default for ScanResult {
     fn default() -> Self {
         Self {
             files: std::array::from_fn(|_| Vec::new()),
+            amp_synced_count: 0,
             opencode_dbs: Vec::new(),
             copilot_desktop_db: None,
             synthetic_db: None,
@@ -176,12 +178,18 @@ impl ScanResult {
             )
     }
 
+    /// Amp candidates are in source priority order, with synced files first.
     pub fn get(&self, client: ClientId) -> &Vec<PathBuf> {
         &self.files[client as usize]
     }
 
     pub fn get_mut(&mut self, client: ClientId) -> &mut Vec<PathBuf> {
         &mut self.files[client as usize]
+    }
+
+    /// The prefix of this length came from the dedicated sync cache search.
+    pub(crate) fn amp_sources(&self) -> (&[PathBuf], usize) {
+        (self.get(ClientId::Amp).as_slice(), self.amp_synced_count)
     }
 
     /// Get total number of files found
@@ -897,6 +905,19 @@ pub fn antigravity_conversation_roots(home_dir: &str, use_env_roots: bool) -> Ve
                 })
         })
         .collect()
+}
+
+/// Where `tokens amp sync` keeps the usage of threads stored on ampcode.com,
+/// one `T-<id>.json` per thread. Current Amp no longer writes the legacy
+/// `amp/threads` data directory (missuo/tokens#64).
+pub fn amp_sync_cache_root(home_dir: &str, use_env_roots: bool) -> PathBuf {
+    let mut root = if use_env_roots {
+        crate::paths::get_config_dir()
+    } else {
+        PathRoot::Config.resolve_with_env_strategy(home_dir, false).into()
+    };
+    root.extend(["amp-cache", "threads"]);
+    root
 }
 
 pub fn built_in_extra_scan_paths_for(
@@ -3177,6 +3198,18 @@ fn scan_all_clients_with_env_strategy_inner(
     // roots intentionally retain the same relative transcript names, so defer
     // its path selection until V2 can win over a V1 counterpart.
     let mut seen: HashSet<(ClientId, PathBuf)> = HashSet::new();
+    // Register synced Amp paths first so an overlapping extra root cannot
+    // claim them as local sources. Thread identity is resolved during parsing.
+    if enabled.contains(&ClientId::Amp) {
+        let sync_root = amp_sync_cache_root(home_dir, use_env_roots);
+        let amp_files = result.get_mut(ClientId::Amp);
+        amp_files.extend(discover_synced_amp_threads(&sync_root).filter(|path| {
+            let key = std::fs::canonicalize(path).unwrap_or_else(|_| path.clone());
+            seen.insert((ClientId::Amp, key))
+        }));
+        amp_files.sort_unstable();
+        result.amp_synced_count = amp_files.len();
+    }
     let mut cherry_files: Vec<(bool, String, PathBuf)> = Vec::new();
     for (client_id, root, files) in scan_results {
         for file in files {
@@ -3255,6 +3288,19 @@ fn scan_all_clients_with_env_strategy_inner(
     prefer_cursor_json_over_csv(result.get_mut(ClientId::Cursor));
 
     result
+}
+
+fn discover_synced_amp_threads(sync_root: &Path) -> impl Iterator<Item = PathBuf> {
+    std::fs::read_dir(sync_root)
+        .into_iter()
+        .flatten()
+        .filter_map(|entry| {
+            let entry = entry.ok()?;
+            let name = entry.file_name();
+            let id = name.to_str()?.strip_suffix(".json")?;
+            (crate::sessions::amp::is_thread_id(id) && entry.file_type().ok()?.is_file())
+                .then(|| entry.path())
+        })
 }
 
 /// Drop each Cursor `usage[.account].csv` whose `usage[.account].json` sibling
@@ -3588,6 +3634,99 @@ mod tests {
             std::slice::from_ref(&expected)
         );
         assert_eq!(result.total_files(), 1);
+    }
+
+    #[test]
+    #[serial]
+    fn test_scan_amp_cache_uses_writer_root_but_isolates_explicit_home() {
+        let dir = TempDir::new().unwrap();
+        let home = dir.path().join("explicit-home");
+        let config = dir.path().join("redirected config");
+        #[cfg(target_os = "linux")]
+        let config = {
+            use std::os::unix::ffi::OsStrExt;
+            config.join(std::ffi::OsStr::from_bytes(b"native-\xff"))
+        };
+        let mut env = EnvGuard::capture(&[
+            "HOME",
+            "TOKENS_CONFIG_DIR",
+            "TOKENS_EXTRA_DIRS",
+            "TOKENS_HEADLESS_DIR",
+            "XDG_DATA_HOME",
+        ]);
+        env.set("HOME", dir.path().join("process-home"));
+        env.set("TOKENS_CONFIG_DIR", &config);
+        env.set("XDG_DATA_HOME", dir.path().join("data"));
+        env.remove("TOKENS_EXTRA_DIRS");
+        env.remove("TOKENS_HEADLESS_DIR");
+
+        let writer_threads = crate::paths::get_config_dir().join("amp-cache").join("threads");
+        let isolated_threads = if cfg!(windows) {
+            home.join("AppData").join("Roaming")
+        } else {
+            home.join(".config")
+        }
+        .join("tokens")
+        .join("amp-cache")
+        .join("threads");
+        fs::create_dir_all(&writer_threads).unwrap();
+        fs::create_dir_all(&isolated_threads).unwrap();
+        let writer_file = writer_threads.join("T-redirected.json");
+        let isolated_file = isolated_threads.join("T-isolated.json");
+        fs::write(&writer_file, br#"{"id":"T-redirected"}"#).unwrap();
+        fs::write(&isolated_file, br#"{"id":"T-isolated"}"#).unwrap();
+        fs::write(writer_threads.join("T-redirected.json.tmp"), b"{}").unwrap();
+
+        let clients = ["amp".to_string()];
+        for (use_env_roots, expected) in [(true, &writer_file), (false, &isolated_file)] {
+            let result =
+                scan_all_clients_with_env_strategy(home.to_str().unwrap(), &clients, use_env_roots);
+            assert_eq!(
+                result.get(ClientId::Amp).as_slice(),
+                std::slice::from_ref(expected)
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[serial]
+    fn test_amp_sync_cache_root_preserves_non_utf8_config_paths() {
+        use std::os::unix::ffi::OsStrExt;
+
+        let dir = TempDir::new().unwrap();
+        let home = dir.path().to_str().unwrap();
+        // Some filesystems reject invalid UTF-8 names. Check resolution without
+        // creating the directory so this also covers the macOS resolver.
+        let config = dir.path().join(std::ffi::OsStr::from_bytes(b"config-\xff"));
+        let mut env = EnvGuard::capture(&["TOKENS_CONFIG_DIR", "XDG_CONFIG_HOME", "HOME"]);
+        env.set("TOKENS_CONFIG_DIR", &config);
+        assert_eq!(
+            amp_sync_cache_root(home, true),
+            config.join("amp-cache").join("threads")
+        );
+
+        env.remove("TOKENS_CONFIG_DIR");
+        #[cfg(target_os = "linux")]
+        {
+            env.set("XDG_CONFIG_HOME", &config);
+            assert_eq!(
+                amp_sync_cache_root(home, true),
+                config.join("tokens").join("amp-cache").join("threads")
+            );
+        }
+        #[cfg(target_os = "macos")]
+        {
+            env.set("HOME", &config);
+            assert_eq!(
+                amp_sync_cache_root(home, true),
+                config
+                    .join(".config")
+                    .join("tokens")
+                    .join("amp-cache")
+                    .join("threads")
+            );
+        }
     }
 
     #[test]
