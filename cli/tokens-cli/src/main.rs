@@ -2947,6 +2947,11 @@ fn run_submit_command(
     // The clients this submission covers — the only ones whose MCP configs may
     // be read when names are opted in.
     let selected_clients = clients.clone().unwrap_or_default();
+    let include_amp = selected_clients.iter().any(|client| client == "amp");
+    // Keep this lock through the response, not just through the scan.
+    let _amp_replacement_guard = (include_amp && replacement.is_some())
+        .then(amp::guard_replacement_cache)
+        .transpose()?;
 
     let include_cursor = clients
         .as_ref()
@@ -3048,20 +3053,11 @@ fn run_submit_command(
         }
     }
 
-    let include_amp = clients
-        .as_ref()
-        .is_none_or(|s| s.iter().any(|src| src == "amp"));
     // Only after an explicit `tokens amp sync`: submit never starts reading
     // the account's threads on ampcode.com on its own.
-    let refresh_amp = include_amp && amp::has_amp_sync_state();
-    if refresh_amp {
+    if include_amp && replacement.is_none() && amp::has_amp_sync_state() {
         say!("{}", t!("cli.submit.syncingAmp").bright_black());
         let sync_result = amp::sync_amp_cache(false);
-        if replacement.is_some() && (!sync_result.synced || sync_result.failed != 0) {
-            // Full coverage can delete missing days. A stale or partial cache
-            // is safe for an ordinary submit but not an authoritative one.
-            anyhow::bail!(t!("cli.submit.ampReplaceIncomplete"));
-        }
         if sync_result.synced {
             say!(
                 "{}",
@@ -3084,14 +3080,10 @@ fn run_submit_command(
                 tr!("cli.submit.ampSyncFailedCached", error = err).yellow()
             );
         }
+        if let Some(pending) = sync_result.pending.filter(|count| *count > sync_result.failed) {
+            say!("{}", tr!("top.amp.pendingExports", pending = pending).yellow());
+        }
     }
-    let replacing_amp = include_amp && replacement.is_some();
-    let amp_replacement_guard = if replacing_amp {
-        amp::guard_replacement_cache(refresh_amp)
-            .map_err(|_| anyhow::anyhow!(t!("cli.submit.ampReplaceIncomplete")))?
-    } else {
-        None
-    };
 
     if explicit_cursor_filter || explicit_warp_filter || explicit_hindsight_filter {
         let cursor_setup_warnings = setup_warnings(&clients);
@@ -3123,12 +3115,6 @@ fn run_submit_command(
             .await
         })
         .map_err(|e| anyhow::anyhow!(e))?;
-    if replacing_amp && amp_replacement_guard.is_none()
-        && amp::get_amp_cache_dir().try_exists().unwrap_or(true)
-    {
-        anyhow::bail!(t!("cli.submit.ampReplaceIncomplete"));
-    }
-    drop(amp_replacement_guard);
 
     // Preserve local-calendar contributions here. The API validator owns the
     // UTC+ timezone buffer; client-side UTC capping silently drops current-day

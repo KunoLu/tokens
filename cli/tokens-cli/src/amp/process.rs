@@ -18,16 +18,25 @@ pub(super) enum CaptureError {
 
 pub(super) struct Supervisor {
     cleanup_failed: AtomicBool,
+    // Restore Linux adoption before Signals can re-raise cancellation.
+    #[cfg(target_os = "linux")]
+    _subreaper: platform::Subreaper,
     #[cfg(unix)]
     signals: platform::Signals,
 }
 
 impl Supervisor {
     pub(super) fn new() -> io::Result<Self> {
+        #[cfg(unix)]
+        let signals = platform::Signals::new()?;
+        #[cfg(target_os = "linux")]
+        let subreaper = platform::Subreaper::new()?;
         Ok(Self {
             cleanup_failed: AtomicBool::new(false),
+            #[cfg(target_os = "linux")]
+            _subreaper: subreaper,
             #[cfg(unix)]
-            signals: platform::Signals::new()?,
+            signals,
         })
     }
 
@@ -45,11 +54,15 @@ impl Supervisor {
         timeout: Duration,
         limit: usize,
     ) -> Result<Vec<u8>, CaptureError> {
+        #[cfg(target_os = "linux")]
+        let group_ids = platform::lock_group_ids().map_err(|_| CaptureError::Run)?;
         if self.stopped() {
             return Err(CaptureError::Run);
         }
         let deadline = Instant::now() + timeout;
         let (mut child, mut tree) = platform::spawn(command).map_err(|_| CaptureError::Run)?;
+        #[cfg(target_os = "linux")]
+        drop(group_ids);
         let mut stdout = child.stdout.take();
         let result = capture(self, &mut child, &mut stdout, deadline, limit);
         drop(stdout);
@@ -149,6 +162,89 @@ mod platform {
     const CANCEL_SIGNALS: [libc::c_int; 4] = [libc::SIGINT, libc::SIGTERM, libc::SIGHUP, libc::SIGQUIT];
     static SIGNAL_SCOPE: Mutex<()> = Mutex::new(());
     static CANCELLED_BY: AtomicI32 = AtomicI32::new(0);
+
+    #[cfg(target_os = "linux")]
+    static GROUP_IDS: Mutex<()> = Mutex::new(());
+
+    #[cfg(target_os = "linux")]
+    pub(super) fn lock_group_ids() -> io::Result<MutexGuard<'static, ()>> {
+        // A recycled PGID must not select a new Amp child during a group wait.
+        let mut guard = None;
+        wait_for_exit(|| match GROUP_IDS.try_lock() {
+            Ok(locked) => {
+                guard = Some(locked);
+                Ok(true)
+            }
+            Err(std::sync::TryLockError::WouldBlock) => Ok(false),
+            Err(std::sync::TryLockError::Poisoned(_)) => {
+                Err(io::Error::other("Amp process group lock poisoned"))
+            }
+        })?;
+        Ok(guard.expect("success acquires the group lock"))
+    }
+
+    // Linux adoption is process-wide and restoring the flag cannot undo an
+    // adoption. Amp sync has no other child trees or waiters in this CLI;
+    // `serve` refreshes through a separate, short-lived submit process.
+    #[cfg(target_os = "linux")]
+    pub(super) struct Subreaper(bool);
+
+    #[cfg(target_os = "linux")]
+    impl Subreaper {
+        pub(super) fn new() -> io::Result<Self> {
+            let mut enabled: libc::c_int = 0;
+            let unused: libc::c_ulong = 0;
+            // SAFETY: PR_GET_CHILD_SUBREAPER writes an int; unused arguments are zero.
+            if unsafe {
+                libc::prctl(
+                    libc::PR_GET_CHILD_SUBREAPER,
+                    &raw mut enabled,
+                    unused,
+                    unused,
+                    unused,
+                )
+            } == -1
+            {
+                return Err(io::Error::last_os_error());
+            }
+            if enabled == 0 {
+                set_child_subreaper(true)?;
+            }
+            Ok(Self(enabled == 0))
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    impl Drop for Subreaper {
+        fn drop(&mut self) {
+            if !self.0 {
+                return;
+            }
+            if let Err(error) = set_child_subreaper(false) {
+                eprintln!("Could not restore the Amp child subreaper setting: {error}");
+                std::process::exit(1);
+            }
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    fn set_child_subreaper(enabled: bool) -> io::Result<()> {
+        let unused: libc::c_ulong = 0;
+        // SAFETY: PR_SET_CHILD_SUBREAPER takes a 0 or 1 and three unused arguments.
+        if unsafe {
+            libc::prctl(
+                libc::PR_SET_CHILD_SUBREAPER,
+                libc::c_ulong::from(enabled),
+                unused,
+                unused,
+                unused,
+            )
+        } == -1
+        {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(())
+    }
 
     pub(super) struct Signals {
         previous: [Option<libc::sigaction>; CANCEL_SIGNALS.len()],
@@ -260,7 +356,25 @@ mod platform {
             Ok(())
         }
 
-        #[cfg(not(target_vendor = "apple"))]
+        #[cfg(target_os = "linux")]
+        pub(super) fn cleanup(&mut self, child: &mut Child) -> io::Result<()> {
+            let group = self.0.expect("cleanup runs once");
+            wait_for_exit(|| {
+                // Do not signal if the kernel no longer recognizes our leader.
+                let exited = exit_status(child).inspect_err(|_| self.0 = None)?.is_some();
+                signal_group(group)?;
+                Ok(exited)
+            })?;
+            let group_ids = lock_group_ids();
+            // Reap the leader by its handle even if the group lock timed out.
+            // Once the leader can be reaped, never signal the numeric ID again.
+            self.0 = None;
+            child.try_wait()?.ok_or(io::ErrorKind::TimedOut)?;
+            let _group_ids = group_ids?;
+            reap_group(group)
+        }
+
+        #[cfg(all(not(target_vendor = "apple"), not(target_os = "linux")))]
         pub(super) fn cleanup(&mut self, child: &mut Child) -> io::Result<()> {
             let group = self.0.expect("cleanup runs once");
             wait_for_exit(|| {
@@ -272,14 +386,7 @@ mod platform {
             // can receive a terminating signal from this supervisor.
             self.0 = None;
             child.wait()?;
-            wait_for_exit(|| {
-                // SAFETY: signal 0 asks the kernel whether the group exists.
-                if unsafe { libc::killpg(group, 0) } == 0 {
-                    return Ok(false);
-                }
-                let error = io::Error::last_os_error();
-                if error.raw_os_error() == Some(libc::ESRCH) { Ok(true) } else { Err(error) }
-            })
+            wait_for_exit(|| group_is_absent(group))
         }
     }
 
@@ -301,6 +408,45 @@ mod platform {
             }
         }
         Ok(())
+    }
+
+    #[cfg(not(target_vendor = "apple"))]
+    fn group_is_absent(group: libc::pid_t) -> io::Result<bool> {
+        // SAFETY: signal 0 asks the kernel whether the group exists.
+        if unsafe { libc::killpg(group, 0) } == 0 {
+            return Ok(false);
+        }
+        let error = io::Error::last_os_error();
+        if error.raw_os_error() == Some(libc::ESRCH) {
+            Ok(true)
+        } else {
+            Err(error)
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    fn reap_group(group: libc::pid_t) -> io::Result<()> {
+        let deadline = Instant::now() + REAP_TIMEOUT;
+        loop {
+            // SAFETY: The negative PID selects only our children in this Amp group.
+            let pid = unsafe { libc::waitpid(-group, null_mut(), libc::WNOHANG) };
+            if pid == -1 {
+                let error = io::Error::last_os_error();
+                match error.raw_os_error() {
+                    // ECHILD does not rule out a group member we do not own.
+                    Some(libc::ECHILD) if group_is_absent(group)? => return Ok(()),
+                    Some(libc::ECHILD | libc::EINTR) => {}
+                    _ => return Err(error),
+                }
+            }
+            let delay = POLL_INTERVAL.min(deadline.saturating_duration_since(Instant::now()));
+            if delay.is_zero() {
+                return Err(io::ErrorKind::TimedOut.into());
+            }
+            if pid <= 0 {
+                thread::sleep(delay);
+            }
+        }
     }
 
 
@@ -582,6 +728,8 @@ mod tests {
 
     const MODE: &str = "TOKENS_TEST_AMP_PROCESS_MODE";
     const DIR: &str = "TOKENS_TEST_AMP_PROCESS_DIR";
+    #[cfg(target_os = "linux")]
+    const ORPHAN_OUTPUT: &str = "Amp fixture output";
     #[cfg(unix)]
     const CANCEL_DIRS: [&str; 2] = ["first", "second"];
 
@@ -612,6 +760,13 @@ mod tests {
     fn fixture_process() {
         let mode = std::env::var(MODE).unwrap();
         let dir = std::path::PathBuf::from(std::env::var_os(DIR).unwrap());
+        #[cfg(target_os = "linux")]
+        match mode.as_str() {
+            "non-reaping-ancestor" => return non_reaping_ancestor(&dir),
+            "capture-orphan" => return capture_orphan(&dir),
+            "exit" => return,
+            _ => {}
+        }
         #[cfg(unix)]
         if mode == "supervisor" {
             for signal in [libc::SIGINT, libc::SIGTERM] {
@@ -655,6 +810,10 @@ mod tests {
                 thread::sleep(POLL_INTERVAL);
             }
             fs::write(dir.join("wrapper-exiting"), []).unwrap();
+            #[cfg(target_os = "linux")]
+            if mode == "wrapper-closed" {
+                println!("{ORPHAN_OUTPUT}");
+            }
             std::process::exit(0);
         }
 
@@ -677,6 +836,100 @@ mod tests {
             .open(dir.join("alive"))
             .unwrap();
         fs2::FileExt::try_lock_exclusive(&lock).expect("fixture still holds its lock");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_reaps_amp_orphan_with_nonreaping_ancestor() {
+        let dir = tempfile::tempdir().unwrap();
+        let status = fixture("non-reaping-ancestor", dir.path())
+            .stdout(Stdio::null())
+            .stderr(Stdio::inherit())
+            .status()
+            .unwrap();
+        assert!(status.success(), "{status}");
+        assert_stopped(dir.path());
+        assert!(dir.path().join("wrapper-exiting").is_file());
+    }
+
+    #[cfg(target_os = "linux")]
+    fn non_reaping_ancestor(dir: &Path) {
+        let one: libc::c_ulong = 1;
+        let unused: libc::c_ulong = 0;
+        // SAFETY: Only this isolated fixture becomes a stand-in for PID 1.
+        assert_eq!(
+            unsafe { libc::prctl(libc::PR_SET_CHILD_SUBREAPER, one, unused, unused, unused) },
+            0
+        );
+        drop(Supervisor::new().unwrap());
+        assert_eq!(subreaper_setting(), 1);
+        let status = fixture("capture-orphan", dir)
+            .stderr(Stdio::inherit())
+            .status()
+            .unwrap();
+
+        // Do not reap while the capture runs. Clean up leftovers if it regresses.
+        let mut adopted = false;
+        wait_for_exit(|| {
+            // SAFETY: This isolated fixture has no unrelated children.
+            match unsafe { libc::waitpid(-1, std::ptr::null_mut(), libc::WNOHANG) } {
+                -1 => {
+                    let error = io::Error::last_os_error();
+                    match error.raw_os_error() {
+                        Some(libc::ECHILD) => Ok(true),
+                        Some(libc::EINTR) => Ok(false),
+                        _ => Err(error),
+                    }
+                }
+                0 => Ok(false),
+                _ => {
+                    adopted = true;
+                    Ok(false)
+                }
+            }
+        })
+        .unwrap();
+        assert!(status.success(), "{status}");
+        assert!(!adopted, "Amp orphan reached the non-reaping ancestor");
+    }
+
+    #[cfg(target_os = "linux")]
+    fn capture_orphan(dir: &Path) {
+        assert_eq!(subreaper_setting(), 0);
+        let supervisor = Supervisor::new().unwrap();
+        let mut unrelated = fixture("exit", dir).stdout(Stdio::null()).spawn().unwrap();
+        wait_for_exit(|| Ok(platform::exit_status(&mut unrelated)?.is_some())).unwrap();
+        let output = supervisor
+            .bounded_output(
+                fixture("wrapper-closed", dir).stdout(Stdio::piped()),
+                Duration::from_secs(3),
+                4096,
+            )
+            .unwrap();
+        assert!(std::str::from_utf8(&output).unwrap().contains(ORPHAN_OUTPUT));
+        assert!(unrelated.wait().unwrap().success());
+        drop(supervisor);
+        assert_eq!(subreaper_setting(), 0);
+    }
+
+    #[cfg(target_os = "linux")]
+    fn subreaper_setting() -> libc::c_int {
+        let mut enabled: libc::c_int = 0;
+        let unused: libc::c_ulong = 0;
+        // SAFETY: PR_GET_CHILD_SUBREAPER writes into this int.
+        assert_eq!(
+            unsafe {
+                libc::prctl(
+                    libc::PR_GET_CHILD_SUBREAPER,
+                    &raw mut enabled,
+                    unused,
+                    unused,
+                    unused,
+                )
+            },
+            0
+        );
+        enabled
     }
 
     #[test]

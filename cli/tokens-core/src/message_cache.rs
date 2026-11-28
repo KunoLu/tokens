@@ -1588,7 +1588,8 @@ fn parser_version(client: ClientId) -> u32 {
         // v3 keeps malformed trailing-slash model names rather than an empty id.
         // v4 falls back to the stem for blank IDs and ignores unmetered usage.
         // v5 preserves exact ledger timing and caches blank IDs separately from display stems.
-        ClientId::Amp => 5,
+        // v6 dates metered messages from exact timing-only ledger events.
+        ClientId::Amp => 6,
         // The remaining clients parse their own formats and have never
         // shipped a parser-only change that leaves byte-identical input
         // parsing differently, so all of them are at version 1. Repeating
@@ -4321,7 +4322,7 @@ mod tests {
 
     #[test]
     #[serial_test::serial]
-    fn test_amp_parser_version_invalidates_v4_warm_entries() {
+    fn test_amp_parser_version_invalidates_v4_and_v5_warm_entries() {
         let home = TempDir::new().unwrap();
         let _cache_env = sandbox_cache_env(home.path());
         let source = home.path().join("T-reparse.json");
@@ -4331,27 +4332,35 @@ mod tests {
         )
         .unwrap();
         let current = CacheIdentity::for_client(ClientId::Amp);
-        assert_eq!(current.parser_version, 5);
-        let stale = CacheIdentity {
-            namespace: current.namespace,
-            parser_version: 4,
-        };
-        // The v4 source cache did not distinguish this display stem from a real ID.
-        let messages = crate::sessions::amp::parse_amp_file(&source);
-        assert_eq!(messages[0].session_id, "T-reparse");
-        let entry = CachedSourceEntry::new(
-            stale,
-            &source,
-            SourceFingerprint::from_path(&source).unwrap(),
-            messages,
-            Vec::new(),
-            None,
-        );
+        assert_eq!(current.parser_version, 6);
         let shard = cache_shard_path(current, &source);
         ensure_cache_dir(shard.parent().unwrap()).unwrap();
-        write_shard_with_limit(&shard, stale, &[entry], MAX_CACHE_SHARD_BYTES).unwrap();
-
-        assert!(SourceMessageCache::load().get(current, &source).is_none());
+        for parser_version in [4, 5] {
+            let stale = CacheIdentity {
+                namespace: current.namespace,
+                parser_version,
+            };
+            // v4 had already turned the blank ID into a display stem.
+            let messages = if parser_version == 4 {
+                crate::sessions::amp::parse_amp_file(&source)
+            } else {
+                crate::sessions::amp::parse_amp_source(&source)
+            };
+            assert_eq!(
+                messages[0].session_id,
+                if parser_version == 4 { "T-reparse" } else { "" }
+            );
+            let entry = CachedSourceEntry::new(
+                stale,
+                &source,
+                SourceFingerprint::from_path(&source).unwrap(),
+                messages,
+                Vec::new(),
+                None,
+            );
+            write_shard_with_limit(&shard, stale, &[entry], MAX_CACHE_SHARD_BYTES).unwrap();
+            assert!(SourceMessageCache::load().get(current, &source).is_none());
+        }
     }
 
     #[test]

@@ -199,7 +199,7 @@
   "cli.status.json.help": "Output as JSON",
   "cli.submit.about": "Submit usage data to the Tokens social platform",
   "cli.submit.activeDays": "    Active days: {days}",
-  "cli.submit.ampReplaceIncomplete": "--replace refused: Amp cache coverage could not be verified. Resolve sync errors and restore any missing cached threads before retrying.",
+  "cli.submit.ampReplaceIncomplete": "--replace requires legacy-only Amp history. Cloud sync has started, sync files exist, or exclusive access could not be verified. Use submit without --replace.",
   "cli.submit.ampSyncFailedCached": "  Amp sync failed; using cached data: {error}",
   "cli.submit.ampSynced": "  Amp: successfully exported {exported} threads",
   "cli.submit.antigravityDiscoveryFailed": "  Antigravity discovery failed: {error}",

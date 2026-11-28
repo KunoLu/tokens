@@ -221,12 +221,13 @@ Once an explicit sync writes `<tokens config dir>/amp-cache/state.json`,
 submission includes Amp. They do not contact Amp before this opt-in.
 If the first sync is interrupted or only partly succeeds, run `tokens amp sync`
 again yourself. Having a cached thread alone does not enable automatic refresh.
+`amp status --json` reports `pending` (known updates not yet exported) separately
+from `autoRefreshEnabled`. A successful export alone does not enable refresh.
 If a refresh fails, ordinary submissions continue using the existing cache.
-An Amp `--replace` submission also checks that the files on disk match the
-sync state. A known update that failed to export still blocks replacement even
-if it leaves the discovery results. Restore missing thread files or resolve
-the failed exports before retrying; an ordinary submit does not erase missing
-days. The scanner also reads
+Use ordinary `tokens submit` after Amp cloud sync. `--replace` accepts only
+legacy local Amp history: it refuses a configuration that has started cloud
+sync or contains an `amp-cache` directory, even after a successful `--force`.
+Exports cannot prove that every previously reported day is present. The scanner also reads
 legacy files from `~/.local/share/amp/threads/` (or
 `$XDG_DATA_HOME/amp/threads/`). If both sources contain usable measurements
 for the same thread ID, only the synced copy counts.

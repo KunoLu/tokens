@@ -242,7 +242,7 @@
   "cli.submit.replaceNeedsClient": "--replace 至少需要一个显式的 --client",
   "cli.submit.replaceNeedsSince": "--replace 需要带边界的 --since 日期",
   "cli.submit.replaceNeedsUntil": "--replace 需要带边界的 --until 日期",
-  "cli.submit.ampReplaceIncomplete": "无法确认 Amp 缓存完整，已拒绝 --replace。请处理同步错误，并恢复缺失的线程缓存后再试。",
+  "cli.submit.ampReplaceIncomplete": "--replace 仅支持纯旧版本地 Amp 历史。当前配置曾启动云同步、存在同步文件，或无法确认独占访问。请使用不带 --replace 的普通提交。",
   "cli.submit.replaceNoContributions": "--replace 在 {start} 至 {end} 内找不到 {client} 的贡献；拒绝无锚点替换",
   "cli.submit.replaceOnlyExplicitBounds": "--replace 只接受显式的 --since 和 --until 边界；请去掉 --today/--yesterday/--week/--month/--year",
   "cli.submit.replaceSinceFormat": "--replace --since 必须使用 YYYY-MM-DD",

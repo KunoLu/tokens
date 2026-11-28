@@ -89,9 +89,23 @@ struct AmpSyncState {
     synced_at: Option<DateTime<Utc>>,
     /// Thread id -> latest update time confirmed by a successful export.
     threads: BTreeMap<String, DateTime<Utc>>,
-    /// Thread id -> observed update still awaiting a successful export.
+    /// Thread id -> latest observed or requested export still outstanding.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pending: BTreeMap<String, DateTime<Utc>>,
+}
+
+impl AmpSyncState {
+    fn record_pending(&mut self, id: &str, updated: DateTime<Utc>) -> bool {
+        if let Some(pending) = self.pending.get_mut(id) {
+            if updated <= *pending {
+                return false;
+            }
+            *pending = updated;
+        } else {
+            self.pending.insert(id.to_owned(), updated);
+        }
+        true
+    }
 }
 
 /// One entry of `amp threads list --json`.
@@ -114,13 +128,18 @@ struct SearchedThread {
 #[derive(Debug, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SyncAmpResult {
+    /// Discovery finished and either exports made progress or no updates remain.
     pub synced: bool,
-    /// Threads with messages on the account.
+    /// Distinct eligible threads discovered this run, including before a discovery error.
     pub threads: usize,
-    /// Threads exported this run because they were new or changed.
+    /// Thread cache files successfully written this run.
     pub exported: usize,
     /// Exports that failed; they keep any previous cache file and watermark.
     pub failed: usize,
+    /// Persisted updates still awaiting export, or unknown if state could not be read.
+    pub pending: Option<usize>,
+    /// Whether a complete first sync has published valid state.
+    pub auto_refresh_enabled: Option<bool>,
     pub error: Option<String>,
 }
 
@@ -131,6 +150,8 @@ struct AmpStatus {
     cache_dir: String,
     has_cache: bool,
     cached_threads: usize,
+    pending: usize,
+    auto_refresh_enabled: bool,
     last_synced_at: Option<DateTime<Utc>>,
 }
 
@@ -141,107 +162,63 @@ pub fn run_amp_sync(force: bool, json: bool) -> Result<()> {
         return Ok(());
     }
 
-    if result.synced {
+    if result.synced || result.threads != 0 || result.exported != 0 {
+        let summary = tr!(
+            "top.amp.synced",
+            threads = result.threads,
+            exported = result.exported
+        );
         println!(
             "{}",
-            tr!(
-                "top.amp.synced",
-                threads = result.threads,
-                exported = result.exported
-            )
-            .green()
+            if result.synced && result.pending == Some(0) {
+                summary.green()
+            } else {
+                summary.yellow()
+            }
         );
-        if result.failed > 0 {
-            eprintln!(
-                "{}",
-                tr!(
-                    "top.amp.exportsFailed",
-                    failed = result.failed,
-                    error = result.error.unwrap_or_default()
-                )
-                .yellow()
-            );
-        }
-    } else if let Some(error) = result.error {
-        eprintln!("{}", tr!("top.amp.syncFailed", error = error).yellow());
+    }
+    if let Some(error) = result.error.as_deref() {
+        let warning = if result.synced && result.failed != 0 {
+            tr!("top.amp.exportsFailed", failed = result.failed, error = error)
+        } else {
+            tr!("top.amp.syncFailed", error = error)
+        };
+        eprintln!("{}", warning.yellow());
+    }
+    if let (Some(enabled), Some(pending)) = (result.auto_refresh_enabled, result.pending) {
+        print_amp_refresh_status(enabled, pending);
     }
     Ok(())
 }
 
-/// Hold the writer lock until the caller has scanned its authoritative input.
-/// A successful discovery cannot vouch for an older, now-unlisted thread.
-pub fn guard_replacement_cache(refreshed: bool) -> Result<Option<fs::File>> {
-    let cache_dir = get_amp_cache_dir();
-    guard_replacement_cache_at(&cache_dir, refreshed)
+fn print_amp_refresh_status(enabled: bool, pending: usize) {
+    println!(
+        "{}",
+        if enabled {
+            t!("top.amp.autoRefreshEnabled").green()
+        } else {
+            t!("top.amp.autoRefreshDisabled").yellow()
+        }
+    );
+    if pending != 0 {
+        eprintln!("{}", tr!("top.amp.pendingExports", pending = pending).yellow());
+    }
 }
 
-fn guard_replacement_cache_at(cache_dir: &Path, refreshed: bool) -> Result<Option<fs::File>> {
-    if !refreshed && !cache_dir.try_exists()? {
-        // A legacy-only submit must not create any cloud sync files. The
-        // caller checks that no first sync started while it scanned.
-        return Ok(None);
-    }
-    let lock = acquire_sync_lock(cache_dir)?;
-    let state = load_state(cache_dir)?;
-    let incomplete = || anyhow::anyhow!(t!("cli.submit.ampReplaceIncomplete"));
-    if state_file_exists(&initial_state_path(cache_dir))
-        || state.is_some() != refreshed
-        || state.as_ref().is_some_and(|state| !state.pending.is_empty())
-    {
-        return Err(incomplete());
-    }
-    let mut expected = state.map_or_else(BTreeMap::new, |state| state.threads);
-    match fs::read_dir(threads_dir(cache_dir)) {
-        Ok(entries) => {
-            for entry in entries {
-                let entry = entry?;
-                let name = entry.file_name();
-                let Some(id) = name.to_str().and_then(|name| name.strip_suffix(".json"))
-                    .filter(|id| is_thread_id(id)) else { continue };
-                if expected.remove(id).is_none()
-                    || !tokens_core::sessions::amp::is_valid_cached_thread(&entry.path())
-                {
-                    return Err(incomplete());
-                }
-            }
-        }
-        Err(error) if error.kind() == ErrorKind::NotFound => {}
-        Err(error) => return Err(error.into()),
-    }
-    if !expected.is_empty() {
-        return Err(incomplete());
-    }
-    Ok(Some(lock))
+/// A legacy-only replacement keeps the first cloud sync out until upload finishes.
+pub fn guard_replacement_cache() -> Result<fs::File> {
+    let dir = get_amp_cache_dir();
+    let lock = policy_lock(&dir).map_err(|_| anyhow::anyhow!(t!("cli.submit.ampReplaceIncomplete")))?;
+    anyhow::ensure!(
+        lock.metadata()?.len() == 0
+            && fs::symlink_metadata(&dir).is_err_and(|err| err.kind() == ErrorKind::NotFound),
+        t!("cli.submit.ampReplaceIncomplete")
+    );
+    Ok(lock)
 }
 
 pub fn run_amp_status(json: bool) -> Result<()> {
-    let cache_dir = get_amp_cache_dir();
-    let state = load_state(&cache_dir)?;
-    let dir = threads_dir(&cache_dir);
-    let mut cached_threads = 0;
-    match fs::read_dir(&dir) {
-        Ok(entries) => {
-            for entry in entries {
-                let entry = entry?;
-                if entry.file_type()?.is_file()
-                    && entry.file_name().to_str()
-                        .and_then(|name| name.strip_suffix(".json"))
-                        .is_some_and(is_thread_id)
-                {
-                    cached_threads += 1;
-                }
-            }
-        }
-        Err(error) if error.kind() == ErrorKind::NotFound => {}
-        Err(error) => return Err(error.into()),
-    }
-    let status = AmpStatus {
-        amp_cli: find_amp_binary().map(|path| path.display().to_string()),
-        cache_dir: dir.display().to_string(),
-        has_cache: state.is_some(),
-        cached_threads,
-        last_synced_at: state.and_then(|state| state.synced_at),
-    };
+    let status = amp_status_at(&get_amp_cache_dir(), find_amp_binary())?;
     if json {
         println!("{}", serde_json::to_string_pretty(&status)?);
         return Ok(());
@@ -265,24 +242,58 @@ pub fn run_amp_status(json: bool) -> Result<()> {
             status.cache_dir.yellow()
         }
     );
-    if status.has_cache {
+    println!(
+        "  {} {}",
+        t!("top.amp.threadsLabel").bright_black(),
+        status.cached_threads
+    );
+    if let Some(synced_at) = &status.last_synced_at {
         println!(
             "  {} {}",
-            t!("top.amp.threadsLabel").bright_black(),
-            status.cached_threads
+            t!("top.amp.lastSyncLabel").bright_black(),
+            synced_at.to_rfc3339()
         );
-        if let Some(synced_at) = &status.last_synced_at {
-            println!(
-                "  {} {}",
-                t!("top.amp.lastSyncLabel").bright_black(),
-                synced_at.to_rfc3339()
-            );
-        }
-    } else {
-        println!("{}", t!("top.amp.syncHint").bright_black());
     }
+    print_amp_refresh_status(status.auto_refresh_enabled, status.pending);
     println!();
     Ok(())
+}
+
+fn amp_status_at(cache_dir: &Path, amp_cli: Option<PathBuf>) -> Result<AmpStatus> {
+    let (state, auto_refresh_enabled) = load_sync_state(cache_dir)?;
+    let dir = threads_dir(cache_dir);
+    let mut cached_threads = 0;
+    match fs::read_dir(&dir) {
+        Ok(entries) => {
+            for entry in entries {
+                let entry = entry?;
+                if entry.file_type()?.is_file()
+                    && entry
+                        .file_name()
+                        .to_str()
+                        .and_then(|name| name.strip_suffix(".json"))
+                        .is_some_and(is_thread_id)
+                {
+                    cached_threads += 1;
+                }
+            }
+        }
+        Err(error) if error.kind() == ErrorKind::NotFound => {}
+        Err(error) => return Err(error.into()),
+    }
+    Ok(AmpStatus {
+        amp_cli: amp_cli.map(|path| path.display().to_string()),
+        cache_dir: dir.display().to_string(),
+        has_cache: cached_threads != 0,
+        cached_threads,
+        pending: state.as_ref().map_or(0, |state| state.pending.len()),
+        auto_refresh_enabled,
+        last_synced_at: if auto_refresh_enabled {
+            state.and_then(|state| state.synced_at)
+        } else {
+            None
+        },
+    })
 }
 
 pub fn sync_amp_cache(force: bool) -> SyncAmpResult {
@@ -290,13 +301,24 @@ pub fn sync_amp_cache(force: bool) -> SyncAmpResult {
 }
 
 fn sync_amp_cache_for_request(force: bool, allow_initial_sync: bool) -> SyncAmpResult {
-    sync_amp_cache_with(
-        &get_amp_cache_dir(),
-        force,
-        allow_initial_sync,
-        find_amp_binary,
-    )
-    .unwrap_or_else(|error| SyncAmpResult {
+    let cache_dir = get_amp_cache_dir();
+    let sync = || -> Result<_> {
+        let lock = policy_lock(&cache_dir)?;
+        if lock.metadata()?.len() == 0 {
+            // Sticky across cache moves/restores. An empty lock alone means legacy-only.
+            lock.set_len(1)?;
+            lock.sync_data()?;
+        }
+        for dir in [&cache_dir, &threads_dir(&cache_dir)] {
+            match fs::symlink_metadata(dir) {
+                Ok(meta) => anyhow::ensure!(meta.is_dir(), t!("top.amp.invalidState")),
+                Err(err) if err.kind() == ErrorKind::NotFound => fs::create_dir(dir)?,
+                Err(err) => return Err(err.into()),
+            }
+        }
+        sync_amp_cache_with(&cache_dir, force, allow_initial_sync, find_amp_binary)
+    };
+    sync().unwrap_or_else(|error| SyncAmpResult {
         error: Some(error.to_string()),
         ..SyncAmpResult::default()
     })
@@ -308,48 +330,92 @@ fn sync_amp_cache_with(
     allow_initial_sync: bool,
     amp_binary: impl FnOnce() -> Option<PathBuf>,
 ) -> Result<SyncAmpResult> {
-    // Recheck opt-in under the same lock that guards discovery and publication.
-    let _lock = acquire_sync_lock(cache_dir)?;
-    let state = load_state(cache_dir)?;
-    let initialized = state.is_some();
+    let (state, initialized) = load_sync_state(cache_dir)?;
+    let mut state = state.unwrap_or_else(|| AmpSyncState {
+        version: STATE_VERSION,
+        synced_at: None,
+        threads: BTreeMap::new(),
+        pending: BTreeMap::new(),
+    });
+    let result = SyncAmpResult {
+        pending: Some(state.pending.len()),
+        auto_refresh_enabled: Some(initialized),
+        ..SyncAmpResult::default()
+    };
     if !allow_initial_sync && !initialized {
-        return Ok(SyncAmpResult::default());
+        return Ok(result);
     }
-    let initial_path = initial_state_path(cache_dir);
+
     let working_path = if initialized {
-        // These two files cannot coexist after a normal publication.
-        anyhow::ensure!(
-            !state_file_exists(&initial_path),
-            t!("top.amp.invalidState")
-        );
         state_path(cache_dir)
     } else {
-        initial_path
-    };
-    let mut state = match state {
-        Some(state) => state,
-        None => read_state(&working_path, false)?.unwrap_or_else(|| AmpSyncState {
-            version: STATE_VERSION,
-            synced_at: None,
-            threads: BTreeMap::new(),
-            pending: BTreeMap::new(),
-        }),
+        initial_state_path(cache_dir)
     };
     state.version = STATE_VERSION;
-    let amp = amp_binary().ok_or_else(|| anyhow::anyhow!(t!("top.amp.cliNotFound")))?;
-    let amp = Amp::new(amp)?;
-    let threads = find_threads(&amp)?;
+    let mut progress = SyncProgress {
+        state,
+        path: &working_path,
+        result,
+    };
+    let outcome = amp_binary()
+        .ok_or_else(|| anyhow::anyhow!(t!("top.amp.cliNotFound")))
+        .and_then(Amp::new)
+        .and_then(|amp| sync_discovered_threads(&amp, cache_dir, force, initialized, &mut progress));
+    if let Err(error) = outcome {
+        progress.result.error = Some(error.to_string());
+    }
+    Ok(progress.result)
+}
 
+struct SyncProgress<'a> {
+    state: AmpSyncState,
+    path: &'a Path,
+    result: SyncAmpResult,
+}
+
+impl SyncProgress<'_> {
+    fn checkpoint(&mut self) -> Result<()> {
+        save_state(self.path, &self.state)?;
+        self.result.pending = Some(self.state.pending.len());
+        Ok(())
+    }
+
+    fn observe<'a>(
+        &mut self,
+        observations: impl Iterator<Item = (&'a str, DateTime<Utc>)>,
+    ) -> Result<()> {
+        let mut recorded = false;
+        for (id, updated) in observations {
+            if self.state.threads.get(id).is_none_or(|known| updated > *known) {
+                recorded |= self.state.record_pending(id, updated);
+            }
+        }
+        if recorded {
+            self.checkpoint()?;
+        }
+        Ok(())
+    }
+}
+
+fn sync_discovered_threads(
+    amp: &Amp,
+    cache_dir: &Path,
+    force: bool,
+    initialized: bool,
+    progress: &mut SyncProgress<'_>,
+) -> Result<()> {
+    let threads = find_threads(amp, progress)?;
     let dir = threads_dir(cache_dir);
-    let thread_count = threads.len();
+    let state = &progress.state;
     let exports: Vec<_> = threads
         .into_iter()
-        .filter(|(id, updated)| {
-            force
-                || state.threads.get(id).is_none_or(|known| updated > known)
-                || state.pending.get(id).is_some_and(|pending| updated >= pending)
+        .filter_map(|(id, (updated, _))| {
+            (force
+                || state.threads.get(&id).is_none_or(|known| updated > *known)
+                || state.pending.get(&id).is_some_and(|pending| updated >= *pending)
                 || !fs::symlink_metadata(dir.join(format!("{id}.json")))
-                    .is_ok_and(|metadata| metadata.is_file())
+                    .is_ok_and(|metadata| metadata.is_file()))
+            .then_some((id, updated))
         })
         .collect();
 
@@ -357,33 +423,17 @@ fn sync_amp_cache_with(
     // a crash must leave evidence even if an unfinished thread falls out of discovery.
     let mut recorded = false;
     for (id, updated) in &exports {
-        match state.pending.get_mut(id) {
-            Some(pending) if *updated > *pending => {
-                *pending = *updated;
-                recorded = true;
-            }
-            Some(_) => {}
-            None => {
-                state.pending.insert(id.clone(), *updated);
-                recorded = true;
-            }
-        }
+        recorded |= progress.state.record_pending(id, *updated);
     }
     if recorded {
-        save_state(&working_path, &state)?;
+        progress.checkpoint()?;
     }
 
     // A first sync exports every thread; a few at a time keeps it to minutes
     // without flooding ampcode.com.
     let worker_count = EXPORT_WORKERS.min(exports.len());
     let exports = Mutex::new(exports.into_iter());
-    let progress = Mutex::new((
-        state,
-        SyncAmpResult {
-            threads: thread_count,
-            ..SyncAmpResult::default()
-        },
-    ));
+    let progress = Mutex::new(progress);
     std::thread::scope(|scope| {
         for _ in 0..worker_count {
             scope.spawn(|| loop {
@@ -392,8 +442,8 @@ fn sync_amp_cache_with(
                 }
                 let next = exports.lock().unwrap().next();
                 let Some((id, updated)) = next else { break };
-                let outcome = export_thread(&amp, &dir, &id);
-                let (state, result) = &mut *progress.lock().unwrap();
+                let outcome = export_thread(amp, &dir, &id);
+                let SyncProgress { state, result, .. } = &mut **progress.lock().unwrap();
                 match outcome {
                     Ok(()) => {
                         if state.pending.get(&id).is_some_and(|pending| updated >= *pending) {
@@ -418,17 +468,18 @@ fn sync_amp_cache_with(
             });
         }
     });
-    let (mut state, mut result) = progress.into_inner().unwrap();
-    result.synced = !amp.processes.stopped() && (result.failed == 0 || result.exported != 0);
-    let complete = result.synced && state.pending.is_empty();
-    let record_sync = complete || (initialized && result.synced && result.exported != 0);
+    let progress = progress.into_inner().unwrap();
+    let stopped = amp.processes.stopped();
+    let complete = !stopped && progress.result.failed == 0 && progress.state.pending.is_empty();
+    let partial = !stopped && progress.result.exported != 0;
+    let record_sync = complete || (initialized && partial);
     if record_sync {
-        state.synced_at = Some(Utc::now());
+        progress.state.synced_at = Some(Utc::now());
     }
-    if record_sync || result.exported != 0 {
+    if record_sync || progress.result.exported != 0 {
         // Keep confirmed exports even after cancellation. Omitted discoveries
         // and unfinished updates keep their previous entries.
-        save_state(&working_path, &state)?;
+        progress.checkpoint()?;
     }
     anyhow::ensure!(
         !amp.processes.stopped(),
@@ -436,21 +487,37 @@ fn sync_amp_cache_with(
     );
     if complete && !initialized {
         // Publish the opt-in key only after all known first-sync work succeeds.
-        fs::rename(&working_path, state_path(cache_dir)).context(t!("top.amp.writeStateFailed"))?;
+        fs::rename(progress.path, state_path(cache_dir)).context(t!("top.amp.writeStateFailed"))?;
+        progress.result.auto_refresh_enabled = Some(true);
     }
-    Ok(result)
+    progress.result.synced = complete || partial;
+    Ok(())
 }
 
-/// Every thread to keep in the cache, with the update time that marks a
-/// change (see the module docs for why it comes from two commands).
-fn find_threads(amp: &Amp) -> Result<BTreeMap<String, DateTime<Utc>>> {
-    let mut threads = list_threads(amp)?;
-    for thread in search_recent_threads(amp)? {
+type DiscoveredThreads = BTreeMap<String, (DateTime<Utc>, Option<i64>)>;
+
+/// Discover the export candidates, retaining each valid page even if a later command fails.
+fn find_threads(amp: &Amp, progress: &mut SyncProgress<'_>) -> Result<DiscoveredThreads> {
+    let mut threads = BTreeMap::new();
+    let listed = list_threads(amp, &mut threads, progress);
+    threads.retain(|_, (_, count)| *count != Some(0));
+    progress.result.threads = threads.len();
+    listed?;
+
+    let recent = search_recent_threads(amp)?;
+    let checkpoint = progress.observe(
+        recent
+            .iter()
+            .map(|thread| (thread.id.as_str(), thread.updated_at)),
+    );
+    for thread in recent {
         threads
             .entry(thread.id)
-            .and_modify(|updated| *updated = (*updated).max(thread.updated_at))
-            .or_insert(thread.updated_at);
+            .and_modify(|(updated, _)| *updated = (*updated).max(thread.updated_at))
+            .or_insert((thread.updated_at, None));
     }
+    progress.result.threads = threads.len();
+    checkpoint?;
     Ok(threads)
 }
 
@@ -466,8 +533,11 @@ fn search_recent_threads(amp: &Amp) -> Result<Vec<SearchedThread>> {
     Ok(threads)
 }
 
-fn list_threads(amp: &Amp) -> Result<BTreeMap<String, DateTime<Utc>>> {
-    let mut threads = BTreeMap::new();
+fn list_threads(
+    amp: &Amp,
+    threads: &mut DiscoveredThreads,
+    progress: &mut SyncProgress<'_>,
+) -> Result<()> {
     let mut offset = 0usize;
     let limit = LIST_PAGE_SIZE.to_string();
     loop {
@@ -486,13 +556,20 @@ fn list_threads(amp: &Amp) -> Result<BTreeMap<String, DateTime<Utc>>> {
             page.len() <= LIST_PAGE_SIZE && page.iter().all(|thread| is_thread_id(&thread.id)),
             unexpected_output("list")
         );
+        // Commit valid observations before asking Amp for another page or search.
+        let checkpoint = progress.observe(
+            page.iter()
+                .filter(|thread| thread.message_count != Some(0))
+                .map(|thread| (thread.id.as_str(), thread.updated)),
+        );
         let last_page = page.len() < LIST_PAGE_SIZE;
         offset += page.len();
         let before = threads.len();
         for thread in page {
             let candidate = (thread.updated, thread.message_count);
-            threads.entry(thread.id)
-                .and_modify(|current: &mut (DateTime<Utc>, Option<i64>)| {
+            threads
+                .entry(thread.id)
+                .and_modify(|current| {
                     if candidate.0 > current.0
                         || (candidate.0 == current.0 && current.1 == Some(0) && candidate.1 != Some(0))
                     {
@@ -501,11 +578,10 @@ fn list_threads(amp: &Amp) -> Result<BTreeMap<String, DateTime<Utc>>> {
                 })
                 .or_insert(candidate);
         }
+        checkpoint?;
         anyhow::ensure!(last_page || threads.len() > before, unexpected_output("list"));
         if last_page {
-            return Ok(threads.into_iter().filter_map(|(id, (updated, count))| {
-                (count != Some(0)).then_some((id, updated))
-            }).collect());
+            return Ok(());
         }
     }
 }
@@ -520,8 +596,7 @@ fn export_thread(amp: &Amp, dir: &Path, thread_id: &str) -> Result<()> {
     Ok(())
 }
 
-/// The export reduced to the fields the Amp parser reads, with only the
-/// messages that carry usage.
+/// Retain usage and the message IDs and timestamps needed to date it.
 fn usage_only_thread(thread_id: &str, export: &[u8]) -> Result<Vec<u8>> {
     project_cached_thread(thread_id, export).map_err(|error| match error {
         AmpCacheProjectionError::OtherThread => anyhow::anyhow!(t!("top.amp.exportOfOtherThread")),
@@ -637,15 +712,24 @@ fn run_amp(amp: &Amp, operation: &str, args: &[&str], timeout: Duration) -> Resu
         .map_err(anyhow::Error::msg)
 }
 
-fn acquire_sync_lock(cache_dir: &Path) -> Result<fs::File> {
-    fs::create_dir_all(cache_dir).context(t!("top.amp.lockFailed"))?;
-    let lock = fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .open(cache_dir.join(".sync.lock"))
-        .context(t!("top.amp.lockFailed"))?;
+fn policy_lock(cache_dir: &Path) -> Result<fs::File> {
+    let config = cache_dir.parent().context(t!("top.amp.lockFailed"))?;
+    fs::create_dir_all(config).context(t!("top.amp.lockFailed"))?;
+    let path = config.join(".amp-cloud.lock");
+    let mut options = fs::OpenOptions::new();
+    options.read(true).write(true).create(true).truncate(false);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600).custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        options.custom_flags(0x0020_0000); // FILE_FLAG_OPEN_REPARSE_POINT
+    }
+    let lock = options.open(path).context(t!("top.amp.lockFailed"))?;
+    anyhow::ensure!(lock.metadata()?.is_file(), t!("top.amp.lockFailed"));
     match fs2::FileExt::try_lock_exclusive(&lock) {
         Ok(()) => Ok(lock),
         Err(error) if crate::commands::autosubmit::is_lock_contention(&error) => {
@@ -657,6 +741,24 @@ fn acquire_sync_lock(cache_dir: &Path) -> Result<fs::File> {
 
 fn load_state(cache_dir: &Path) -> Result<Option<AmpSyncState>> {
     read_state(&state_path(cache_dir), true)
+}
+
+fn load_sync_state(cache_dir: &Path) -> Result<(Option<AmpSyncState>, bool)> {
+    let initial_path = initial_state_path(cache_dir);
+    if let Some(state) = load_state(cache_dir)? {
+        // These files cannot coexist after normal publication.
+        anyhow::ensure!(
+            !state_file_exists(&initial_path),
+            t!("top.amp.invalidState")
+        );
+        return Ok((Some(state), true));
+    }
+    let draft = read_state(&initial_path, false);
+    // Status doesn't lock; an initial state may have moved between reads.
+    if let Some(state) = load_state(cache_dir)? {
+        return Ok((Some(state), true));
+    }
+    Ok((draft?, false))
 }
 
 fn read_state(path: &Path, committed: bool) -> Result<Option<AmpSyncState>> {
@@ -716,17 +818,27 @@ mod tests {
                 r#"#!/bin/sh
 root=${0%/*}
 case "$1 $2" in
-    'threads list'|'threads search') route=$2 ;;
-    'threads export')
-        route=$3
-        state="$root/state.json"
-        [ -f "$state" ] || state="$root/initial-state.json"
-        while IFS= read -r line || [ -n "$line" ]; do
-            printf '%s\n' "$line"
-        done <"$state" >"$root/$route.before" || exit 2
+    'threads list')
+        route=list
+        while [ "$#" -gt 1 ]; do
+            if [ "$1" = '--offset' ] && [ "$2" != 0 ]; then
+                route="list-$2"
+                break
+            fi
+            shift
+        done
         ;;
+    'threads search') route=search ;;
+    'threads export') route=$3 ;;
     *) exit 2 ;;
 esac
+state="$root/state.json"
+[ -f "$state" ] || state="$root/initial-state.json"
+if [ -f "$state" ]; then
+    while IFS= read -r line || [ -n "$line" ]; do
+        printf '%s\n' "$line"
+    done <"$state" >"$root/$route.before" || exit 2
+fi
 IFS= read -r response <"$root/$route.response" || exit 2
 printf '%s\n' "$response"
 "#,
@@ -935,12 +1047,103 @@ printf '%s\n' "$response"
 
     #[cfg(unix)]
     #[test]
-    fn stranded_update_blocks_replacement_until_that_watermark_exports() {
+    fn first_sync_checkpoints_list_before_failed_search_without_opt_in() {
+        let amp = SyntheticAmp::new();
+        amp.response("list", json!([{"id": "T-1", "updated": UPDATED}]));
+        amp.response("T-1", json!({"id": "T-1", "messages": []}));
+        fs::remove_file(amp.dir().join("search.response")).unwrap();
+
+        let result = serde_json::to_value(amp.sync(false, true)).unwrap();
+        assert_eq!(result["synced"], false);
+        assert_eq!(result["threads"], 1);
+        assert_eq!(result["exported"], 0);
+        assert_eq!(result["failed"], 0);
+        assert_eq!(result["pending"], 1);
+        assert_eq!(result["autoRefreshEnabled"], false);
+        assert!(result["error"].as_str().unwrap().contains("amp threads search"));
+        for name in ["search.before", "initial-state.json"] {
+            assert_eq!(amp.read_json(name)["pending"], json!({"T-1": UPDATED}));
+        }
+        assert!(!amp.dir().join("T-1.before").exists());
+        assert!(!state_path(amp.dir()).exists());
+
+        amp.response("list", json!([]));
+        amp.response("search", json!([]));
+        let result = amp.sync(false, true);
+        assert!(!result.synced);
+        assert_eq!(
+            (result.exported, result.failed, result.pending),
+            (0, 0, Some(1))
+        );
+        assert_eq!(result.auto_refresh_enabled, Some(false));
+        assert!(result.error.is_none());
+        assert!(!amp.dir().join("T-1.before").exists());
+        assert!(!state_path(amp.dir()).exists());
+
+        amp.response("list", json!([{"id": "T-1", "updated": UPDATED}]));
+        let result = amp.sync(false, true);
+        assert!(result.synced);
+        assert_eq!(
+            (result.exported, result.pending, result.auto_refresh_enabled),
+            (1, Some(0), Some(true))
+        );
+        assert_eq!(amp.read_json("state.json")["threads"]["T-1"], UPDATED);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn later_discovery_failure_keeps_every_completed_list_page() {
+        for (failed, command) in [
+            ("list-1000", "amp threads list"),
+            ("search", "amp threads search"),
+        ] {
+            let amp = SyntheticAmp::new();
+            fs::write(
+                state_path(amp.dir()),
+                json!({"version": 2, "syncedAt": FIRST, "threads": {"T-1": FIRST, "T-2": FIRST}})
+                    .to_string(),
+            )
+            .unwrap();
+            for (route, id) in [("list", "T-1"), ("list-500", "T-2")] {
+                let mut page = vec![json!({"id": id, "updated": UPDATED, "messageCount": 1})];
+                page.extend((1..LIST_PAGE_SIZE).map(|i| {
+                    json!({"id": format!("T-{route}-empty-{i}"), "updated": FIRST, "messageCount": 0})
+                }));
+                amp.response(route, Value::Array(page));
+            }
+            if failed == "search" {
+                amp.response("list-1000", json!([]));
+                fs::remove_file(amp.dir().join("search.response")).unwrap();
+            }
+
+            let result = amp.sync(false, false);
+            assert!(!result.synced);
+            assert_eq!(result.threads, 2);
+            assert_eq!(
+                (result.exported, result.failed, result.pending),
+                (0, 0, Some(2))
+            );
+            assert_eq!(result.auto_refresh_enabled, Some(true));
+            assert!(result.error.unwrap().contains(command));
+            assert_eq!(amp.read_json("list-500.before")["pending"], json!({"T-1": UPDATED}));
+            let pending = json!({"T-1": UPDATED, "T-2": UPDATED});
+            assert_eq!(amp.read_json(&format!("{failed}.before"))["pending"], pending);
+            let state = amp.read_json("state.json");
+            assert_eq!(state["pending"], pending);
+            assert_eq!(state["threads"], json!({"T-1": FIRST, "T-2": FIRST}));
+            assert_eq!(state["syncedAt"], FIRST);
+            assert!(!amp.dir().join("T-1.before").exists());
+            assert!(!amp.dir().join("T-2.before").exists());
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn stranded_update_remains_pending_until_that_watermark_exports() {
         let amp = SyntheticAmp::new();
         amp.response("search", json!([{"id":"T-1","updatedAt":FIRST}]));
         amp.response("T-1", json!({"id":"T-1","messages":[]}));
         assert_eq!(amp.sync(false, true).exported, 1);
-        assert!(guard_replacement_cache_at(amp.dir(), true).is_ok());
 
         amp.response("search", json!([{"id":"T-1","updatedAt":UPDATED}]));
         fs::remove_file(amp.dir().join("T-1.response")).unwrap();
@@ -955,20 +1158,19 @@ printf '%s\n' "$response"
         amp.response("T-2", json!({"id":"T-2","messages":[]}));
         let result = amp.sync(true, true);
         assert_eq!((result.exported, result.failed), (1, 0));
-        assert!(guard_replacement_cache_at(amp.dir(), true).is_err());
+        assert_eq!(result.pending, Some(1));
+        assert_eq!(result.auto_refresh_enabled, Some(true));
 
         amp.response("search", json!([{"id":"T-1","updatedAt":FIRST}]));
         amp.response("T-1", json!({"id":"T-1","messages":[]}));
         assert_eq!(amp.sync(true, true).exported, 1);
         assert_eq!(amp.read_json("state.json")["pending"]["T-1"], UPDATED);
-        assert!(guard_replacement_cache_at(amp.dir(), true).is_err());
 
         amp.response("search", json!([{"id":"T-1","updatedAt":UPDATED}]));
         assert_eq!(amp.sync(false, false).exported, 1);
         let state = amp.read_json("state.json");
         assert_eq!(state["threads"]["T-1"], UPDATED);
         assert!(state.get("pending").is_none());
-        assert!(guard_replacement_cache_at(amp.dir(), true).is_ok());
     }
 
     #[cfg(unix)]
@@ -982,21 +1184,30 @@ printf '%s\n' "$response"
         let result = amp.sync(false, true);
         assert!(!result.synced);
         assert_eq!((result.exported, result.failed), (0, 2));
+        assert_eq!(result.pending, Some(2));
+        assert_eq!(result.auto_refresh_enabled, Some(false));
         assert_eq!(
             amp.read_json("T-1.before")["pending"],
             json!({"T-1":FIRST,"T-2":FIRST}),
         );
         assert!(!state_file_exists(&state_path(amp.dir())));
-        assert!(guard_replacement_cache_at(amp.dir(), false).is_err());
 
         amp.response("T-1", json!({"id":"T-1","messages":[]}));
         let result = amp.sync(false, true);
         assert!(result.synced);
         assert_eq!((result.exported, result.failed), (1, 1));
+        assert_eq!(result.pending, Some(1));
+        assert_eq!(result.auto_refresh_enabled, Some(false));
         assert!(!state_file_exists(&state_path(amp.dir())));
         let draft = amp.read_json("initial-state.json");
         assert_eq!(draft["threads"], json!({"T-1":FIRST}));
         assert_eq!(draft["pending"], json!({"T-2":FIRST}));
+        let status = serde_json::to_value(amp_status_at(amp.dir(), None).unwrap()).unwrap();
+        assert_eq!(status["hasCache"], true);
+        assert_eq!(status["cachedThreads"], 1);
+        assert_eq!(status["pending"], 1);
+        assert_eq!(status["autoRefreshEnabled"], false);
+        assert!(status["lastSyncedAt"].is_null());
         assert!(!sync_amp_cache_with(amp.dir(), true, false, || {
             panic!("an incomplete first sync must not authorize a refresh")
         })
@@ -1004,34 +1215,39 @@ printf '%s\n' "$response"
         .synced);
 
         amp.response("search", json!([{"id":"T-1","updatedAt":FIRST}]));
-        assert_eq!(amp.sync(false, true).exported, 0);
+        let result = amp.sync(false, true);
+        assert!(!result.synced);
+        assert_eq!(
+            (result.exported, result.failed, result.pending),
+            (0, 0, Some(1))
+        );
+        assert_eq!(result.auto_refresh_enabled, Some(false));
+        assert!(result.error.is_none());
         assert!(!state_file_exists(&state_path(amp.dir())));
-        assert!(guard_replacement_cache_at(amp.dir(), false).is_err());
 
         amp.response("search", json!([{"id":"T-2","updatedAt":FIRST}]));
         amp.response("T-2", json!({"id":"T-2","messages":[]}));
-        assert_eq!(amp.sync(false, true).exported, 1);
+        let result = amp.sync(false, true);
+        assert!(result.synced);
+        assert_eq!(result.exported, 1);
+        assert_eq!(result.pending, Some(0));
+        assert_eq!(result.auto_refresh_enabled, Some(true));
         assert_eq!(
             amp.read_json("state.json")["threads"],
             json!({"T-1":FIRST,"T-2":FIRST}),
         );
         assert!(!state_file_exists(&initial_state_path(amp.dir())));
-        assert!(guard_replacement_cache_at(amp.dir(), true).is_ok());
     }
 
     #[test]
-    #[serial_test::serial]
-    fn replacement_guard_blocks_a_new_sync() {
+    fn legacy_replacement_and_first_sync_cannot_hold_the_same_policy_lock() {
         let dir = tempfile::tempdir().unwrap();
-        let _guard = guard_replacement_cache_at(dir.path(), false)
-            .unwrap()
-            .unwrap();
-        let error = sync_amp_cache_with(dir.path(), true, true, || {
-            panic!("another writer holds the sync lock")
-        })
-        .unwrap_err();
-        assert_eq!(error.to_string(), t!("top.amp.syncInProgress"));
-        assert!(!state_path(dir.path()).exists());
+        let cache = dir.path().join("amp-cache");
+        let guard = policy_lock(&cache).unwrap();
+        assert!(policy_lock(&cache).is_err());
+        assert!(!cache.exists());
+        drop(guard);
+        assert_eq!(policy_lock(&cache).unwrap().metadata().unwrap().len(), 0);
     }
 
     #[test]

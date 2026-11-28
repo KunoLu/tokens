@@ -139,11 +139,8 @@ impl AmpFixture {
         output
     }
 
-    fn invoke(&self, args: &[&str]) -> Output {
+    fn command(&self, args: &[&str], endpoint: &str) -> Command {
         let home = self.path("home");
-        // Keep proxy-aware HTTP(S) local and trap any accidental backend request.
-        let proxy = TcpListener::bind("127.0.0.1:0").unwrap();
-        let endpoint = format!("http://{}", proxy.local_addr().unwrap());
         let mut command = Command::new(env!("CARGO_BIN_EXE_tokens"));
         command
             .args(args)
@@ -164,7 +161,7 @@ impl AmpFixture {
             command.env(var, self.path("tmp"));
         }
         for var in ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "TOKENS_API_URL"] {
-            command.env(var, &endpoint);
+            command.env(var, endpoint);
         }
         #[cfg(windows)]
         if let Some(system_root) = std::env::var_os("SystemRoot") {
@@ -175,8 +172,14 @@ impl AmpFixture {
                 .env("TOKENS_API_TOKEN", "synthetic-amp-test-token")
                 .env("TOKENS_DEVICE_ID", "amp-integration-test");
         }
+        command
+    }
 
-        let output = command.output().unwrap();
+    fn invoke(&self, args: &[&str]) -> Output {
+        // Trap accidental network access, including proxy-aware HTTP(S).
+        let proxy = TcpListener::bind("127.0.0.1:0").unwrap();
+        let endpoint = format!("http://{}", proxy.local_addr().unwrap());
+        let output = self.command(args, &endpoint).output().unwrap();
         proxy.set_nonblocking(true).unwrap();
         assert!(
             proxy.accept().is_err_and(|error| error.kind() == ErrorKind::WouldBlock),
@@ -308,9 +311,10 @@ fn assert_private_cache(path: &Path) {
     for entry in fs::read_dir(path).unwrap() {
         let entry = entry.unwrap();
         let path = entry.path();
-        if entry.file_type().unwrap().is_dir() {
+        let kind = entry.file_type().unwrap();
+        if kind.is_dir() {
             assert_private_cache(&path);
-        } else {
+        } else if kind.is_file() {
             assert_private_text_absent(&fs::read(&path).unwrap(), &path.display().to_string());
         }
     }
@@ -387,7 +391,7 @@ fn amp_sync_stops_on_a_repeated_full_list_page() {
     fixture.sync(&[], 2, 0);
     fixture.assert_calls(BOTH_EXPORTS);
     let state_path = fixture.path("config/amp-cache/state.json");
-    let state = fs::read(&state_path).unwrap();
+    let state: Value = serde_json::from_slice(&fs::read(&state_path).unwrap()).unwrap();
 
     let page = (0..500)
         .map(|i| json!({"id": format!("T-page-{i}"), "updated": FIRST, "messageCount": 2}))
@@ -397,7 +401,12 @@ fn amp_sync_stops_on_a_repeated_full_list_page() {
     assert_eq!(result["synced"], false);
     assert!(result["error"].as_str().unwrap().contains("amp threads list"));
     fixture.assert_calls(&["list", "list"]);
-    assert_eq!(fs::read(state_path).unwrap(), state);
+    let after: Value = serde_json::from_slice(&fs::read(state_path).unwrap()).unwrap();
+    assert_eq!(after["threads"], state["threads"]);
+    assert_eq!(after["syncedAt"], state["syncedAt"]);
+    assert_eq!(after["pending"].as_object().unwrap().len(), 500);
+    assert_eq!(result["pending"], 500);
+    assert_eq!(result["autoRefreshEnabled"], true);
 }
 
 #[test]
@@ -523,7 +532,7 @@ fn amp_submit_uses_cached_usage_after_failure_but_replace_refuses_partial_refres
     fs::remove_file(fixture.cached_thread(RECENT)).unwrap();
     fixture.fail_export(RECENT);
     fixture.assert_replace_refused();
-    fixture.assert_calls(BOTH_EXPORTS);
+    fixture.assert_calls(&[]);
     assert!(!fixture.cached_thread(RECENT).exists());
 }
 
@@ -554,8 +563,9 @@ fn amp_failed_update_outside_the_search_window_cannot_authorize_replacement() {
     fs::remove_file(error).unwrap();
     fixture.discovery(FIRST, UPDATED);
     fixture.sync(&[], 1, 0);
-    let payload = output_json(&fixture.run(&[SUBMIT, SUBMIT_BOUNDS, &["--replace"]].concat()));
-    assert_eq!(payload["clientManifest"]["clients"][0]["coverage"]["mode"], "full");
+    fixture.assert_calls(&["list", "search", RECENT]);
+    fixture.assert_replace_refused();
+    fixture.assert_calls(&[]);
 }
 
 #[test]
@@ -575,7 +585,7 @@ fn amp_submit_previews_remaining_usage_but_replace_refuses_a_missing_undiscovere
     fixture.assert_calls(&["list", "search"]);
 
     fixture.assert_replace_refused();
-    fixture.assert_calls(&["list", "search"]);
+    fixture.assert_calls(&[]);
 }
 
 #[test]
@@ -605,19 +615,86 @@ fn amp_submit_replace_allows_legacy_only_but_refuses_sync_files_without_state() 
 
 #[cfg(unix)]
 #[test]
-fn amp_submit_replace_refuses_symlinked_thread_when_reexport_fails() {
+fn amp_replace_refuses_a_dangling_cache_or_previously_synced_config() {
     let fixture = AmpFixture::new();
     fixture.prepare_offline_submit();
-    fixture.response(RECENT, thread_at(RECENT, 23, NEXT_DAY));
+    let cache = fixture.path("config/amp-cache");
+    std::os::unix::fs::symlink(fixture.path("missing"), &cache).unwrap();
+    fixture.assert_replace_refused();
+    fixture.assert_calls(&[]);
+    fs::remove_file(&cache).unwrap();
     fixture.sync(&[], 2, 0);
     fixture.assert_calls(BOTH_EXPORTS);
-
-    let cached = fixture.cached_thread(RECENT);
-    let target = fixture.path("linked-thread.json");
-    fs::rename(&cached, &target).unwrap();
-    std::os::unix::fs::symlink(&target, &cached).unwrap();
-    fixture.fail_export(RECENT);
-
+    fs::rename(&cache, fixture.path("saved-cache")).unwrap();
     fixture.assert_replace_refused();
-    fixture.assert_calls(&["list", "search", RECENT]);
+    fixture.assert_calls(&[]);
+}
+
+#[cfg(unix)]
+#[test]
+fn amp_sync_does_not_publish_through_a_linked_cache_directory() {
+    let fixture = AmpFixture::new();
+    let outside = fixture.path("outside");
+    let cache = fixture.path("config/amp-cache");
+    fs::create_dir(&outside).unwrap();
+    fs::create_dir_all(&cache).unwrap();
+    std::os::unix::fs::symlink(&outside, cache.join("threads")).unwrap();
+    let result = output_json(&fixture.run(&["amp", "sync", "--json"]));
+    assert_eq!(result["synced"], false);
+    assert!(result["error"].is_string());
+    assert!(fs::read_dir(outside).unwrap().next().is_none());
+    fixture.assert_calls(&[]);
+}
+
+#[test]
+fn legacy_replace_blocks_first_cloud_sync_until_the_submission_returns() {
+    use std::io::{BufRead, BufReader, Read, Write};
+    use std::time::Instant;
+
+    let fixture = AmpFixture::new();
+    fixture.prepare_offline_submit();
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let endpoint = format!("http://{}", listener.local_addr().unwrap());
+    let args = [&["submit", "--replace", "--client", "amp"][..], SUBMIT_BOUNDS].concat();
+    let mut command = fixture.command(&args, &endpoint);
+    std::thread::scope(|scope| {
+        let submit = scope.spawn(move || command.output().unwrap());
+        let deadline = Instant::now() + Duration::from_secs(8);
+        let mut socket = loop {
+            match listener.accept() {
+                Ok((socket, _)) => break socket,
+                Err(err) if err.kind() == ErrorKind::WouldBlock && Instant::now() < deadline => {
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                other => panic!("did not receive the legacy replacement: {other:?}"),
+            }
+        };
+        socket.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+        let mut request = BufReader::new(&socket);
+        let mut line = String::new();
+        request.read_line(&mut line).unwrap();
+        assert!(line.starts_with("POST ") && line.contains("/api/submit "));
+        let mut length = None;
+        loop {
+            line.clear();
+            assert_ne!(request.read_line(&mut line).unwrap(), 0);
+            if line == "\r\n" {
+                break;
+            }
+            if let Some((_, v)) = line.split_once(':').filter(|(k, _)| k.eq_ignore_ascii_case("content-length")) {
+                length = Some(v.trim().parse::<u64>().unwrap());
+            }
+        }
+        std::io::copy(&mut request.take(length.unwrap()), &mut std::io::sink()).unwrap();
+        let sync = output_json(&fixture.run(&["amp", "sync", "--json"]));
+        assert_eq!(sync["synced"], false);
+        assert!(sync["error"].is_string());
+        fixture.assert_calls(&[]);
+        assert!(!fixture.path("config/amp-cache").exists());
+        socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}").unwrap();
+        assert!(submit.join().unwrap().status.success());
+    });
+    fixture.sync(&[], 2, 0);
+    fixture.assert_calls(BOTH_EXPORTS);
 }

@@ -2462,9 +2462,8 @@ fn parse_all_messages_streaming<S: MessageSink>(
         }
     }
 
-    let amp_paths = scan_result.get(ClientId::Amp);
+    let (amp_paths, synced_count) = scan_result.amp_sources();
     if !amp_paths.is_empty() {
-        let synced_root = scanner::amp_sync_cache_root(home_dir, use_env_roots);
         let amp_identity = message_cache::CacheIdentity::for_client(ClientId::Amp);
         let amp_outcomes: Vec<_> = amp_paths
             .par_iter()
@@ -2480,7 +2479,7 @@ fn parse_all_messages_streaming<S: MessageSink>(
             .collect();
         for (outcome, selected) in sessions::amp::mark_preferred_sources(
             amp_paths,
-            &synced_root,
+            synced_count,
             amp_outcomes,
             |outcome| outcome.messages.as_mut_slice(),
         ) {
@@ -5610,9 +5609,8 @@ pub fn parse_local_clients(options: LocalParseOptions) -> Result<ParsedMessages,
     counts.set(ClientId::Gemini, gemini_count);
     messages.extend(gemini_msgs);
 
-    let amp_paths = scan_result.get(ClientId::Amp);
+    let (amp_paths, synced_count) = scan_result.amp_sources();
     if !amp_paths.is_empty() {
-        let synced_root = scanner::amp_sync_cache_root(&home_dir, options.use_env_roots);
         let amp_sources: Vec<_> = amp_paths
             .par_iter()
             .map(|path| sessions::amp::parse_amp_source(path))
@@ -5620,7 +5618,7 @@ pub fn parse_local_clients(options: LocalParseOptions) -> Result<ParsedMessages,
         let before_amp = messages.len();
         for (source, selected) in sessions::amp::mark_preferred_sources(
             amp_paths,
-            &synced_root,
+            synced_count,
             amp_sources,
             Vec::as_mut_slice,
         ) {
@@ -18715,9 +18713,11 @@ mod tests {
         let local_a = local.join("a");
         let local_b = local.join("b");
         let synced = scanner::amp_sync_cache_root(home, false);
+        let extra = source_home.path().join("extra");
         std::fs::create_dir_all(&local_a).unwrap();
         std::fs::create_dir_all(&local_b).unwrap();
         std::fs::create_dir_all(&synced).unwrap();
+        std::fs::create_dir_all(&extra).unwrap();
 
         for (root, name, id, input) in [
             (&local, "T-blank-id", Some(" \t\u{2003} "), 90),
@@ -18739,6 +18739,9 @@ mod tests {
             (&synced, "T-same-name", Some("T-same-name"), 30),
             (&synced, "T-cloud", Some("T-cloud"), 40),
             (&synced, "T-fallback", Some("T-fallback"), 60),
+            (&synced, "T-manual_copy", Some("T-manual"), 13),
+            (&extra, "T-manual", None, 14),
+            (&extra, "T-fallback", None, 904),
         ] {
             let mut thread = serde_json::json!({
                 "created": 1_795_279_800_001_i64,
@@ -18791,6 +18794,8 @@ mod tests {
             ("T-empty-id", 91),
             ("T-fallback", 60),
             ("T-legacy", 70),
+            ("T-manual", 13),
+            ("T-manual", 14),
             ("T-model-only", 77),
             ("T-no-id", 80),
             ("T-same-name", 30),
@@ -18821,6 +18826,10 @@ mod tests {
         let options = LocalParseOptions {
             home_dir: Some(home.to_string()),
             clients: Some(vec!["amp".to_string()]),
+            scanner_settings: scanner::ScannerSettings {
+                extra_scan_paths: [("amp".to_string(), vec![synced, extra])].into(),
+                ..Default::default()
+            },
             ..Default::default()
         };
         let parsed = parse_local_clients(options.clone()).unwrap();
@@ -18828,6 +18837,82 @@ mod tests {
         assert_usage(&parsed.messages);
 
         // The reporting lane must make the same choices on cold and warm scans.
+        let runtime = tokio::runtime::Builder::new_current_thread().build().unwrap();
+        for _ in 0..2 {
+            let unified = runtime
+                .block_on(super::parse_local_unified_messages_with_pricing(
+                    options.clone(),
+                    None,
+                ))
+                .unwrap();
+            assert_usage(&unified.iter().map(unified_to_parsed).collect::<Vec<_>>());
+        }
+    }
+
+    #[test]
+    #[serial]
+    fn test_amp_exact_timing_and_explicit_zero_in_both_apis() {
+        let cache_home = tempfile::TempDir::new().unwrap();
+        let source_home = tempfile::TempDir::new().unwrap();
+        let _cache_env = redirect_cache_home(cache_home.path());
+        let home = source_home.path().to_str().unwrap();
+        let local = client_scan_root(source_home.path(), ClientId::Amp);
+        let synced = scanner::amp_sync_cache_root(home, false);
+        std::fs::create_dir_all(&local).unwrap();
+        std::fs::create_dir_all(&synced).unwrap();
+        std::fs::write(
+            local.join("T-local-timing.json"),
+            br#"{
+                "id":"T-local-timing","created":1775000000000,
+                "messages":[{"role":"assistant","messageId":7,"usage":{"timestamp":"2026-04-06T12:00:00Z"}}],
+                "usageLedger":{"events":[{"model":"claude-sonnet-4-0","toMessageId":7,"tokens":{"input":17}}]}
+            }"#,
+        )
+        .unwrap();
+        std::fs::write(
+            local.join("T-cloud-zero.json"),
+            br#"{"id":"T-cloud-zero","messages":[{"role":"assistant","usage":{"model":"claude-sonnet-4-0","inputTokens":19}}]}"#,
+        )
+        .unwrap();
+        let projected = sessions::amp::project_cached_thread(
+            "T-cloud-zero",
+            br#"{
+                "id":"T-cloud-zero","created":1775000000000,
+                "messages":[{"role":"assistant","messageId":8,"usage":{"model":"claude-sonnet-4-0","credits":0}}],
+                "usageLedger":{"events":[{"toMessageId":8,"timestamp":"2026-04-07T12:00:00Z"}]}
+            }"#,
+        )
+        .unwrap();
+        std::fs::write(synced.join("T-cloud-zero.json"), projected).unwrap();
+
+        let timestamp = |value| {
+            chrono::DateTime::parse_from_rfc3339(value)
+                .unwrap()
+                .timestamp_millis()
+        };
+        let assert_usage = |messages: &[super::ParsedMessage]| {
+            let mut rows: Vec<_> = messages
+                .iter()
+                .map(|message| (message.session_id.as_str(), message.timestamp, message.input))
+                .collect();
+            rows.sort_unstable();
+            assert_eq!(
+                rows,
+                [
+                    ("T-cloud-zero", timestamp("2026-04-07T12:00:00Z"), 0),
+                    ("T-local-timing", timestamp("2026-04-06T12:00:00Z"), 17),
+                ]
+            );
+        };
+        let options = LocalParseOptions {
+            home_dir: Some(home.to_string()),
+            clients: Some(vec!["amp".to_string()]),
+            ..Default::default()
+        };
+        let parsed = parse_local_clients(options.clone()).unwrap();
+        assert_eq!(parsed.counts.get(ClientId::Amp), 2);
+        assert_usage(&parsed.messages);
+
         let runtime = tokio::runtime::Builder::new_current_thread().build().unwrap();
         for _ in 0..2 {
             let unified = runtime

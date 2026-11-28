@@ -158,8 +158,10 @@ curl -fsSL https://raw.githubusercontent.com/KunoLu/tokens/v1.0.6/pre-install-to
 
 Tokens 不读取 Amp 凭据；本机 `amp` CLI 使用自己的登录状态。`<Tokens 配置目录>/amp-cache/threads/T-<id>.json` 只保存用量元数据，不写入提示词、回复、工具输出或线程标题。macOS 和 Linux 的配置目录通常为 `~/.config/tokens`，可用 `TOKENS_CONFIG_DIR` 覆盖；`tokens amp status` 显示实际缓存路径。
 
-手动同步写入 `<Tokens 配置目录>/amp-cache/state.json` 后，只要提交包含 Amp，`tokens submit` 和 `tokens serve` 就会增量刷新缓存。未主动启用前，它们不会访问 Amp。普通提交在刷新失败时沿用旧缓存。包含 Amp 的 `--replace` 还会核对缓存文件与同步状态；刷新或缓存不完整时拒绝覆盖，以免删除缺失日期的历史用量。扫描器也读取 `~/.local/share/amp/threads/`（或 `$XDG_DATA_HOME/amp/threads/`）里的旧版文件。两处均有同一线程的可用计量数据时，只统计同步缓存中的副本。
-首次同步被中断或仅部分成功时，请手动再次运行 `tokens amp sync`；仅有线程文件不代表已启用自动刷新。已发现但导出失败的更新，即使后来退出搜索窗口，也会阻止覆盖。请恢复缺失的线程缓存或解决失败的导出，再重试 `--replace`。
+手动同步写入 `<Tokens 配置目录>/amp-cache/state.json` 后，只要提交包含 Amp，`tokens submit` 和 `tokens serve` 就会增量刷新。首次同步中断或仅部分成功时，请手动再次运行 `tokens amp sync`；仅有线程文件不会启用自动刷新。普通提交在刷新失败时沿用旧缓存。
+`amp status --json` 分别报告未导出的已知更新数 `pending` 和自动刷新状态 `autoRefreshEnabled`。
+
+包含 Amp 的 `--replace` 仅支持纯旧版本地历史。当前配置曾启动云同步或存在 `amp-cache` 时，即使 `--force` 成功也拒绝覆盖：导出不能证明所有曾上报的日期都在。请使用不带 `--replace` 的普通提交。扫描器也读取 `~/.local/share/amp/threads/`（或 `$XDG_DATA_HOME/amp/threads/`）里的旧版文件。两处均有同一线程的可用计量时，只统计同步副本。
 
 Amp 导出仅包含主代理请求，不含子代理（`Task`）请求，也不含生成标题等系统模型请求。上游一次抽样中，同步的 token 总量比 `amp usage` 约少 15%，这不是固定差值。首次同步还可能漏掉不在 `threads list` 中的旧线程：`threads search` 只返回最近活跃的 100 条。
 增量同步也受此窗口影响：如果只有代理回复、列表时间未变，且该线程已经不在最近 100 条中，就可能漏刷。可用 `--force` 重新导出列表中能找到的线程，但它无法找回未被发现的线程。

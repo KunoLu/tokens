@@ -92,6 +92,7 @@ pub struct CrushDbSource {
 #[derive(Debug)]
 pub struct ScanResult {
     pub files: [Vec<PathBuf>; ClientId::COUNT],
+    amp_synced_count: usize,
     /// All OpenCode SQLite databases discovered under the data dir.
     ///
     /// Includes the default `opencode.db` (used by `latest`/`beta` channels
@@ -143,6 +144,7 @@ impl Default for ScanResult {
     fn default() -> Self {
         Self {
             files: std::array::from_fn(|_| Vec::new()),
+            amp_synced_count: 0,
             opencode_dbs: Vec::new(),
             copilot_desktop_db: None,
             synthetic_db: None,
@@ -183,6 +185,11 @@ impl ScanResult {
 
     pub fn get_mut(&mut self, client: ClientId) -> &mut Vec<PathBuf> {
         &mut self.files[client as usize]
+    }
+
+    /// The prefix of this length came from the dedicated sync cache search.
+    pub(crate) fn amp_sources(&self) -> (&[PathBuf], usize) {
+        (self.get(ClientId::Amp).as_slice(), self.amp_synced_count)
     }
 
     /// Get total number of files found
@@ -3201,6 +3208,7 @@ fn scan_all_clients_with_env_strategy_inner(
             seen.insert((ClientId::Amp, key))
         }));
         amp_files.sort_unstable();
+        result.amp_synced_count = amp_files.len();
     }
     let mut cherry_files: Vec<(bool, String, PathBuf)> = Vec::new();
     for (client_id, root, files) in scan_results {
