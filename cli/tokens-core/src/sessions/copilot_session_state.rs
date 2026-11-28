@@ -33,14 +33,13 @@ use std::path::{Path, PathBuf};
 /// records, so a corrupted chain cannot loop or fan out without limit.
 const MAX_JOURNAL_FILES: usize = 64;
 
-/// SDK usage metrics report input inclusive of both cache reads and writes.
-/// Keep that input intact until the cumulative counters have been differenced.
+/// SDK input includes both cache buckets. Keep it inclusive until snapshots
+/// have been differenced and any source-specific limits applied.
+pub(super) type UsageBuckets = [i64; 5];
 type Buckets = [i64; 6];
 const INPUT: usize = 0;
-const OUTPUT: usize = 1;
 const CACHE_READ: usize = 2;
 const CACHE_WRITE: usize = 3;
-const REASONING: usize = 4;
 const REQUESTS: usize = 5;
 
 pub fn parse_copilot_session_state_files(paths: &[PathBuf]) -> Vec<UnifiedMessage> {
@@ -178,14 +177,8 @@ fn parse_session_events(path: &Path) -> Vec<UnifiedMessage> {
 
     let workspace_key = cwd.as_deref().and_then(normalize_workspace_key);
     snapshot_deltas(snapshots, complete_from_start)
-        .map(|(snapshot, delta)| {
-            let tokens = TokenBreakdown {
-                input: delta[INPUT] - delta[CACHE_READ] - delta[CACHE_WRITE],
-                output: delta[OUTPUT],
-                cache_read: delta[CACHE_READ],
-                cache_write: delta[CACHE_WRITE],
-                reasoning: delta[REASONING],
-            };
+        .map(|(snapshot, [usage @ .., requests])| {
+            let tokens = sdk_token_breakdown(usage);
             let model_id = snapshot
                 .attributed_model
                 .unwrap_or_else(|| "auto".to_string());
@@ -208,7 +201,7 @@ fn parse_session_events(path: &Path) -> Vec<UnifiedMessage> {
             );
             // The request counter is cumulative too, so its delta is the number
             // of model calls this increment covers.
-            message.message_count = i32::try_from(delta[REQUESTS].max(1)).unwrap_or(i32::MAX);
+            message.message_count = i32::try_from(requests.max(1)).unwrap_or(i32::MAX);
             if let Some(workspace_key) = workspace_key.clone() {
                 let workspace_label = workspace_label_from_key(&workspace_key);
                 message.set_workspace(Some(workspace_key), workspace_label);
@@ -218,9 +211,63 @@ fn parse_session_events(path: &Path) -> Vec<UnifiedMessage> {
         .collect()
 }
 
-struct TrackerPeak {
-    buckets: Buckets,
+/// Shared by shutdown consumers. The journal also tracks request counts.
+pub(super) struct TrackerPeak<const N: usize> {
+    buckets: [i64; N],
     unassigned_cache: [i64; 2],
+}
+
+impl<const N: usize> TrackerPeak<N> {
+    pub(super) fn new(first: &[i64; N], complete_from_start: bool) -> Self {
+        Self {
+            buckets: if complete_from_start { [0; N] } else { *first },
+            unassigned_cache: [0; 2],
+        }
+    }
+
+    pub(super) fn into_buckets(self) -> [i64; N] {
+        self.buckets
+    }
+
+    pub(super) fn observe(&mut self, current: &[i64; N]) -> [i64; N] {
+        let mut delta = [0; N];
+        for (index, &value) in current.iter().enumerate() {
+            delta[index] = (value - self.buckets[index]).max(0);
+            self.buckets[index] = self.buckets[index].max(value);
+        }
+        // Both cache buckets share the same inclusive input budget.
+        let mut capacity = delta[INPUT];
+        for (cache, unassigned) in delta[CACHE_READ..=CACHE_WRITE]
+            .iter_mut()
+            .zip(&mut self.unassigned_cache)
+        {
+            let assigned = (*cache).min(capacity);
+            *unassigned += *cache - assigned;
+            *cache = assigned;
+            capacity -= assigned;
+        }
+        delta
+    }
+
+    pub(super) fn has_unassigned_cache(&self) -> bool {
+        self.unassigned_cache != [0; 2]
+    }
+
+    pub(super) fn reclassify_cache(&mut self, delta: &mut [i64; N]) {
+        let mut capacity = delta[INPUT] - delta[CACHE_READ] - delta[CACHE_WRITE];
+        if capacity == 0 || !self.has_unassigned_cache() {
+            return;
+        }
+        for (cache, unassigned) in delta[CACHE_READ..=CACHE_WRITE]
+            .iter_mut()
+            .zip(&mut self.unassigned_cache)
+        {
+            let reassigned = (*unassigned).min(capacity);
+            *cache += reassigned;
+            *unassigned -= reassigned;
+            capacity -= reassigned;
+        }
+    }
 }
 
 /// Turn cumulative snapshots into the increment each one added.
@@ -239,57 +286,24 @@ fn snapshot_deltas(
     // Stable: records that share a timestamp keep journal order.
     snapshots.sort_by_key(|snapshot| snapshot.timestamp_ms);
 
-    let mut peaks: HashMap<&str, TrackerPeak> = HashMap::new();
+    let mut peaks = HashMap::new();
     let mut deltas = Vec::with_capacity(snapshots.len());
     for snapshot in &snapshots {
         let peak = peaks
             .entry(snapshot.tracker.as_str())
-            .or_insert_with(|| TrackerPeak {
-                buckets: if complete_from_start {
-                    Buckets::default()
-                } else {
-                    snapshot.buckets
-                },
-                unassigned_cache: [0; 2],
-            });
-        let mut delta = Buckets::default();
-        for (index, &value) in snapshot.buckets.iter().enumerate() {
-            delta[index] = (value - peak.buckets[index]).max(0);
-            peak.buckets[index] = peak.buckets[index].max(value);
-        }
-        // The cache buckets share the same inclusive input budget.
-        let mut capacity = delta[INPUT];
-        for (cache, unassigned) in delta[CACHE_READ..=CACHE_WRITE]
-            .iter_mut()
-            .zip(&mut peak.unassigned_cache)
-        {
-            let assigned = (*cache).min(capacity);
-            *unassigned += *cache - assigned;
-            *cache = assigned;
-            capacity -= assigned;
-        }
-        deltas.push(delta);
+            .or_insert_with(|| TrackerPeak::new(&snapshot.buckets, complete_from_start));
+        deltas.push(peak.observe(&snapshot.buckets));
     }
 
     // A reset can raise a cache peak without adding input. Reclassify already
     // counted input for that tracker, newest first, without minting more input
     // or pulling any cache tokens out of a skipped baseline.
-    if peaks.values().any(|peak| peak.unassigned_cache != [0; 2]) {
+    if peaks.values().any(TrackerPeak::has_unassigned_cache) {
         for (snapshot, delta) in snapshots.iter().zip(&mut deltas).rev() {
-            let mut capacity = delta[INPUT] - delta[CACHE_READ] - delta[CACHE_WRITE];
-            if capacity == 0 {
-                continue;
-            }
-            let peak = peaks.get_mut(snapshot.tracker.as_str()).unwrap();
-            for (cache, unassigned) in delta[CACHE_READ..=CACHE_WRITE]
-                .iter_mut()
-                .zip(&mut peak.unassigned_cache)
-            {
-                let reassigned = (*unassigned).min(capacity);
-                *cache += reassigned;
-                *unassigned -= reassigned;
-                capacity -= reassigned;
-            }
+            peaks
+                .get_mut(snapshot.tracker.as_str())
+                .unwrap()
+                .reclassify_cache(delta);
         }
     }
     drop(peaks);
@@ -459,16 +473,38 @@ fn usage_trackers(data: &Value, is_shutdown: bool) -> Vec<(String, Buckets)> {
 }
 
 fn metric_buckets(metric: &Value) -> Option<Buckets> {
+    let [input, output, cache_read, cache_write, reasoning] = sdk_usage_buckets(metric)?;
+    let requests = metric
+        .pointer("/requests/count")
+        .and_then(Value::as_i64)
+        .unwrap_or(0)
+        .max(0);
+    Some([input, output, cache_read, cache_write, reasoning, requests])
+}
+
+pub(super) fn sdk_usage_buckets(metric: &Value) -> Option<UsageBuckets> {
     let usage = metric.get("usage")?;
-    let read = |value: Option<&Value>| value.and_then(Value::as_i64).unwrap_or(0).max(0);
+    let read = |name: &str| usage.get(name).and_then(Value::as_i64).unwrap_or(0).max(0);
     Some([
-        read(usage.get("inputTokens")),
-        read(usage.get("outputTokens")),
-        read(usage.get("cacheReadTokens")),
-        read(usage.get("cacheWriteTokens")),
-        read(usage.get("reasoningTokens")),
-        read(metric.pointer("/requests/count")),
+        read("inputTokens"),
+        read("outputTokens"),
+        read("cacheReadTokens"),
+        read("cacheWriteTokens"),
+        read("reasoningTokens"),
     ])
+}
+
+/// Convert SDK buckets after both cache counts have been bounded by input.
+pub(super) fn sdk_token_breakdown(
+    [input, output, cache_read, cache_write, reasoning]: UsageBuckets,
+) -> TokenBreakdown {
+    TokenBreakdown {
+        input: input - cache_read - cache_write,
+        output,
+        cache_read,
+        cache_write,
+        reasoning,
+    }
 }
 
 fn non_empty_str(value: Option<&Value>) -> Option<&str> {

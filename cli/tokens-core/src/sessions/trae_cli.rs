@@ -42,16 +42,18 @@ pub const TRAE_CLI_CLIENT_ID: &str = "trae-cli";
 /// Added to the Codex parser version for the `trae-cli` cache identity. Bump
 /// it when this wrapper (relabel or `token_usage_record` fallback) changes how
 /// byte-identical rollouts parse.
-pub const TRAE_CLI_PARSER_OFFSET: u32 = 1;
+pub const TRAE_CLI_PARSER_OFFSET: u32 = 2;
 
 /// Agents-tab bucket for TRAE CLI threads, in place of the Codex names.
 const TRAE_CLI_AGENT: &str = "TRAE CLI";
 
 pub fn parse_trae_cli_file(path: &Path) -> Vec<UnifiedMessage> {
-    let mut messages = codex::parse_codex_file(path);
-    if messages.is_empty() {
-        messages = parse_token_usage_records(path);
-    }
+    let parsed = codex::parse_codex_file_incremental(path, 0, CodexParseState::default());
+    let mut messages = if parsed.messages.is_empty() && !parsed.has_owned_token_count {
+        parse_token_usage_records(path)
+    } else {
+        parsed.messages
+    };
     for message in &mut messages {
         relabel_codex_message(message);
     }
@@ -120,8 +122,8 @@ fn history_mutation_has_human_turn(payload: &Value) -> bool {
     })
 }
 
-/// Read per-response usage only when this thread has no `token_count` event.
-/// Replay history is not evidence of the child's usage dialect.
+/// Read per-response usage after the Codex pass found no owned `token_count`.
+/// Replayed snapshots do not establish the child's usage dialect.
 fn parse_token_usage_records(path: &Path) -> Vec<UnifiedMessage> {
     let is_archive = is_zst_path(path);
     let Some(mut reader) = open_rollout(path, is_archive) else {
@@ -205,7 +207,6 @@ fn parse_token_usage_records(path: &Path) -> Vec<UnifiedMessage> {
                 }
             }
             "event_msg" => match event_type {
-                Some("token_count") => return Vec::new(),
                 Some("user_message")
                     if codex_message_is_human_turn(
                         payload.get("message").and_then(Value::as_str),

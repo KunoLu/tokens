@@ -176,6 +176,66 @@ async fn usage_only_fork_drops_parent_replay_without_losing_own_usage() {
 }
 
 #[test]
+fn forked_trae_rollout_uses_only_the_childs_usage_dialect() {
+    let home = common::temp_home();
+    let parent_snapshot = r#"{"timestamp":"2026-09-01T10:00:03.100Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"cached_input_tokens":40,"output_tokens":12,"total_tokens":112},"last_token_usage":{"input_tokens":100,"cached_input_tokens":40,"output_tokens":12,"total_tokens":112}}}}"#;
+    let trailing_snapshot = parent_snapshot.replace("10:00:03.100Z", "10:00:07.000Z");
+    let prefix = [
+        r#"{"timestamp":"2026-09-01T10:00:04.000Z","type":"session_meta","payload":{"id":"019fcf70-2222-7000-8000-000000000001","forked_from_id":"019fcf70-1111-7000-8000-000000000001","thread_source":"user","model_provider":"trae"}}"#,
+        HISTORY_MUTATION_ROLLOUT[0],
+        r#"{"timestamp":"2026-09-01T10:00:01.000Z","type":"turn_context","payload":{"turn_id":"019fcf70-1112-7000-8000-000000000001","model":"gpt-5-codex"}}"#,
+        HISTORY_MUTATION_ROLLOUT[2],
+        HISTORY_MUTATION_ROLLOUT[3],
+        parent_snapshot,
+        r#"{"timestamp":"2026-09-01T10:00:04.100Z","type":"turn_context","payload":{"turn_id":"019fcf70-2223-7000-8000-000000000001","model":"gpt-5-codex"}}"#,
+        r#"{"timestamp":"2026-09-01T10:00:05.000Z","type":"event_msg","payload":{"type":"user_message","message":"Continue in the fork."}}"#,
+        r#"{"timestamp":"2026-09-01T10:00:06.000Z","type":"token_usage_record","payload":{"response_id":"resp_child","usage":{"input_tokens":20,"output_tokens":2,"total_tokens":22}}}"#,
+        trailing_snapshot.as_str(),
+        HISTORY_MUTATION_ROLLOUT[3],
+    ];
+    let child_snapshot = r#"{"timestamp":"2026-09-01T10:00:08.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":120,"cached_input_tokens":40,"output_tokens":14,"total_tokens":134},"last_token_usage":{"input_tokens":20,"output_tokens":2,"total_tokens":22}}}}"#;
+    let zero_snapshot = child_snapshot.replace(
+        r#""last_token_usage":{"input_tokens":20,"output_tokens":2,"total_tokens":22}"#,
+        r#""last_token_usage":{"input_tokens":0,"output_tokens":0,"total_tokens":0}"#,
+    );
+
+    for (name, snapshot, expected_key_prefix) in [
+        (
+            "inherited",
+            None,
+            Some("trae-cli:response:019fcf70-2222-7000-8000-000000000001:resp_child"),
+        ),
+        (
+            "owned",
+            Some(child_snapshot),
+            Some("trae-cli:token_count-total:"),
+        ),
+        ("owned-zero", Some(zero_snapshot.as_str()), None),
+    ] {
+        let path = home.path().join(format!("rollout-{name}.jsonl"));
+        let mut lines = prefix.to_vec();
+        lines.extend(snapshot);
+        write_jsonl(&path, &lines);
+
+        let messages = parse_trae_cli_file(&path);
+        if let Some(key_prefix) = expected_key_prefix {
+            assert_eq!(messages.len(), 1, "{name}");
+            assert_eq!(messages[0].tokens.total(), 22, "{name}");
+            assert!(messages[0].is_turn_start, "{name}");
+            assert!(
+                messages[0]
+                    .dedup_key
+                    .as_deref()
+                    .is_some_and(|key| key.starts_with(key_prefix)),
+                "{name}"
+            );
+        } else {
+            assert!(messages.is_empty(), "{name}");
+        }
+    }
+}
+
+#[test]
 fn trae_response_usage_splits_inclusive_and_disjoint_cache_buckets() {
     let home = common::temp_home();
     let path = home.path().join("rollout-cache-buckets.jsonl");

@@ -17221,44 +17221,37 @@ mod tests {
     /// Host, which journals sessions under `~/.copilot/session-state` rather
     /// than `workspaceStorage/*/chatSessions` (#131). A session the desktop
     /// app's `data.db` already reports must not be counted again from its
-    /// journal.
+    /// journal, and both lanes must count the same SDK input buckets.
     #[test]
     fn test_copilot_session_state_journals_are_parsed_once_per_session() {
         let temp_dir = tempfile::TempDir::new().unwrap();
         let copilot_home = temp_dir.path().join(".copilot");
-        let checkpoint = |session: &str| {
-            format!(
-                "{}\n{}\n",
-                format_args!(
-                    r#"{{"type":"session.start","data":{{"sessionId":"{session}","version":1,"producer":"copilot-agent","copilotVersion":"1.0.111-0","startTime":"2026-11-18T10:00:00.000Z","context":{{"cwd":"/Users/alice/project"}}}},"id":"{session}-start","timestamp":"2026-11-18T10:00:00.000Z","parentId":null}}"#
-                ),
-                format_args!(
-                    r#"{{"type":"session.usage_checkpoint","data":{{"totalNanoAiu":0,"providerModelMetrics":[{{"modelId":"gpt-5.4","provider":{{"id":"github-copilot","kind":"copilot","label":"GitHub Copilot"}},"metrics":{{"requests":{{"count":2,"cost":1}},"usage":{{"inputTokens":1000,"outputTokens":100,"cacheReadTokens":400,"cacheWriteTokens":0,"reasoningTokens":0}}}}}}]}},"id":"{session}-checkpoint","timestamp":"2026-11-18T10:05:00.000Z","parentId":"{session}-start"}}"#
-                ),
-            )
-        };
-        for session in ["agent-host-session", "desktop-session"] {
+        const CHECKPOINT: &str = r#"{"type":"session.usage_checkpoint","data":{"totalNanoAiu":0,"providerModelMetrics":[{"modelId":"gpt-5.4","provider":{"id":"github-copilot","kind":"copilot","label":"GitHub Copilot"},"metrics":{"requests":{"count":2,"cost":1},"usage":{"inputTokens":1000,"outputTokens":100,"cacheReadTokens":400,"cacheWriteTokens":200,"reasoningTokens":20}}}]},"id":"checkpoint","timestamp":"2026-11-18T10:05:00.000Z","parentId":"start"}"#;
+        const SHUTDOWN: &str = r#"{"type":"session.shutdown","data":{"shutdownType":"routine","modelMetrics":{"gpt-5.4":{"requests":{"count":2,"cost":1},"usage":{"inputTokens":1000,"outputTokens":100,"cacheReadTokens":400,"cacheWriteTokens":200,"reasoningTokens":20}}}},"id":"shutdown","timestamp":"2026-11-18T10:05:00.000Z","parentId":"start"}"#;
+        for (session, event) in [
+            ("agent-host-session", CHECKPOINT),
+            ("desktop-session", SHUTDOWN),
+            ("journal-only-session", SHUTDOWN),
+        ] {
             let dir = copilot_home.join("session-state").join(session);
             std::fs::create_dir_all(&dir).unwrap();
-            std::fs::write(dir.join("events.jsonl"), checkpoint(session)).unwrap();
+            let journal = format!(
+                "{}\n{event}\n",
+                format_args!(
+                    r#"{{"type":"session.start","data":{{"sessionId":"{session}","version":1,"producer":"copilot-agent","copilotVersion":"1.0.111-0","startTime":"2026-11-18T10:00:00.000Z","context":{{"cwd":"/project"}}}},"id":"start","timestamp":"2026-11-18T10:00:00.000Z","parentId":null}}"#
+                ),
+            );
+            std::fs::write(dir.join("events.jsonl"), journal).unwrap();
         }
         let conn = rusqlite::Connection::open(copilot_home.join("data.db")).unwrap();
         conn.execute_batch(
             r#"CREATE TABLE sessions (id TEXT, title TEXT, model TEXT, total_input_tokens INTEGER,
                 total_output_tokens INTEGER, total_cached_tokens INTEGER, total_reasoning_tokens INTEGER,
                 total_nano_aiu INTEGER, created_at TEXT);
-            INSERT INTO sessions VALUES ('desktop-session', 't', 'gpt-5.4', 1000, 100, 400, 0, 0, '2026-11-18T10:00:00Z');"#,
+            INSERT INTO sessions VALUES ('desktop-session', 't', 'gpt-5.4', 1000, 100, 400, 20, 0, '2026-11-18T10:00:00Z');"#,
         )
         .unwrap();
         drop(conn);
-
-        let count_by_session = |messages: &[(String, i64)]| {
-            let mut counts: HashMap<String, i64> = HashMap::new();
-            for (session, output) in messages {
-                *counts.entry(session.clone()).or_default() += output;
-            }
-            counts
-        };
 
         let streamed = parse_all_messages_with_pricing_with_cache_policy(
             temp_dir.path().to_str().unwrap(),
@@ -17268,13 +17261,15 @@ mod tests {
             &scanner::ScannerSettings::default(),
             SourceCachePolicy::InMemory,
         );
-        let streamed: Vec<(String, i64)> = streamed
-            .iter()
-            .map(|m| (m.session_id.clone(), m.tokens.output))
-            .collect();
-        let streamed = count_by_session(&streamed);
-        assert_eq!(streamed.get("agent-host-session"), Some(&100));
-        assert_eq!(streamed.get("desktop-session"), Some(&100));
+        assert!(streamed.iter().any(|message| {
+            message.dedup_key.as_deref()
+                == Some("copilot-desktop:desktop-session:shutdown:shutdown:gpt-5.4")
+        }));
+        assert!(streamed.iter().any(|message| {
+            message.dedup_key.as_deref()
+                == Some("copilot-session-state:journal-only-session:shutdown:gpt-5.4")
+        }));
+        let streamed: Vec<_> = streamed.iter().map(unified_to_parsed).collect();
 
         let local = parse_local_clients(LocalParseOptions {
             home_dir: Some(temp_dir.path().to_str().unwrap().to_string()),
@@ -17286,14 +17281,31 @@ mod tests {
             scanner_settings: scanner::ScannerSettings::default(),
         })
         .unwrap();
-        // One desktop request plus two SDK requests in a single checkpoint.
-        assert_eq!(local.counts.get(ClientId::Copilot), 3);
-        let local: Vec<(String, i64)> = local
-            .messages
-            .iter()
-            .map(|m| (m.session_id.clone(), m.output))
-            .collect();
-        assert_eq!(count_by_session(&local), streamed);
+        assert_eq!(local.counts.get(ClientId::Copilot), 5);
+        let expected = [
+            ("agent-host-session", 2),
+            ("desktop-session", 1),
+            ("journal-only-session", 2),
+        ];
+        for messages in [&streamed[..], &local.messages[..]] {
+            assert_eq!(messages.len(), expected.len());
+            for (session, request_count) in expected {
+                let message = messages.iter().find(|m| m.session_id == session).unwrap();
+                assert_eq!(
+                    (
+                        message.timestamp,
+                        message.input,
+                        message.output,
+                        message.cache_read,
+                        message.cache_write,
+                        message.reasoning,
+                        message.message_count,
+                    ),
+                    (1_794_996_300_000, 400, 100, 400, 200, 20, request_count),
+                    "{session}",
+                );
+            }
+        }
     }
 
     #[test]
@@ -18883,7 +18895,13 @@ mod tests {
     #[test]
     #[serial_test::serial]
     fn test_prime_agent_rejects_damaged_child_lineage_and_timestamp_cold_and_warm() {
-        for damage in ["parent-value", "timestamp-value", "timestamp-bool", "timestamp-object"] {
+        for damage in [
+            "parent-value",
+            "timestamp-value",
+            "timestamp-bool",
+            "timestamp-object",
+            "timestamp-null",
+        ] {
             let cache_home = tempfile::TempDir::new().unwrap();
             let source_home = tempfile::TempDir::new().unwrap();
             let _cache_env = redirect_cache_home(cache_home.path());
@@ -18922,6 +18940,7 @@ mod tests {
                 "timestamp-value" => b"\"2026-08-08T00:00:0\xffZ\"",
                 "timestamp-bool" => b"true",
                 "timestamp-object" => b"{}",
+                "timestamp-null" => b"null",
                 _ => b"\"2026-08-08T00:00:02.000Z\"",
             };
             child.extend_from_slice(br#"{"type":"message","id":"child-message","timestamp":"#);

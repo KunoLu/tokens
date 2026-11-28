@@ -1589,6 +1589,63 @@ fn test_parse_hermes_sqlite_keeps_rows_without_window_messages_whole() {
 }
 
 #[test]
+fn test_parse_hermes_sqlite_preserves_unknown_bounds_when_grouping_task_rows() {
+    let dir = TempDir::new().unwrap();
+    let db_path = create_test_db(&dir);
+    let conn = Connection::open(&db_path).unwrap();
+    add_messages_table(&conn);
+
+    let early = DAY0 + 20.0;
+    let middle = DAY0 + DAY + 20.0;
+    let late = DAY0 + 2.0 * DAY + 20.0;
+    let cases = [
+        ("unknown-first", None, Some(middle), [early, middle]),
+        ("unknown-last", Some(middle), None, [middle, late]),
+    ];
+    for (session, first_seen, last_seen, _) in cases {
+        insert_session(&conn, session, "claude-sonnet-4", DAY0, 3);
+        insert_usage(
+            &conn,
+            session,
+            "claude-sonnet-4",
+            200,
+            40,
+            0.5,
+            Some(middle),
+            Some(middle),
+        );
+        conn.execute(
+            "INSERT INTO session_model_usage (
+                session_id, model, billing_provider, task, input_tokens, output_tokens,
+                actual_cost_usd, first_seen, last_seen
+            ) VALUES (?1, 'claude-sonnet-4', 'anthropic', 'aux', 100, 20, 0.25, ?2, ?3)",
+            params![session, first_seen, last_seen],
+        )
+        .unwrap();
+        for ts in [DAY0 - 5.0, early, middle, late] {
+            insert_message(&conn, session, "assistant", ts);
+        }
+    }
+
+    let messages = parse_hermes_sqlite(&db_path);
+    assert_eq!(messages.len(), 4);
+    for (session, _, _, expected) in cases {
+        let pieces: Vec<_> = messages
+            .iter()
+            .filter(|m| m.session_id == session)
+            .map(|m| (m.timestamp, m.tokens.input, m.tokens.output, m.cost, m.message_count))
+            .collect();
+        assert_eq!(
+            pieces,
+            [
+                (ms(expected[0]), 150, 30, 0.375, 3),
+                (ms(expected[1]), 150, 30, 0.375, 0),
+            ]
+        );
+    }
+}
+
+#[test]
 fn test_parse_hermes_sqlite_drops_empty_pieces_but_keeps_the_count() {
     let dir = TempDir::new().unwrap();
     let db_path = create_test_db(&dir);
@@ -1669,6 +1726,72 @@ fn test_parse_hermes_sqlite_spreads_session_totals_from_their_start() {
 }
 
 #[test]
+fn test_parse_hermes_databases_excludes_cross_database_model_overlaps_in_either_order() {
+    let a_dir = TempDir::new().unwrap();
+    let b_dir = TempDir::new().unwrap();
+    let a_db = create_test_db(&a_dir);
+    let b_db = create_test_db(&b_dir);
+    let a_first = DAY0 + 20.0;
+    let a_last = DAY0 + 2.0 * DAY + 20.0;
+    let b_start = DAY0 + DAY + 10.0;
+    let b_end = DAY0 + DAY + 100.0;
+
+    let conn = Connection::open(&a_db).unwrap();
+    add_messages_table(&conn);
+    insert_session(&conn, "switch-back", "claude-sonnet-4", DAY0, 7);
+    insert_usage(
+        &conn,
+        "switch-back",
+        "claude-sonnet-4",
+        401,
+        41,
+        0.4,
+        Some(DAY0),
+        Some(a_last),
+    );
+    for ts in [a_first, b_start + 10.0, a_last] {
+        insert_message(&conn, "switch-back", "assistant", ts);
+    }
+    drop(conn);
+
+    let conn = Connection::open(&b_db).unwrap();
+    add_messages_table(&conn);
+    insert_session(&conn, "switch-back", "glm-5.2", DAY0, 9);
+    insert_usage(
+        &conn,
+        "switch-back",
+        "glm-5.2",
+        903,
+        93,
+        0.9,
+        Some(b_start),
+        Some(b_end),
+    );
+    // Only A's window covers this first timestamp, but it is in B's database.
+    for ts in [a_first + 25.0, b_end] {
+        insert_message(&conn, "switch-back", "assistant", ts);
+    }
+    drop(conn);
+
+    for (paths, a_count, b_count) in [([&a_db, &b_db], 7, 0), ([&b_db, &a_db], 0, 9)] {
+        let mut messages = parse_hermes_databases(&paths);
+        messages.sort_by_key(|m| m.timestamp);
+        let pieces: Vec<_> = messages
+            .iter()
+            .map(|m| (m.model_id.as_str(), m.timestamp, m.tokens.input, m.message_count))
+            .collect();
+        assert_eq!(
+            pieces,
+            [
+                ("claude-sonnet-4", ms(a_first), 200, a_count),
+                ("glm-5.2", ms(b_start), 903, b_count),
+                ("claude-sonnet-4", ms(a_last), 201, 0),
+            ]
+        );
+    }
+}
+
+#[test]
 fn test_parse_hermes_databases_dedups_rows_before_spreading() {
     let dir = TempDir::new().unwrap();
     let first_dir = dir.path().join("first");
@@ -1696,6 +1819,7 @@ fn test_parse_hermes_databases_dedups_rows_before_spreading() {
 
     // The second copy would spread the same row over three messages; none of
     // its pieces may be added on top of the first copy's row.
+    // Its wider window must not make the accepted GLM row's time ambiguous.
     let second_db = create_test_db(&second);
     let conn = Connection::open(&second_db).unwrap();
     add_messages_table(&conn);
@@ -1708,7 +1832,7 @@ fn test_parse_hermes_databases_dedups_rows_before_spreading() {
         99,
         9.9,
         Some(DAY0),
-        Some(DAY0 + DAY),
+        Some(DAY0 + 3.0 * DAY),
     );
     // A distinct model row in the later copy must still contribute usage, but
     // not its copy of sessions.message_count even when it is the primary model.
@@ -1733,7 +1857,8 @@ fn test_parse_hermes_databases_dedups_rows_before_spreading() {
         Some(DAY0),
         Some(DAY0 + DAY),
     );
-    for ts in [DAY0 + 1.0, DAY0 + 2.0, DAY0 + 3.0] {
+    let glm_time = DAY0 + 2.0 * DAY + 10.0;
+    for ts in [DAY0 + 1.0, DAY0 + 2.0, DAY0 + 3.0, glm_time] {
         insert_message(&conn, "shared", "assistant", ts);
     }
     drop(conn);
@@ -1745,9 +1870,11 @@ fn test_parse_hermes_databases_dedups_rows_before_spreading() {
         .collect();
     assert_eq!(shared.len(), 2);
     assert_eq!(shared[0].model_id, "claude-sonnet-4");
+    assert_eq!(shared[0].timestamp, ms(DAY0));
     assert_eq!(shared[0].tokens.input, 100);
     assert_eq!(shared[0].message_count, 2);
     assert_eq!(shared[1].model_id, "glm-5.2");
+    assert_eq!(shared[1].timestamp, ms(glm_time));
     assert_eq!(shared[1].tokens.input, 200);
     assert_eq!(shared[1].message_count, 0);
     assert!(messages.iter().any(|m| m.session_id == "only-second"));

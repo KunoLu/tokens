@@ -72,8 +72,8 @@ where
 {
     // Use an invalid RFC 3339 string for present but undecodable values.
     // Prime's child timestamp check must not mistake damage for legacy absence.
-    Ok(Option::<serde_json::Value>::deserialize(deserializer)?
-        .map(|value| decode_flexible_timestamp(value).unwrap_or_default()))
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(Some(decode_flexible_timestamp(value).unwrap_or_default()))
 }
 
 /// Pi session header (first line of JSONL)
@@ -1133,6 +1133,7 @@ mod tests {
             r#"{"type":"session","id":"child","parentSession":"parent.jsonl","rlmDepth":1}
 {"type":"message","id":"wrong-bool","timestamp":true,"message":{"role":"assistant","model":"claude-opus-5","usage":{"input":50}}}
 {"type":"message","id":"wrong-object","timestamp":{"seconds":1},"message":{"role":"assistant","model":"claude-opus-5","usage":{"input":50}}}
+{"type":"message","id":"wrong-null","timestamp":null,"message":{"role":"assistant","model":"claude-opus-5","usage":{"input":50}}}
 {"type":"message","id":"legacy","message":{"role":"assistant","model":"claude-opus-5","usage":{"input":3}}}
 "#,
         )
@@ -1146,7 +1147,9 @@ mod tests {
         assert_eq!(reconciled.len(), 2);
         assert_eq!(reconciled[0].tokens.input, 150);
         assert_eq!(reconciled[1].tokens.input, 3);
-        assert_eq!(parse_pi_file(&child).len(), 3);
+        // Ordinary Pi has no parent accounting and keeps all four usage rows.
+        let pi_input: i64 = parse_pi_file(&child).iter().map(|row| row.tokens.input).sum();
+        assert_eq!(pi_input, 153);
     }
 
     #[test]

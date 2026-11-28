@@ -16,7 +16,7 @@ use super::utils::{
 use super::UnifiedMessage;
 use crate::TokenBreakdown;
 use rusqlite::Connection;
-use std::collections::{HashMap, HashSet};
+use std::collections::{hash_map::Entry, HashMap};
 use std::path::Path;
 use tracing::warn;
 
@@ -34,6 +34,7 @@ const NULL_PROVIDER_KEY: &str = "<null>";
 /// erase one provider from the breakdown and credit its tokens to the other.
 /// Cost is resolved per row (actual when non-zero, otherwise estimated) before
 /// the SUM, so a reconciled sibling row cannot discard estimate-only siblings.
+/// A grouped window bound is known only if every task row recorded that bound.
 /// `ORDER BY` sorts the row matching `sessions.model` first within each session
 /// and is otherwise total, so the caller can hand `sessions.message_count` to
 /// the first row it sees per session and get the primary model whenever one
@@ -51,8 +52,8 @@ const PER_MODEL_QUERY: &str = r#"
             SUM(smu.cache_write_tokens)  AS cache_write_tokens,
             SUM(smu.reasoning_tokens)    AS reasoning_tokens,
             SUM(COALESCE(NULLIF(smu.actual_cost_usd, 0), smu.estimated_cost_usd, 0)) AS cost_usd,
-            MIN(smu.first_seen)          AS first_seen,
-            MAX(smu.last_seen)           AS last_seen
+            CASE WHEN COUNT(smu.first_seen) = COUNT(*) THEN MIN(smu.first_seen) END AS first_seen,
+            CASE WHEN COUNT(smu.last_seen) = COUNT(*) THEN MAX(smu.last_seen) END AS last_seen
         FROM session_model_usage smu
         JOIN sessions s ON s.id = smu.session_id
         WHERE smu.model IS NOT NULL
@@ -130,7 +131,7 @@ struct HermesUsageRow {
     reasoning: i64,
     cost: f64,
     /// When Hermes first and last recorded usage for this row (epoch seconds);
-    /// NULL for session totals.
+    /// NULL for session totals or when any grouped task row lacks that bound.
     first_seen: Option<f64>,
     last_seen: Option<f64>,
 }
@@ -204,16 +205,15 @@ fn usage_window<'a>(row: &HermesUsageRow, timestamps: &'a [f64]) -> &'a [f64] {
 
 /// The message table does not identify a model. When models switch back and
 /// forth, the same timestamp can fall inside more than one model's interval.
-/// Exclude it from all rows instead of attributing it to each model.
-fn exclude_ambiguous_times(
-    rows: &[HermesUsageRow],
-    timestamps: &mut Vec<f64>,
+/// Find those intervals using the selected rows from all databases.
+fn collect_ambiguous_intervals<'a>(
+    rows: impl Iterator<Item = &'a HermesUsageRow> + Clone,
     overlaps: &mut Vec<(f64, f64)>,
 ) {
     overlaps.clear();
-    for (i, row) in rows.iter().enumerate().skip(1) {
+    for (i, row) in rows.clone().enumerate().skip(1) {
         let (start, end) = usage_bounds(row);
-        for other in &rows[..i] {
+        for other in rows.clone().take(i) {
             if row.model_id == other.model_id {
                 continue;
             }
@@ -225,11 +225,10 @@ fn exclude_ambiguous_times(
             }
         }
     }
-    if overlaps.is_empty() {
-        return;
-    }
-
     overlaps.sort_unstable_by(|left, right| left.0.total_cmp(&right.0));
+}
+
+fn exclude_ambiguous_times(timestamps: &mut Vec<f64>, overlaps: &[(f64, f64)]) {
     let mut overlaps = overlaps.iter();
     let mut current = overlaps.next();
     timestamps.retain(|&time| {
@@ -348,20 +347,31 @@ pub fn parse_hermes_sqlite(db_path: &Path) -> Vec<UnifiedMessage> {
 }
 
 enum SessionSource {
-    PerModel,
+    PerModel {
+        first: usize,
+        additional: Vec<usize>,
+    },
     Totals(usize), // index in pending_totals
+}
+
+struct PendingModelRow {
+    row: HermesUsageRow,
+    row_key: String,
+    timestamps_index: usize,
 }
 
 /// Parses every Hermes database, preferring per-model usage over session
 /// totals for the same session regardless of database order. The first
 /// database wins for duplicate rows within a representation, before spreading
 /// makes copies with different message histories produce different pieces.
+/// Model windows compete across databases, but each row uses its own source's
+/// assistant timestamps.
 pub fn parse_hermes_databases<P: AsRef<Path>>(db_paths: &[P]) -> Vec<UnifiedMessage> {
     let mut session_sources = HashMap::new();
-    let mut seen_model_rows = HashSet::new();
+    let mut seen_model_rows = HashMap::new();
+    let mut pending_models: Vec<PendingModelRow> = Vec::new();
+    let mut model_timestamps = Vec::new();
     let mut pending_totals = Vec::new();
-    let mut overlaps = Vec::new();
-    let mut messages = Vec::new();
     for db_path in db_paths {
         let db_path = db_path.as_ref();
         let Some(conn) = open_hermes_database(db_path) else {
@@ -373,37 +383,53 @@ pub fn parse_hermes_databases<P: AsRef<Path>>(db_paths: &[P]) -> Vec<UnifiedMess
             continue;
         }
         let mut timestamps = query_assistant_timestamps(db_path, &conn);
-        for rows in model_rows
-            .chunk_by(|a, b| a.session_id == b.session_id)
-            .filter(|rows| rows.len() > 1)
-        {
-            if let Some(times) = timestamps.get_mut(&rows[0].session_id) {
-                exclude_ambiguous_times(rows, times, &mut overlaps);
-            }
-        }
+        let db_model_start = pending_models.len();
 
         for mut row in model_rows {
             let provider = row.billing_provider.as_deref().unwrap_or(NULL_PROVIDER_KEY);
             let row_key = format!("hermes:{}:{}:{}", row.session_id, row.model_id, provider);
-            if seen_model_rows.contains(&row_key) {
+            let Entry::Vacant(key) = seen_model_rows.entry(row_key) else {
                 continue;
-            }
+            };
+            let index = pending_models.len();
+            key.insert(index);
+            let first_model = SessionSource::PerModel {
+                first: index,
+                additional: Vec::new(),
+            };
             // SQL orders the primary model first. Only the first per-model
             // row of the session carries the session's message count.
             if let Some(source) = session_sources.get_mut(&row.session_id) {
-                match *source {
-                    SessionSource::PerModel => row.message_count = 0,
+                match source {
+                    SessionSource::PerModel { additional, .. } => {
+                        row.message_count = 0;
+                        additional.push(index);
+                    }
                     SessionSource::Totals(index) => {
-                        pending_totals[index] = None;
-                        *source = SessionSource::PerModel;
+                        pending_totals[*index] = None;
+                        *source = first_model;
                     }
                 }
             } else {
-                session_sources.insert(row.session_id.clone(), SessionSource::PerModel);
+                session_sources.insert(row.session_id.clone(), first_model);
             }
-            let times = timestamps.get(&row.session_id).map_or(&[][..], Vec::as_slice);
-            push_spread_messages(row, Some(&row_key), times, &mut messages);
-            seen_model_rows.insert(row_key);
+            // SQL groups rows by session, so rows from the same DB and session
+            // can share one timestamp list without copying it.
+            let timestamps_index = match pending_models[db_model_start..].last() {
+                Some(previous) if previous.row.session_id == row.session_id => {
+                    previous.timestamps_index
+                }
+                _ => {
+                    let index = model_timestamps.len();
+                    model_timestamps.push(timestamps.remove(&row.session_id).unwrap_or_default());
+                    index
+                }
+            };
+            pending_models.push(PendingModelRow {
+                row,
+                row_key: String::new(),
+                timestamps_index,
+            });
         }
 
         // Keep only the first totals row, and defer spreading: this session
@@ -419,6 +445,47 @@ pub fn parse_hermes_databases<P: AsRef<Path>>(db_paths: &[P]) -> Vec<UnifiedMess
             let times = timestamps.remove(&row.session_id).unwrap_or_default();
             pending_totals.push(Some((row, times)));
         }
+    }
+
+    let mut overlaps = Vec::new();
+    for source in session_sources.into_values() {
+        let SessionSource::PerModel { first, additional } = source else {
+            continue;
+        };
+        if additional.is_empty() {
+            continue;
+        }
+        let indices = std::iter::once(first).chain(additional.iter().copied());
+        collect_ambiguous_intervals(
+            indices.clone().map(|index| &pending_models[index].row),
+            &mut overlaps,
+        );
+        if overlaps.is_empty() {
+            continue;
+        }
+        // Indices follow scan order; filter each source's shared list once.
+        let mut previous = None;
+        for index in indices {
+            let timestamps_index = pending_models[index].timestamps_index;
+            if previous != Some(timestamps_index) {
+                exclude_ambiguous_times(&mut model_timestamps[timestamps_index], &overlaps);
+                previous = Some(timestamps_index);
+            }
+        }
+    }
+
+    // Move the dedup keys into the rows without changing scan order.
+    for (row_key, index) in seen_model_rows {
+        pending_models[index].row_key = row_key;
+    }
+    let mut messages = Vec::new();
+    for pending in pending_models {
+        push_spread_messages(
+            pending.row,
+            Some(&pending.row_key),
+            &model_timestamps[pending.timestamps_index],
+            &mut messages,
+        );
     }
     for (row, times) in pending_totals.into_iter().flatten() {
         push_spread_messages(row, None, &times, &mut messages);

@@ -500,6 +500,8 @@ fn codex_originator_is_openclaw(originator: Option<&str>) -> bool {
 #[derive(Debug, Clone)]
 pub(crate) struct ParsedCodexFile {
     pub messages: Vec<UnifiedMessage>,
+    /// A token_count outside inherited fork history, even if it emitted no usage.
+    pub has_owned_token_count: bool,
     pub fallback_timestamp_indices: Vec<usize>,
     pub consumed_offset: u64,
     pub parse_succeeded: bool,
@@ -556,6 +558,7 @@ fn parse_codex_reader<R: BufRead>(
     let mut parse_succeeded = true;
     let mut pending_model_messages = Vec::new();
     let mut unresolved_model_events = false;
+    let mut has_owned_token_count = false;
 
     loop {
         line.clear();
@@ -830,9 +833,9 @@ fn parse_codex_reader<R: BufRead>(
 
                 // Process token_count events
                 if is_token_count {
-                    let info = match payload.info {
-                        Some(i) => i,
-                        None => continue,
+                    let Some(info) = payload.info else {
+                        has_owned_token_count = true;
+                        continue;
                     };
 
                     let model = payload_model
@@ -872,6 +875,7 @@ fn parse_codex_reader<R: BufRead>(
                     ) {
                         continue;
                     }
+                    has_owned_token_count = true;
                     state.forked_child_inherited_baseline = None;
                     state.forked_child_inherited_reported_total = None;
 
@@ -1141,6 +1145,7 @@ fn parse_codex_reader<R: BufRead>(
 
     ParsedCodexFile {
         messages,
+        has_owned_token_count,
         fallback_timestamp_indices,
         consumed_offset,
         parse_succeeded,
@@ -1535,6 +1540,7 @@ fn parse_codex_archive(
 ) -> ParsedCodexFile {
     let unusable = |state: CodexParseState| ParsedCodexFile {
         messages: Vec::new(),
+        has_owned_token_count: false,
         fallback_timestamp_indices: Vec::new(),
         consumed_offset: start_offset,
         parse_succeeded: false,
@@ -1620,6 +1626,7 @@ pub(crate) fn parse_codex_file_incremental(
         Err(_) => {
             return ParsedCodexFile {
                 messages: Vec::new(),
+                has_owned_token_count: false,
                 fallback_timestamp_indices: Vec::new(),
                 consumed_offset: start_offset,
                 parse_succeeded: false,
@@ -1632,6 +1639,7 @@ pub(crate) fn parse_codex_file_incremental(
     if file.seek(SeekFrom::Start(start_offset)).is_err() {
         return ParsedCodexFile {
             messages: Vec::new(),
+            has_owned_token_count: false,
             fallback_timestamp_indices: Vec::new(),
             consumed_offset: start_offset,
             parse_succeeded: false,

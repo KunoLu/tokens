@@ -1182,9 +1182,9 @@ const SHARED_PARSER_FAMILIES: &[SharedParserFamily] = &[
             // damaged lineage and usage structural keys before
             // reconciliation bookkeeping. v3->v4 rejects damaged lineage
             // values and matching-critical child timestamps while
-            // preserving unrelated damaged usage extensions. A further bump
-            // rejects wrong-typed timestamps in RLM child messages.
-            (ClientId::PrimeAgent, 4),
+            // preserving unrelated damaged usage extensions. Later bumps
+            // reject wrong-typed child timestamps, including explicit null.
+            (ClientId::PrimeAgent, 5),
         ],
     },
     SharedParserFamily {
@@ -4155,7 +4155,7 @@ mod tests {
 
     #[test]
     fn test_lossy_jsonl_parser_versions_invalidate_v3_entries() {
-        assert_eq!(parser_version(ClientId::PrimeAgent), 7);
+        assert_eq!(parser_version(ClientId::PrimeAgent), 8);
         assert_eq!(parser_version(ClientId::Reasonix), 4);
     }
 
@@ -4169,7 +4169,7 @@ mod tests {
         // (the standard-lane members took a further +1 for #122, below),
         // plus the base 2 -> 3 speed bump.
         assert_eq!(parser_version(ClientId::Kimchi), 4);
-        assert_eq!(parser_version(ClientId::PrimeAgent), 7);
+        assert_eq!(parser_version(ClientId::PrimeAgent), 8);
     }
 
     /// #122: the standard cross-session lane (Pi, OMP, Senpi, Craft Agent)
@@ -5178,7 +5178,7 @@ mod tests {
                     (ClientId::Senpi, 2),
                     (ClientId::CraftAgent, 2),
                     (ClientId::Kwwk, 1),
-                    (ClientId::PrimeAgent, 4),
+                    (ClientId::PrimeAgent, 5),
                 ],
             ),
             (
