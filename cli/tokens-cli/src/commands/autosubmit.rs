@@ -86,7 +86,7 @@ impl SchedulerKind {
 pub enum AutosubmitRunDecision {
     Disabled,
     NotDue { next_run_at_ms: i64 },
-    Due,
+    Due { wait_ms: u64 },
 }
 
 pub struct AutosubmitRunLock {
@@ -336,6 +336,9 @@ fn status_output(settings: &AutosubmitSettings) -> StatusOutput {
     }
 }
 
+/// Slack for on-cadence ticks that wake slightly early, so they are not skipped.
+const DUE_JITTER_TOLERANCE_MS: i64 = 30_000;
+
 pub fn run_decision(
     settings: &AutosubmitSettings,
     now_ms: i64,
@@ -344,15 +347,25 @@ pub fn run_decision(
     if !settings.enabled {
         return AutosubmitRunDecision::Disabled;
     }
-    if force {
-        return AutosubmitRunDecision::Due;
-    }
+    let due_now = AutosubmitRunDecision::Due { wait_ms: 0 };
+    let Some(last) = settings.last_run_at_ms.filter(|_| !force) else {
+        return due_now;
+    };
     let interval_ms = (settings.interval_minutes as i64).saturating_mul(60_000);
-    match settings.last_run_at_ms {
-        Some(last) if now_ms < last.saturating_add(interval_ms) => AutosubmitRunDecision::NotDue {
-            next_run_at_ms: last.saturating_add(interval_ms),
-        },
-        _ => AutosubmitRunDecision::Due,
+    let next_run_at_ms = last.saturating_add(interval_ms);
+    let remaining = next_run_at_ms.saturating_sub(now_ms);
+    if remaining > DUE_JITTER_TOLERANCE_MS {
+        AutosubmitRunDecision::NotDue { next_run_at_ms }
+    } else if remaining > 0
+        && (settings.today || settings.yesterday || settings.week || settings.month)
+    {
+        // Relative dates must be evaluated at the due tick, not just before
+        // midnight. Wait out the bounded slack rather than skipping the tick.
+        AutosubmitRunDecision::Due {
+            wait_ms: remaining as u64,
+        }
+    } else {
+        due_now
     }
 }
 
@@ -1142,5 +1155,45 @@ mod tests {
             Some(expected)
         );
         assert_eq!(windows_task_command_from_xml("<Task></Task>"), None);
+    }
+
+    #[test]
+    fn run_decision_tolerates_early_scheduler_tick() {
+        let last = 1_700_000_000_000_i64;
+        let next_run_at_ms = last + 30 * 60_000;
+        let settings = AutosubmitSettings {
+            enabled: true,
+            interval_minutes: 30,
+            last_run_at_ms: Some(last),
+            ..AutosubmitSettings::default()
+        };
+        assert_eq!(
+            run_decision(&settings, next_run_at_ms - 1, false),
+            AutosubmitRunDecision::Due { wait_ms: 0 }
+        );
+        assert_eq!(
+            run_decision(&settings, next_run_at_ms - DUE_JITTER_TOLERANCE_MS, false),
+            AutosubmitRunDecision::Due { wait_ms: 0 }
+        );
+        assert_eq!(
+            run_decision(
+                &settings,
+                next_run_at_ms - DUE_JITTER_TOLERANCE_MS - 1,
+                false
+            ),
+            AutosubmitRunDecision::NotDue { next_run_at_ms }
+        );
+        let monthly = AutosubmitSettings {
+            month: true,
+            ..settings
+        };
+        assert_eq!(
+            run_decision(&monthly, next_run_at_ms - 1_000, false),
+            AutosubmitRunDecision::Due { wait_ms: 1_000 }
+        );
+        assert_eq!(
+            run_decision(&monthly, next_run_at_ms - 1_000, true),
+            AutosubmitRunDecision::Due { wait_ms: 0 }
+        );
     }
 }

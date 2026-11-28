@@ -37,6 +37,10 @@ pub struct AmpTokens {
 #[derive(Debug, Deserialize)]
 pub struct AmpMessageUsage {
     pub model: Option<String>,
+    /// When the request was made. Threads exported from ampcode.com
+    /// (`amp threads export`) carry it on every usage; older local thread
+    /// files do not.
+    pub timestamp: Option<String>,
     #[serde(rename = "inputTokens")]
     pub input_tokens: Option<i64>,
     #[serde(rename = "outputTokens")]
@@ -70,6 +74,15 @@ pub struct AmpThread {
     pub usage_ledger: Option<AmpUsageLedger>,
 }
 
+/// Amp names some models by their upstream org, such as
+/// `zai-org/GLM-5.3-Flash`; other clients report the same model without it.
+fn strip_org_prefix(model: &str) -> &str {
+    match model.rsplit_once('/') {
+        Some((_, id)) if !id.is_empty() => id,
+        _ => model,
+    }
+}
+
 /// Get provider from model name
 fn get_provider_from_model(model: &str) -> &'static str {
     provider_identity::inferred_provider_from_model(model).unwrap_or("anthropic")
@@ -92,10 +105,11 @@ impl AmpUsageRecord {
     }
 
     fn into_unified(self, thread_id: &str) -> UnifiedMessage {
+        let model = strip_org_prefix(&self.model);
         UnifiedMessage::new(
             "amp",
-            &self.model,
-            get_provider_from_model(&self.model),
+            model,
+            get_provider_from_model(model),
             thread_id.to_string(),
             self.timestamp,
             self.tokens,
@@ -192,12 +206,17 @@ fn parse_amp_message_records(
             let usage = msg.usage?;
             let model = usage.model?;
             let message_id = msg.message_id.unwrap_or(0).max(0);
-            let timestamp = base_timestamp.saturating_add(message_id.saturating_mul(1000));
+            // Without a recorded time, messages are spaced a second apart from
+            // the thread's creation, which books a thread that ran for days on
+            // the day it started.
+            let explicit_timestamp = parse_amp_timestamp(usage.timestamp);
+            let timestamp = explicit_timestamp
+                .unwrap_or_else(|| base_timestamp.saturating_add(message_id.saturating_mul(1000)));
 
             Some(AmpUsageRecord {
                 model,
                 timestamp,
-                has_explicit_timestamp: false,
+                has_explicit_timestamp: explicit_timestamp.is_some(),
                 message_id: Some(message_id).filter(|id| *id > 0),
                 ledger_to_message_id: None,
                 tokens: TokenBreakdown {
@@ -587,6 +606,108 @@ mod tests {
         let messages = parse_amp_file(&path);
         assert_eq!(messages.len(), 1);
         assert_eq!(messages[0].timestamp, thread_created + 7000);
+    }
+
+    #[test]
+    fn test_parse_amp_dates_exported_messages_by_their_usage_timestamp() {
+        // `amp threads export` output: no usage ledger, and every usage carries
+        // the time of its request. A thread created on the 4th that is still in
+        // use on the 6th books that day's usage on the 6th.
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let path = temp_dir.path().join("T-exported.json");
+        let thread_created = timestamp_ms("2026-04-04T12:00:00Z");
+        let first_usage_timestamp = "2026-04-04T12:00:05Z";
+        let second_usage_timestamp = "2026-04-06T12:00:00Z";
+
+        write_amp_thread(
+            &path,
+            &serde_json::json!({
+                "id": "T-exported",
+                "created": thread_created,
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "messageId": 2,
+                        "usage": {
+                            "model": "claude-sonnet-4-0",
+                            "timestamp": first_usage_timestamp,
+                            "inputTokens": 20,
+                            "outputTokens": 5
+                        }
+                    },
+                    {
+                        "role": "assistant",
+                        "messageId": 4,
+                        "usage": {
+                            "model": "claude-sonnet-4-0",
+                            "timestamp": second_usage_timestamp,
+                            "inputTokens": 30,
+                            "outputTokens": 7
+                        }
+                    }
+                ]
+            })
+            .to_string(),
+        );
+
+        let messages = parse_amp_file(&path);
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0].timestamp, timestamp_ms(first_usage_timestamp));
+        assert_eq!(messages[1].timestamp, timestamp_ms(second_usage_timestamp));
+        assert_eq!(
+            messages[1].date,
+            local_date(timestamp_ms(second_usage_timestamp))
+        );
+        assert_eq!(messages[1].tokens.input, 30);
+    }
+
+    #[test]
+    fn test_parse_amp_drops_upstream_org_prefix_from_model() {
+        // Amp reports some models with their upstream org; other clients
+        // report the bare id, which is also what the pricing tables use.
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let path = temp_dir.path().join("T-prefixed.json");
+        write_amp_thread(
+            &path,
+            &serde_json::json!({
+                "id": "T-prefixed",
+                "created": timestamp_ms("2026-11-21T10:00:00Z"),
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "messageId": 1,
+                        "usage": {
+                            "model": "zai-org/GLM-5.3-Flash",
+                            "timestamp": "2026-11-21T10:00:05Z",
+                            "inputTokens": 10,
+                            "outputTokens": 5
+                        }
+                    },
+                    {
+                        "role": "assistant",
+                        "messageId": 3,
+                        "usage": {
+                            "model": "claude-opus-5-5",
+                            "timestamp": "2026-11-21T10:00:09Z",
+                            "inputTokens": 2,
+                            "outputTokens": 1
+                        }
+                    },
+                    {
+                        "role": "assistant",
+                        "messageId": 4,
+                        "usage": {"model": "org/", "timestamp": "2026-11-21T10:00:10Z", "inputTokens": 1}
+                    }
+                ]
+            })
+            .to_string(),
+        );
+
+        let messages = parse_amp_file(&path);
+        assert_eq!(messages.len(), 3);
+        assert_eq!(messages[0].model_id, "GLM-5.3-Flash");
+        assert_eq!(messages[1].model_id, "claude-opus-5-5");
+        assert_eq!(messages[2].model_id, "org/");
     }
 
     #[test]

@@ -1,7 +1,8 @@
 use rusqlite::{params, Connection};
 use std::collections::HashSet;
 use tempfile::TempDir;
-use tokens_core::sessions::hermes::parse_hermes_sqlite;
+use tokens_core::sessions::hermes::{parse_hermes_databases, parse_hermes_sqlite};
+use tokens_core::{TokenBreakdown, UnifiedMessage};
 
 #[test]
 fn test_parse_hermes_sqlite_returns_empty_for_missing_database() {
@@ -196,7 +197,7 @@ fn test_parse_hermes_sqlite_reads_session_rows_and_preserves_message_count() {
     assert_eq!(msg.cost, 0.34);
     assert_eq!(
         msg.dedup_key.as_deref(),
-        Some("hermes:session-1:claude-sonnet-4:anthropic")
+        Some("hermes:session-1:claude-sonnet-4:anthropic#0")
     );
 }
 
@@ -491,7 +492,7 @@ fn test_parse_hermes_sqlite_emits_per_model_rows_for_multi_model_session() {
     assert_eq!(cohere.message_count, 0); // secondary model
     assert_eq!(
         cohere.dedup_key.as_deref(),
-        Some("hermes:session-multi:cohere/north-mini-code:free:bifrost")
+        Some("hermes:session-multi:cohere/north-mini-code:free:bifrost#0")
     );
 
     // glm-5.2: primary model, gets message_count
@@ -501,7 +502,7 @@ fn test_parse_hermes_sqlite_emits_per_model_rows_for_multi_model_session() {
     assert_eq!(glm.message_count, 15); // primary model
     assert_eq!(
         glm.dedup_key.as_deref(),
-        Some("hermes:session-multi:glm-5.2:kilocode")
+        Some("hermes:session-multi:glm-5.2:kilocode#0")
     );
 
     // mimo-v2.5-free: secondary model
@@ -514,7 +515,7 @@ fn test_parse_hermes_sqlite_emits_per_model_rows_for_multi_model_session() {
     assert_eq!(mimo.message_count, 0); // secondary model
     assert_eq!(
         mimo.dedup_key.as_deref(),
-        Some("hermes:session-multi:mimo-v2.5-free:opencode-zen")
+        Some("hermes:session-multi:mimo-v2.5-free:opencode-zen#0")
     );
 }
 
@@ -569,7 +570,7 @@ fn test_parse_hermes_sqlite_falls_back_to_session_totals_without_session_model_u
     assert_eq!(msg.cost, 0.34);
     // The session-totals path emits one message per session, so it keeps the
     // bare session id as the dedup key.
-    assert_eq!(msg.dedup_key.as_deref(), Some("legacy-session"));
+    assert_eq!(msg.dedup_key.as_deref(), Some("legacy-session#0"));
 }
 
 #[test]
@@ -646,7 +647,7 @@ fn test_parse_hermes_sqlite_legacy_skips_empty_sessions_and_falls_back_to_estima
     assert_eq!(msg.provider_id, "openai");
     assert_eq!(msg.cost, 1.25);
     assert_eq!(msg.message_count, 3);
-    assert_eq!(msg.dedup_key.as_deref(), Some("legacy-valid"));
+    assert_eq!(msg.dedup_key.as_deref(), Some("legacy-valid#0"));
 }
 
 /// A Hermes upgrade can create `session_model_usage` without backfilling
@@ -740,7 +741,7 @@ fn test_parse_hermes_sqlite_emits_session_totals_for_sessions_without_smu_rows()
     assert_eq!(backfilled[0].tokens.input, 1200);
     assert_eq!(
         backfilled[0].dedup_key.as_deref(),
-        Some("hermes:session-backfilled:claude-sonnet-4:anthropic")
+        Some("hermes:session-backfilled:claude-sonnet-4:anthropic#0")
     );
 
     let recovered = messages
@@ -755,7 +756,7 @@ fn test_parse_hermes_sqlite_emits_session_totals_for_sessions_without_smu_rows()
     assert_eq!(recovered.message_count, 42);
     assert_eq!(
         recovered.dedup_key.as_deref(),
-        Some("session-not-backfilled")
+        Some("session-not-backfilled#0")
     );
 }
 
@@ -885,7 +886,7 @@ fn test_parse_hermes_sqlite_falls_back_to_session_totals_when_per_model_query_ca
     assert_eq!(msg.tokens.reasoning, 10);
     assert_eq!(msg.cost, 0.34);
     assert_eq!(msg.message_count, 42);
-    assert_eq!(msg.dedup_key.as_deref(), Some("drifted-session"));
+    assert_eq!(msg.dedup_key.as_deref(), Some("drifted-session#0"));
 }
 
 /// The composite primary key lets one (session, model) span several billing
@@ -957,11 +958,11 @@ fn test_parse_hermes_sqlite_keeps_billing_providers_separate_for_same_model() {
     assert_eq!(opencode.tokens.input, 2000);
     assert_eq!(
         kilocode.dedup_key.as_deref(),
-        Some("hermes:session-split:glm-5.2:kilocode")
+        Some("hermes:session-split:glm-5.2:kilocode#0")
     );
     assert_eq!(
         opencode.dedup_key.as_deref(),
-        Some("hermes:session-split:glm-5.2:opencode-zen")
+        Some("hermes:session-split:glm-5.2:opencode-zen#0")
     );
 
     // `sessions.message_count` is a per-session total, so splitting the primary
@@ -1207,7 +1208,10 @@ fn test_parse_hermes_sqlite_separates_null_and_empty_billing_providers() {
             cache_write_tokens INTEGER NOT NULL DEFAULT 0,
             reasoning_tokens INTEGER NOT NULL DEFAULT 0,
             estimated_cost_usd REAL NOT NULL DEFAULT 0,
-            actual_cost_usd REAL NOT NULL DEFAULT 0
+            actual_cost_usd REAL NOT NULL DEFAULT 0,
+            -- Part of session_model_usage since its first release.
+            first_seen REAL,
+            last_seen REAL
         );
         INSERT INTO sessions (id, source, model, started_at, message_count)
         VALUES ('session-nullable', 'cli', 'glm-5.2', 1775008000.0, 3);
@@ -1227,4 +1231,725 @@ fn test_parse_hermes_sqlite_separates_null_and_empty_billing_providers() {
         .collect();
     assert_eq!(keys.len(), 2, "NULL and '' must not share a dedup key");
     assert_eq!(messages.iter().map(|m| m.tokens.input).sum::<i64>(), 3000);
+}
+
+// missuo/tokens#129: lifetime usage rows are spread across the assistant
+// messages in their window instead of all landing on `sessions.started_at`.
+
+/// 2026-01-01T00:00:00Z.
+const DAY0: f64 = 1_767_225_600.0;
+const DAY: f64 = 86_400.0;
+
+/// The columns of Hermes's `messages` table the parser reads, plus the
+/// compaction flags whose rows it must still count.
+fn add_messages_table(conn: &Connection) {
+    conn.execute_batch(
+        r#"
+        CREATE TABLE messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT NOT NULL REFERENCES sessions(id),
+            role TEXT NOT NULL,
+            content TEXT,
+            tool_call_id TEXT,
+            tool_calls TEXT,
+            tool_name TEXT,
+            timestamp REAL NOT NULL,
+            token_count INTEGER,
+            finish_reason TEXT,
+            active INTEGER NOT NULL DEFAULT 1,
+            compacted INTEGER NOT NULL DEFAULT 0
+        );
+        "#,
+    )
+    .unwrap();
+}
+
+fn insert_message(conn: &Connection, session_id: &str, role: &str, timestamp: f64) {
+    conn.execute(
+        "INSERT INTO messages (session_id, role, content, timestamp) VALUES (?1, ?2, 'x', ?3)",
+        params![session_id, role, timestamp],
+    )
+    .unwrap();
+}
+
+fn insert_session(conn: &Connection, id: &str, model: &str, started_at: f64, message_count: i64) {
+    conn.execute(
+        "INSERT INTO sessions (id, source, model, started_at, message_count) VALUES (?1, 'cli', ?2, ?3, ?4)",
+        params![id, model, started_at, message_count],
+    )
+    .unwrap();
+}
+
+#[allow(clippy::too_many_arguments)]
+fn insert_usage(
+    conn: &Connection,
+    session_id: &str,
+    model: &str,
+    input: i64,
+    output: i64,
+    cost: f64,
+    first_seen: Option<f64>,
+    last_seen: Option<f64>,
+) {
+    conn.execute(
+        r#"
+        INSERT INTO session_model_usage (
+            session_id, model, billing_provider, input_tokens, output_tokens,
+            actual_cost_usd, first_seen, last_seen
+        ) VALUES (?1, ?2, 'anthropic', ?3, ?4, ?5, ?6, ?7)
+        "#,
+        params![session_id, model, input, output, cost, first_seen, last_seen],
+    )
+    .unwrap();
+}
+
+fn ms(seconds: f64) -> i64 {
+    (seconds * 1000.0) as i64
+}
+
+fn usage_totals<'a>(
+    messages: impl IntoIterator<Item = &'a UnifiedMessage>,
+) -> (TokenBreakdown, f64, i32) {
+    messages.into_iter().fold(
+        (TokenBreakdown::default(), 0.0, 0),
+        |(mut tokens, cost, count), msg| {
+            tokens += &msg.tokens;
+            (tokens, cost + msg.cost, count + msg.message_count)
+        },
+    )
+}
+
+#[test]
+fn test_parse_hermes_sqlite_spreads_usage_across_assistant_messages_in_window() {
+    let dir = TempDir::new().unwrap();
+    let db_path = create_test_db(&dir);
+    let conn = Connection::open(&db_path).unwrap();
+    add_messages_table(&conn);
+
+    let start = DAY0 + 3_600.0;
+    insert_session(&conn, "long", "claude-sonnet-4", start, 12);
+    conn.execute(
+        r#"
+        INSERT INTO session_model_usage (
+            session_id, model, billing_provider, input_tokens, output_tokens,
+            cache_read_tokens, reasoning_tokens, actual_cost_usd, first_seen, last_seen
+        ) VALUES ('long', 'claude-sonnet-4', 'anthropic', 1000, 101, 7, 3, 1.0, ?1, ?2)
+        "#,
+        params![start + 10.0, DAY0 + 2.0 * DAY + 100.0],
+    )
+    .unwrap();
+
+    let in_window = [
+        start + 20.0,
+        start + 40.0,
+        DAY0 + DAY + 50.0,
+        DAY0 + 2.0 * DAY + 10.0,
+        DAY0 + 2.0 * DAY + 20.0,
+        DAY0 + 2.0 * DAY + 30.0,
+    ];
+    for ts in in_window {
+        insert_message(&conn, "long", "assistant", ts);
+    }
+    // Not usage signals: user turns, a message carried in before usage began,
+    // and one written after the last recorded usage.
+    insert_message(&conn, "long", "user", start + 5.0);
+    insert_message(&conn, "long", "assistant", start + 1.0);
+    insert_message(&conn, "long", "assistant", DAY0 + 2.0 * DAY + 500.0);
+    // A compaction clone keeps the original timestamp; it is one API call.
+    conn.execute(
+        "INSERT INTO messages (session_id, role, content, timestamp, active, compacted)
+         VALUES ('long', 'assistant', 'x', ?1, 0, 1)",
+        params![DAY0 + DAY + 50.0],
+    )
+    .unwrap();
+
+    let mut messages = parse_hermes_sqlite(&db_path);
+    messages.sort_by_key(|m| m.timestamp);
+
+    let timestamps: Vec<i64> = messages.iter().map(|m| m.timestamp).collect();
+    assert_eq!(timestamps, in_window.map(ms).to_vec());
+
+    // Cumulative floors keep every bucket exact.
+    let inputs: Vec<i64> = messages.iter().map(|m| m.tokens.input).collect();
+    assert_eq!(inputs, vec![166, 167, 167, 166, 167, 167]);
+    assert_eq!(messages.iter().map(|m| m.tokens.output).sum::<i64>(), 101);
+    assert_eq!(messages.iter().map(|m| m.tokens.cache_read).sum::<i64>(), 7);
+    assert_eq!(messages.iter().map(|m| m.tokens.reasoning).sum::<i64>(), 3);
+    let cost: f64 = messages.iter().map(|m| m.cost).sum();
+    assert!(
+        (cost - 1.0).abs() < 1e-12,
+        "cost should sum to 1.0, got {cost}"
+    );
+
+    // The start day no longer carries the whole session.
+    let day_of = |m: &&tokens_core::UnifiedMessage| ((m.timestamp / 1000) as f64 - DAY0) / DAY;
+    let input_on = |day: f64| -> i64 {
+        messages
+            .iter()
+            .filter(|m| day_of(m).floor() == day)
+            .map(|m| m.tokens.input)
+            .sum()
+    };
+    assert_eq!(
+        (input_on(0.0), input_on(1.0), input_on(2.0)),
+        (333, 167, 500)
+    );
+
+    // sessions.message_count stays on one piece.
+    let counts: Vec<i32> = messages.iter().map(|m| m.message_count).collect();
+    assert_eq!(counts, vec![12, 0, 0, 0, 0, 0]);
+
+    let keys: HashSet<String> = messages
+        .iter()
+        .filter_map(|m| m.dedup_key.clone())
+        .collect();
+    assert_eq!(keys.len(), 6);
+    assert!(keys.contains("hermes:long:claude-sonnet-4:anthropic#5"));
+}
+
+#[test]
+fn test_parse_hermes_sqlite_spreads_each_model_over_its_own_window() {
+    let dir = TempDir::new().unwrap();
+    let db_path = create_test_db(&dir);
+    let conn = Connection::open(&db_path).unwrap();
+    add_messages_table(&conn);
+
+    insert_session(&conn, "switch", "claude-sonnet-4", DAY0, 4);
+    insert_usage(
+        &conn,
+        "switch",
+        "claude-sonnet-4",
+        400,
+        40,
+        0.4,
+        Some(DAY0),
+        Some(DAY0 + 200.0),
+    );
+    insert_usage(
+        &conn,
+        "switch",
+        "glm-5.2",
+        900,
+        90,
+        0.0,
+        Some(DAY0 + DAY),
+        Some(DAY0 + DAY + 200.0),
+    );
+    for ts in [
+        DAY0 + 100.0,
+        DAY0 + 150.0,
+        DAY0 + DAY + 100.0,
+        DAY0 + DAY + 150.0,
+        DAY0 + DAY + 190.0,
+    ] {
+        insert_message(&conn, "switch", "assistant", ts);
+    }
+
+    let messages = parse_hermes_sqlite(&db_path);
+    let times_for = |model: &str| -> Vec<i64> {
+        let mut times: Vec<i64> = messages
+            .iter()
+            .filter(|m| m.model_id == model)
+            .map(|m| m.timestamp)
+            .collect();
+        times.sort();
+        times
+    };
+    assert_eq!(
+        times_for("claude-sonnet-4"),
+        vec![ms(DAY0 + 100.0), ms(DAY0 + 150.0)]
+    );
+    assert_eq!(
+        times_for("glm-5.2"),
+        vec![
+            ms(DAY0 + DAY + 100.0),
+            ms(DAY0 + DAY + 150.0),
+            ms(DAY0 + DAY + 190.0)
+        ]
+    );
+    let glm_input: i64 = messages
+        .iter()
+        .filter(|m| m.model_id == "glm-5.2")
+        .map(|m| m.tokens.input)
+        .sum();
+    assert_eq!(glm_input, 900);
+    assert_eq!(messages.iter().map(|m| m.message_count).sum::<i32>(), 4);
+}
+
+#[test]
+fn test_parse_hermes_sqlite_excludes_ambiguous_model_times_on_a_b_a_switch() {
+    let dir = TempDir::new().unwrap();
+    let db_path = create_test_db(&dir);
+    let conn = Connection::open(&db_path).unwrap();
+    add_messages_table(&conn);
+
+    let a_first = DAY0 + 20.0;
+    let a_last = DAY0 + 2.0 * DAY + 20.0;
+    let b_start = DAY0 + DAY + 10.0;
+    let b_end = DAY0 + DAY + 100.0;
+    insert_session(&conn, "switch-back", "claude-sonnet-4", DAY0, 7);
+    insert_usage(
+        &conn,
+        "switch-back",
+        "claude-sonnet-4",
+        401,
+        41,
+        0.4,
+        Some(DAY0),
+        Some(a_last),
+    );
+    insert_usage(
+        &conn,
+        "switch-back",
+        "glm-5.2",
+        903,
+        93,
+        0.9,
+        Some(b_start),
+        Some(b_end),
+    );
+    conn.execute(
+        "UPDATE session_model_usage
+         SET cache_read_tokens = 7, cache_write_tokens = 5, reasoning_tokens = 3",
+        [],
+    )
+    .unwrap();
+    for ts in [a_first, b_start + 10.0, b_end, a_last] {
+        insert_message(&conn, "switch-back", "assistant", ts);
+    }
+
+    let mut messages = parse_hermes_sqlite(&db_path);
+    messages.sort_by_key(|m| m.timestamp);
+    let pieces: Vec<_> = messages
+        .iter()
+        .map(|m| (m.model_id.as_str(), m.timestamp, m.tokens.input))
+        .collect();
+    // Neither model can claim the two overlapping times. B's whole usage
+    // falls back to first_seen; A uses the exclusive times on either side.
+    assert_eq!(
+        pieces,
+        [
+            ("claude-sonnet-4", ms(a_first), 200),
+            ("glm-5.2", ms(b_start), 903),
+            ("claude-sonnet-4", ms(a_last), 201),
+        ]
+    );
+
+    for (model, input, output, expected_cost, expected_count) in
+        [("claude-sonnet-4", 401, 41, 0.4, 7), ("glm-5.2", 903, 93, 0.9, 0)]
+    {
+        let (tokens, cost, count) = usage_totals(messages.iter().filter(|m| m.model_id == model));
+        assert_eq!(
+            tokens,
+            TokenBreakdown {
+                input,
+                output,
+                cache_read: 7,
+                cache_write: 5,
+                reasoning: 3,
+            }
+        );
+        assert!((cost - expected_cost).abs() < 1e-12);
+        assert_eq!(count, expected_count);
+    }
+}
+
+#[test]
+fn test_parse_hermes_sqlite_keeps_rows_without_window_messages_whole() {
+    let dir = TempDir::new().unwrap();
+    let db_path = create_test_db(&dir);
+    let conn = Connection::open(&db_path).unwrap();
+    add_messages_table(&conn);
+
+    // Messages exist, but none inside this row's window: it stays whole at
+    // the time its usage was first recorded, not at the session start.
+    insert_session(&conn, "aux", "claude-sonnet-4", DAY0, 3);
+    insert_usage(
+        &conn,
+        "aux",
+        "claude-sonnet-4",
+        500,
+        50,
+        0.5,
+        Some(DAY0 + DAY),
+        Some(DAY0 + DAY + 5.0),
+    );
+    insert_message(&conn, "aux", "assistant", DAY0 + 10.0);
+    // No window and no messages at all: the session start is all there is.
+    insert_session(&conn, "bare", "claude-sonnet-4", DAY0 + 7.0, 1);
+    insert_usage(&conn, "bare", "claude-sonnet-4", 10, 1, 0.0, None, None);
+
+    let messages = parse_hermes_sqlite(&db_path);
+    assert_eq!(messages.len(), 2);
+    let aux = messages.iter().find(|m| m.session_id == "aux").unwrap();
+    assert_eq!(aux.timestamp, ms(DAY0 + DAY));
+    assert_eq!((aux.tokens.input, aux.message_count), (500, 3));
+    let bare = messages.iter().find(|m| m.session_id == "bare").unwrap();
+    assert_eq!(bare.timestamp, ms(DAY0 + 7.0));
+}
+
+#[test]
+fn test_parse_hermes_sqlite_preserves_unknown_bounds_when_grouping_task_rows() {
+    let dir = TempDir::new().unwrap();
+    let db_path = create_test_db(&dir);
+    let conn = Connection::open(&db_path).unwrap();
+    add_messages_table(&conn);
+
+    let early = DAY0 + 20.0;
+    let middle = DAY0 + DAY + 20.0;
+    let late = DAY0 + 2.0 * DAY + 20.0;
+    let cases = [
+        ("unknown-first", None, Some(middle), [early, middle]),
+        ("unknown-last", Some(middle), None, [middle, late]),
+    ];
+    for (session, first_seen, last_seen, _) in cases {
+        insert_session(&conn, session, "claude-sonnet-4", DAY0, 3);
+        insert_usage(
+            &conn,
+            session,
+            "claude-sonnet-4",
+            200,
+            40,
+            0.5,
+            Some(middle),
+            Some(middle),
+        );
+        conn.execute(
+            "INSERT INTO session_model_usage (
+                session_id, model, billing_provider, task, input_tokens, output_tokens,
+                actual_cost_usd, first_seen, last_seen
+            ) VALUES (?1, 'claude-sonnet-4', 'anthropic', 'aux', 100, 20, 0.25, ?2, ?3)",
+            params![session, first_seen, last_seen],
+        )
+        .unwrap();
+        for ts in [DAY0 - 5.0, early, middle, late] {
+            insert_message(&conn, session, "assistant", ts);
+        }
+    }
+
+    let messages = parse_hermes_sqlite(&db_path);
+    assert_eq!(messages.len(), 4);
+    for (session, _, _, expected) in cases {
+        let pieces: Vec<_> = messages
+            .iter()
+            .filter(|m| m.session_id == session)
+            .map(|m| (m.timestamp, m.tokens.input, m.tokens.output, m.cost, m.message_count))
+            .collect();
+        assert_eq!(
+            pieces,
+            [
+                (ms(expected[0]), 150, 30, 0.375, 3),
+                (ms(expected[1]), 150, 30, 0.375, 0),
+            ]
+        );
+    }
+}
+
+#[test]
+fn test_parse_hermes_sqlite_drops_empty_pieces_but_keeps_the_count() {
+    let dir = TempDir::new().unwrap();
+    let db_path = create_test_db(&dir);
+    let conn = Connection::open(&db_path).unwrap();
+    add_messages_table(&conn);
+
+    insert_session(&conn, "tiny", "claude-sonnet-4", DAY0, 9);
+    insert_usage(
+        &conn,
+        "tiny",
+        "claude-sonnet-4",
+        2,
+        0,
+        0.0,
+        Some(DAY0),
+        Some(DAY0 + 100.0),
+    );
+    for i in 1..=5 {
+        insert_message(&conn, "tiny", "assistant", DAY0 + f64::from(i));
+    }
+
+    let mut messages = parse_hermes_sqlite(&db_path);
+    messages.sort_by_key(|m| m.timestamp);
+    // Shares 0, 0, 1, 0, 1: the first piece survives for its message count,
+    // the other zero pieces carry nothing and are dropped.
+    let pieces: Vec<(i64, i64, i32)> = messages
+        .iter()
+        .map(|m| (m.timestamp, m.tokens.input, m.message_count))
+        .collect();
+    assert_eq!(
+        pieces,
+        vec![
+            (ms(DAY0 + 1.0), 0, 9),
+            (ms(DAY0 + 3.0), 1, 0),
+            (ms(DAY0 + 5.0), 1, 0),
+        ]
+    );
+}
+
+#[test]
+fn test_parse_hermes_sqlite_spreads_session_totals_from_their_start() {
+    let dir = TempDir::new().unwrap();
+    let db_path = create_legacy_test_db(&dir);
+    let conn = Connection::open(&db_path).unwrap();
+    add_messages_table(&conn);
+
+    conn.execute(
+        r#"
+        INSERT INTO sessions (
+            id, source, model, started_at, message_count, input_tokens, output_tokens,
+            billing_provider, actual_cost_usd
+        ) VALUES ('legacy-long', 'cli', 'claude-sonnet-4', ?1, 6, 300, 30, 'anthropic', 0.3)
+        "#,
+        params![DAY0 + 100.0],
+    )
+    .unwrap();
+    // A parent message carried into a rotated session keeps its older time.
+    insert_message(&conn, "legacy-long", "assistant", DAY0);
+    for ts in [DAY0 + 200.0, DAY0 + DAY + 200.0, DAY0 + 3.0 * DAY] {
+        insert_message(&conn, "legacy-long", "assistant", ts);
+    }
+
+    let mut messages = parse_hermes_sqlite(&db_path);
+    messages.sort_by_key(|m| m.timestamp);
+    let pieces: Vec<(i64, i64)> = messages
+        .iter()
+        .map(|m| (m.timestamp, m.tokens.input))
+        .collect();
+    assert_eq!(
+        pieces,
+        vec![
+            (ms(DAY0 + 200.0), 100),
+            (ms(DAY0 + DAY + 200.0), 100),
+            (ms(DAY0 + 3.0 * DAY), 100),
+        ]
+    );
+    assert_eq!(messages[0].dedup_key.as_deref(), Some("legacy-long#0"));
+}
+
+#[test]
+fn test_parse_hermes_databases_excludes_cross_database_model_overlaps_in_either_order() {
+    let a_dir = TempDir::new().unwrap();
+    let b_dir = TempDir::new().unwrap();
+    let a_db = create_test_db(&a_dir);
+    let b_db = create_test_db(&b_dir);
+    let a_first = DAY0 + 20.0;
+    let a_last = DAY0 + 2.0 * DAY + 20.0;
+    let b_start = DAY0 + DAY + 10.0;
+    let b_end = DAY0 + DAY + 100.0;
+
+    let conn = Connection::open(&a_db).unwrap();
+    add_messages_table(&conn);
+    insert_session(&conn, "switch-back", "claude-sonnet-4", DAY0, 7);
+    insert_usage(
+        &conn,
+        "switch-back",
+        "claude-sonnet-4",
+        401,
+        41,
+        0.4,
+        Some(DAY0),
+        Some(a_last),
+    );
+    for ts in [a_first, b_start + 10.0, a_last] {
+        insert_message(&conn, "switch-back", "assistant", ts);
+    }
+    drop(conn);
+
+    let conn = Connection::open(&b_db).unwrap();
+    add_messages_table(&conn);
+    insert_session(&conn, "switch-back", "glm-5.2", DAY0, 9);
+    insert_usage(
+        &conn,
+        "switch-back",
+        "glm-5.2",
+        903,
+        93,
+        0.9,
+        Some(b_start),
+        Some(b_end),
+    );
+    // Only A's window covers this first timestamp, but it is in B's database.
+    for ts in [a_first + 25.0, b_end] {
+        insert_message(&conn, "switch-back", "assistant", ts);
+    }
+    drop(conn);
+
+    for (paths, a_count, b_count) in [([&a_db, &b_db], 7, 0), ([&b_db, &a_db], 0, 9)] {
+        let mut messages = parse_hermes_databases(&paths);
+        messages.sort_by_key(|m| m.timestamp);
+        let pieces: Vec<_> = messages
+            .iter()
+            .map(|m| (m.model_id.as_str(), m.timestamp, m.tokens.input, m.message_count))
+            .collect();
+        assert_eq!(
+            pieces,
+            [
+                ("claude-sonnet-4", ms(a_first), 200, a_count),
+                ("glm-5.2", ms(b_start), 903, b_count),
+                ("claude-sonnet-4", ms(a_last), 201, 0),
+            ]
+        );
+    }
+}
+
+#[test]
+fn test_parse_hermes_databases_dedups_rows_before_spreading() {
+    let dir = TempDir::new().unwrap();
+    let first_dir = dir.path().join("first");
+    let second_dir = dir.path().join("second");
+    std::fs::create_dir_all(&first_dir).unwrap();
+    std::fs::create_dir_all(&second_dir).unwrap();
+    let first = TempDir::new_in(&first_dir).unwrap();
+    let second = TempDir::new_in(&second_dir).unwrap();
+
+    // The first copy of the session has no messages and stays one piece.
+    let first_db = create_test_db(&first);
+    let conn = Connection::open(&first_db).unwrap();
+    insert_session(&conn, "shared", "claude-sonnet-4", DAY0, 2);
+    insert_usage(
+        &conn,
+        "shared",
+        "claude-sonnet-4",
+        100,
+        10,
+        0.1,
+        Some(DAY0),
+        Some(DAY0 + DAY),
+    );
+    drop(conn);
+
+    // The second copy would spread the same row over three messages; none of
+    // its pieces may be added on top of the first copy's row.
+    // Its wider window must not make the accepted GLM row's time ambiguous.
+    let second_db = create_test_db(&second);
+    let conn = Connection::open(&second_db).unwrap();
+    add_messages_table(&conn);
+    insert_session(&conn, "shared", "glm-5.2", DAY0, 9);
+    insert_usage(
+        &conn,
+        "shared",
+        "claude-sonnet-4",
+        999,
+        99,
+        9.9,
+        Some(DAY0),
+        Some(DAY0 + 3.0 * DAY),
+    );
+    // A distinct model row in the later copy must still contribute usage, but
+    // not its copy of sessions.message_count even when it is the primary model.
+    insert_usage(
+        &conn,
+        "shared",
+        "glm-5.2",
+        200,
+        20,
+        0.2,
+        Some(DAY0 + 2.0 * DAY),
+        Some(DAY0 + 3.0 * DAY),
+    );
+    insert_session(&conn, "only-second", "claude-sonnet-4", DAY0, 1);
+    insert_usage(
+        &conn,
+        "only-second",
+        "claude-sonnet-4",
+        50,
+        5,
+        0.0,
+        Some(DAY0),
+        Some(DAY0 + DAY),
+    );
+    let glm_time = DAY0 + 2.0 * DAY + 10.0;
+    for ts in [DAY0 + 1.0, DAY0 + 2.0, DAY0 + 3.0, glm_time] {
+        insert_message(&conn, "shared", "assistant", ts);
+    }
+    drop(conn);
+
+    let messages = parse_hermes_databases(&[first_db, second_db]);
+    let shared: Vec<_> = messages
+        .iter()
+        .filter(|m| m.session_id == "shared")
+        .collect();
+    assert_eq!(shared.len(), 2);
+    assert_eq!(shared[0].model_id, "claude-sonnet-4");
+    assert_eq!(shared[0].timestamp, ms(DAY0));
+    assert_eq!(shared[0].tokens.input, 100);
+    assert_eq!(shared[0].message_count, 2);
+    assert_eq!(shared[1].model_id, "glm-5.2");
+    assert_eq!(shared[1].timestamp, ms(glm_time));
+    assert_eq!(shared[1].tokens.input, 200);
+    assert_eq!(shared[1].message_count, 0);
+    assert!(messages.iter().any(|m| m.session_id == "only-second"));
+}
+
+#[test]
+fn test_parse_hermes_databases_prefers_per_model_usage_over_session_totals_in_either_order() {
+    let dir = TempDir::new().unwrap();
+    let legacy_db = create_legacy_test_db(&dir);
+    let legacy = Connection::open(&legacy_db).unwrap();
+    legacy
+        .execute(
+            r#"
+            INSERT INTO sessions (
+                id, source, model, started_at, message_count, input_tokens, output_tokens,
+                billing_provider, actual_cost_usd
+            ) VALUES ('shared', 'cli', 'claude-sonnet-4', ?1, 99, 999, 99, 'anthropic', 9.0),
+                     ('legacy-only', 'cli', 'claude-sonnet-4', ?1, 3, 25, 6, 'anthropic', 0.125)
+            "#,
+            params![DAY0],
+        )
+        .unwrap();
+    add_messages_table(&legacy);
+    insert_message(&legacy, "shared", "assistant", DAY0 + 10.0);
+    drop(legacy);
+
+    let model_db = create_test_db(&dir);
+    let modern = Connection::open(&model_db).unwrap();
+    add_messages_table(&modern);
+    insert_session(&modern, "shared", "claude-sonnet-4", DAY0, 5);
+    let a = DAY0 + DAY + 20.0;
+    let b = DAY0 + 2.0 * DAY + 20.0;
+    for (model, time, input, output, cost) in [
+        ("claude-sonnet-4", a, 101, 17, 0.25),
+        ("glm-5.2", b, 49, 8, 0.5),
+    ] {
+        insert_usage(
+            &modern,
+            "shared",
+            model,
+            input,
+            output,
+            cost,
+            Some(time - 10.0),
+            Some(time + 10.0),
+        );
+        insert_message(&modern, "shared", "assistant", time);
+    }
+    drop(modern);
+
+    for paths in [[&legacy_db, &model_db], [&model_db, &legacy_db]] {
+        let mut messages = parse_hermes_databases(&paths);
+        messages.sort_by_key(|m| m.timestamp);
+        let pieces: Vec<_> = messages
+            .iter()
+            .map(|m| (m.session_id.as_str(), m.model_id.as_str(), m.timestamp))
+            .collect();
+        assert_eq!(
+            pieces,
+            [
+                ("legacy-only", "claude-sonnet-4", ms(DAY0)),
+                ("shared", "claude-sonnet-4", ms(a)),
+                ("shared", "glm-5.2", ms(b)),
+            ]
+        );
+        let (tokens, cost, count) = usage_totals(&messages);
+        assert_eq!(
+            tokens,
+            TokenBreakdown {
+                input: 175,
+                output: 31,
+                ..Default::default()
+            }
+        );
+        assert_eq!(cost, 0.875);
+        assert_eq!(count, 8);
+    }
 }

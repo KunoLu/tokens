@@ -2,10 +2,11 @@
 //!
 //! The Antigravity CLI (the terminal agent, distinct from the Antigravity IDE)
 //! stores each conversation as a SQLite database under
-//! `~/.gemini/antigravity-cli/conversations/<uuid>.db`. Unlike the IDE-backed
-//! [`super::antigravity`] source — which depends on a *running* language server
-//! reachable over RPC and caches JSONL under the config dir — the CLI usage is
-//! already on disk and can be read directly. No RPC, no `antigravity sync`.
+//! `~/.gemini/antigravity-cli/conversations/<uuid>.db`, already on disk and read
+//! directly. No RPC, no `antigravity sync`. Current Antigravity desktop builds
+//! write the same schema; [`super::antigravity`] reuses
+//! [`scan_antigravity_conversation_db`], with the RPC-synced JSONL cache
+//! available for older builds and missing local data.
 //!
 //! Each `gen_metadata` row is one generation encoded as the same
 //! `GeneratorMetadata` protobuf the IDE returns over
@@ -68,15 +69,40 @@ use std::ops::RangeInclusive;
 use std::path::Path;
 
 pub fn parse_antigravity_cli_file(path: &Path) -> Vec<UnifiedMessage> {
+    parse_antigravity_conversation_db(path, "antigravity-cli")
+}
+
+/// Parse one Antigravity conversation database and attribute its rows to
+/// `client`.
+///
+/// The CLI (`antigravity-cli`), T3 Code's ACP profiles, and current
+/// Antigravity / Antigravity - Insiders desktop builds (`antigravity`, under
+/// `~/.gemini/antigravity{,-insiders}/conversations/`) all write the same
+/// `gen_metadata` schema, so the decoding is shared and only the client label
+/// differs.
+pub fn parse_antigravity_conversation_db(path: &Path, client: &'static str) -> Vec<UnifiedMessage> {
+    let mut messages = Vec::new();
+    scan_antigravity_conversation_db(path, client, &mut |message, _, _| messages.push(message));
+    messages
+}
+
+/// Emit readable usage even if scanning fails. Return true only if the usage
+/// query reached EOF and decoded every SQLite row. Each emitted message carries
+/// whether its time came from a generation rather than the session or mtime,
+/// plus the original SQLite generation index.
+pub(super) fn scan_antigravity_conversation_db(
+    path: &Path,
+    client: &'static str,
+    emit: &mut dyn FnMut(UnifiedMessage, bool, Option<i64>),
+) -> bool {
     let Some(conn) = open_readonly_sqlite_opt(path) else {
-        return Vec::new();
+        return false;
     };
 
     let session_id = path
         .file_stem()
         .and_then(|stem| stem.to_str())
-        .unwrap_or("unknown")
-        .to_string();
+        .unwrap_or("unknown");
 
     let meta = read_trajectory_meta(&conn, path);
     let step_timestamps = read_step_timestamps(&conn, path);
@@ -88,44 +114,50 @@ pub fn parse_antigravity_cli_file(path: &Path) -> Vec<UnifiedMessage> {
     // Quiet: a database without `gen_metadata` is not an Antigravity CLI
     // database at all, so there is nothing to warn about.
     let mut rows: Vec<(Option<i64>, Vec<u8>)> = Vec::new();
-    sqlite_for_each_row_on(
+    let mut decoded_all = true;
+    let scan = sqlite_for_each_row_on(
         &conn,
         path,
         "SELECT idx, data FROM gen_metadata ORDER BY idx",
         None,
         &mut |row| {
-            let idx = row.get::<_, Option<i64>>(0)?;
-            let data: Vec<u8> = row.get(1)?;
-            rows.push((idx, data));
+            let (idx, data) = row
+                .get::<_, Option<i64>>(0)
+                .and_then(|idx| row.get::<_, Vec<u8>>(1).map(|data| (idx, data)))
+                .inspect_err(|_| decoded_all = false)?;
+            if !is_rejected_generation(&data) {
+                rows.push((idx, data));
+            }
             Ok(())
         },
     );
     let session_models = SessionModels::from_blobs(rows.iter().map(|(_, blob)| blob.as_slice()));
     let ctx = GenContext {
-        session_id: &session_id,
+        client,
+        session_id,
         session_timestamp: meta.fallback_ms,
         session_anchor: meta.created_ms,
         session_models: &session_models,
         step_timestamps: &step_timestamps,
     };
 
-    let mut messages = Vec::new();
-    let mut seen_response_ids: HashSet<String> = HashSet::new();
+    let mut seen_response_ids = HashSet::new();
     for (gen_idx, blob) in &rows {
         // `fallback_ms` is the per-row timestamp fallback; each row prefers its
         // own per-generation wall-clock stamp (see `parse_gen_metadata`).
         // `created_ms` travels separately because only a genuinely decoded
         // session created-at may anchor the inferred 1.1.18 reading.
-        if let Some(mut message) = parse_gen_metadata(blob, &ctx, &mut seen_response_ids, *gen_idx)
+        if let Some((mut message, has_turn_timestamp)) =
+            parse_gen_metadata(blob, &ctx, &mut seen_response_ids, *gen_idx)
         {
             if meta.workspace_key.is_some() {
                 message.set_workspace(meta.workspace_key.clone(), meta.workspace_label.clone());
             }
-            messages.push(message);
+            emit(message, has_turn_timestamp, *gen_idx);
         }
     }
 
-    messages
+    scan.completed() && decoded_all
 }
 
 /// Model attribution recovered from the conversation as a whole, for rows whose
@@ -152,9 +184,9 @@ struct SessionModels {
     /// `gemini-pro-default` / `gemini-pro-agent`) are not ambiguous, and the
     /// first id observed is kept.
     by_display: HashMap<String, String>,
-    /// The file's only `#19` value — set only when every row carrying one
-    /// agrees *and* every label in the file was identified by some row. Serves
-    /// rows that have neither `#19` nor `#21`.
+    /// The only `#19` value among non-rejected rows, set only when they all
+    /// agree and every display label is identified. Serves rows that have
+    /// neither `#19` nor `#21`.
     sole_model: Option<String>,
 }
 
@@ -278,6 +310,7 @@ fn display_label_to_model_id(label: &str) -> Option<&'static str> {
 }
 
 struct GenContext<'a> {
+    client: &'static str,
     session_id: &'a str,
     session_timestamp: i64,
     session_anchor: Option<i64>,
@@ -285,12 +318,29 @@ struct GenContext<'a> {
     step_timestamps: &'a StepTimestamps,
 }
 
-fn parse_gen_metadata(
-    blob: &[u8],
+/// The backend writes an error and the locally-counted prompt even if nothing
+/// was served. Exclude such rows from usage and model inference; a partial
+/// response with a response ID, output, reasoning, or cache reads still counts.
+fn is_rejected_generation(blob: &[u8]) -> bool {
+    if non_empty_string_field(blob, 5).is_none() {
+        return false;
+    }
+    let Some(usage) = message_field(blob, 1).and_then(|chat_model| message_field(chat_model, 4))
+    else {
+        return true;
+    };
+    non_empty_string_field(usage, 11).is_none()
+        && [5, 9, 10]
+            .into_iter()
+            .all(|field| varint_field(usage, field).unwrap_or(0) == 0)
+}
+
+fn parse_gen_metadata<'a>(
+    blob: &'a [u8],
     ctx: &GenContext<'_>,
-    seen_response_ids: &mut HashSet<String>,
+    seen_response_ids: &mut HashSet<&'a str>,
     gen_idx: Option<i64>,
-) -> Option<UnifiedMessage> {
+) -> Option<(UnifiedMessage, bool)> {
     let chat_model = message_field(blob, 1)?;
     let usage = message_field(chat_model, 4)?;
 
@@ -311,30 +361,21 @@ fn parse_gen_metadata(
         return None;
     }
 
-    let dedup_key = string_field(usage, 11)
-        .filter(|text| !text.trim().is_empty())
-        .map(|text| text.to_string());
-    if let Some(key) = &dedup_key {
-        if !seen_response_ids.insert(key.clone()) {
-            return None;
-        }
+    let response_id = non_empty_string_field(usage, 11);
+    if response_id.is_some_and(|id| !seen_response_ids.insert(id)) {
+        return None;
     }
 
     // Per-generation wall-clock time for this turn:
     // 1. In pre-1.1.18 databases, `chatModel.#9.#4` carried an explicit timestamp.
     // 2. In modern agy versions (1.1.18+), `#9.#10` carries prompt cache metadata,
     //    so `generation_timestamp_ms` returns None. Look up the matching turn in `steps.metadata`
-    //    by responseId (`dedup_key`) or generation index.
+    //    by response ID or generation index.
     // 3. Falls back to `session_timestamp` when no candidate decodes.
-    let timestamp = message_field(chat_model, 9)
+    let turn_timestamp = message_field(chat_model, 9)
         .and_then(|gen| generation_timestamp_ms(gen, ctx.session_anchor))
-        .or_else(|| {
-            dedup_key
-                .as_deref()
-                .and_then(|id| ctx.step_timestamps.by_response_id.get(id).copied())
-        })
-        .or_else(|| gen_idx.and_then(|idx| ctx.step_timestamps.by_gen_idx.get(&idx).copied()))
-        .unwrap_or(ctx.session_timestamp);
+        .or_else(|| response_id.and_then(|id| ctx.step_timestamps.by_response_id.get(id).copied()))
+        .or_else(|| gen_idx.and_then(|idx| ctx.step_timestamps.by_gen_idx.get(&idx).copied()));
 
     let response_model = non_empty_string_field(chat_model, 19);
     let model_raw = response_model
@@ -356,12 +397,12 @@ fn parse_gen_metadata(
         .unwrap_or("antigravity")
         .to_string();
 
-    Some(UnifiedMessage::new_with_dedup(
-        "antigravity-cli",
+    let message = UnifiedMessage::new_with_dedup(
+        ctx.client,
         model_id,
         provider_id,
         ctx.session_id,
-        timestamp,
+        turn_timestamp.unwrap_or(ctx.session_timestamp),
         TokenBreakdown {
             input,
             output,
@@ -370,8 +411,9 @@ fn parse_gen_metadata(
             reasoning,
         },
         0.0,
-        dedup_key,
-    ))
+        response_id.map(str::to_owned),
+    );
+    Some((message, turn_timestamp.is_some()))
 }
 
 /// Session-level facts read from the single `trajectory_metadata_blob` row.
@@ -989,17 +1031,17 @@ fn non_empty_string_field(buf: &[u8], field: u64) -> Option<&str> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::*;
     use rusqlite::{params, Connection};
 
-    fn enc_varint(field: u64, value: u64) -> Vec<u8> {
+    pub(crate) fn enc_varint(field: u64, value: u64) -> Vec<u8> {
         let mut out = encode_varint(field << 3);
         out.extend(encode_varint(value));
         out
     }
 
-    fn enc_len(field: u64, payload: &[u8]) -> Vec<u8> {
+    pub(crate) fn enc_len(field: u64, payload: &[u8]) -> Vec<u8> {
         let mut out = encode_varint((field << 3) | 2);
         out.extend(encode_varint(payload.len() as u64));
         out.extend_from_slice(payload);
@@ -1037,7 +1079,7 @@ mod tests {
 
     /// One `gen_metadata` blob whose `chatModel.#9` sub-message is exactly
     /// `gen9`, so a test can drive the timestamp layout directly.
-    fn build_row_with_gen9(gen9: &[u8], response_id: &str) -> Vec<u8> {
+    pub(crate) fn build_row_with_gen9(gen9: &[u8], response_id: &str) -> Vec<u8> {
         let mut usage = Vec::new();
         usage.extend(enc_varint(2, 500)); // input
         usage.extend(enc_varint(9, 300)); // output
@@ -1065,6 +1107,7 @@ mod tests {
         let models = SessionModels::default();
         let step_timestamps = StepTimestamps::default();
         let ctx = GenContext {
+            client: "antigravity-cli",
             session_id: "s",
             session_timestamp: session_fallback,
             session_anchor: anchor,
@@ -1073,28 +1116,30 @@ mod tests {
         };
         parse_gen_metadata(&build_row_with_gen9(gen9, "resp"), &ctx, &mut seen, None)
             .expect("row parses")
+            .0
             .timestamp
     }
 
     /// Parse one row with no conversation-level attribution available, i.e. as
     /// if it were the file's only row. Rows that carry their own `#19` are
     /// unaffected by the session index, so most tests need nothing else.
-    fn parse_isolated_row(
-        blob: &[u8],
+    fn parse_isolated_row<'a>(
+        blob: &'a [u8],
         session_id: &str,
         session_timestamp: i64,
-        seen_response_ids: &mut HashSet<String>,
+        seen_response_ids: &mut HashSet<&'a str>,
     ) -> Option<UnifiedMessage> {
         let models = SessionModels::default();
         let step_timestamps = StepTimestamps::default();
         let ctx = GenContext {
+            client: "antigravity-cli",
             session_id,
             session_timestamp,
             session_anchor: Some(session_timestamp),
             session_models: &models,
             step_timestamps: &step_timestamps,
         };
-        parse_gen_metadata(blob, &ctx, seen_response_ids, None)
+        parse_gen_metadata(blob, &ctx, seen_response_ids, None).map(|(message, _)| message)
     }
 
     fn build_gen_metadata() -> Vec<u8> {
@@ -1107,7 +1152,11 @@ mod tests {
 
     /// One `gen_metadata` blob with either model field independently present or
     /// absent, mirroring the real rows where `#19` is missing but `#21` is not.
-    fn build_row(model: Option<&str>, display: Option<&str>, response_id: &str) -> Vec<u8> {
+    pub(crate) fn build_row(
+        model: Option<&str>,
+        display: Option<&str>,
+        response_id: &str,
+    ) -> Vec<u8> {
         // usage message (#4 of chatModel)
         let mut usage = Vec::new();
         usage.extend(enc_varint(1, 1132)); // fixed system prompt
@@ -1131,7 +1180,7 @@ mod tests {
     }
 
     /// Build a conversation database from `gen_metadata` blobs in row order.
-    fn write_conversation(path: &Path, blobs: &[Vec<u8>]) {
+    pub(crate) fn write_conversation(path: &Path, blobs: &[Vec<u8>]) {
         let conn = Connection::open(path).unwrap();
         conn.execute_batch("CREATE TABLE gen_metadata (idx integer, data blob, size integer);")
             .unwrap();
@@ -1156,6 +1205,121 @@ mod tests {
         blob.extend(enc_len(1, &workspace));
         blob.extend(enc_len(2, &created));
         blob
+    }
+
+    /// A `gen_metadata` row for a generation the backend rejected, laid out as
+    /// agy 1.5.14 writes it: top-level `#5` error text, and a usage message
+    /// holding only the fixed system-prompt count — no responseId, no output,
+    /// no `#19` responseModel.
+    pub(crate) fn build_failed_row(error: &str) -> Vec<u8> {
+        let usage = enc_varint(1, 1418);
+        let mut chat_model = Vec::new();
+        chat_model.extend(enc_varint(3, 1418));
+        chat_model.extend(enc_len(4, &usage));
+        chat_model.extend(enc_len(21, b"Gemini 4 Argon (Medium)"));
+        let mut blob = Vec::new();
+        blob.extend(enc_len(4, b"8620db35-3d52-4dd9-a9d1-d7f8973ab9c3"));
+        blob.extend(enc_len(5, error.as_bytes()));
+        blob.extend(enc_len(1, &chat_model));
+        blob
+    }
+
+    #[test]
+    fn rejected_generations_are_not_counted() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("rejected.db");
+        write_conversation(
+            &path,
+            &[
+                build_failed_row("PERMISSION_DENIED (code 403): This service has been disabled"),
+                build_failed_row("PERMISSION_DENIED (code 403): This service has been disabled"),
+            ],
+        );
+
+        assert!(parse_antigravity_cli_file(&path).is_empty());
+    }
+
+    #[test]
+    fn rejected_generations_are_not_model_evidence() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("rejected-model-evidence.db");
+        let mut rejected_without_usage = enc_len(1, &enc_len(19, b"gemini-3.1-pro"));
+        rejected_without_usage.extend(enc_len(5, b"PERMISSION_DENIED (code 403)"));
+        write_conversation(
+            &path,
+            &[
+                build_row(None, None, "continuation"),
+                build_failed_row("PERMISSION_DENIED (code 403)"),
+                rejected_without_usage,
+                build_row(Some("gemini-3-flash-a"), Some("Gemini 3.5 Flash (High)"), "served"),
+            ],
+        );
+
+        let messages = parse_antigravity_cli_file(&path);
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0].dedup_key.as_deref(), Some("continuation"));
+        assert_eq!(messages[0].model_id, "gemini-3.5-flash-high");
+    }
+
+    #[test]
+    fn an_error_row_that_still_produced_output_is_counted() {
+        // Same error marker, but the generation was served (responseId and
+        // output present) before failing, so its tokens are real.
+        let mut blob = build_row(Some("gemini-3-flash-a"), None, "resp-partial");
+        blob.extend(enc_len(5, b"DEADLINE_EXCEEDED"));
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("partial.db");
+        write_conversation(&path, &[blob]);
+
+        let messages = parse_antigravity_cli_file(&path);
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].tokens.output, 300);
+    }
+
+    #[test]
+    fn conversation_db_rows_carry_the_requested_client() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("cascade-1.db");
+        write_conversation(&path, &[build_gen_metadata()]);
+
+        let messages = parse_antigravity_conversation_db(&path, "antigravity");
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].client, "antigravity");
+        assert_eq!(messages[0].session_id, "cascade-1");
+    }
+
+    #[test]
+    fn rows_still_in_the_write_ahead_log_are_read() {
+        // A running agy keeps its conversation open in WAL mode, so recent
+        // turns sit in `<cascade>.db-wal` until a checkpoint copies them into
+        // the main file. The read-only scan must see them while the writer
+        // is still attached.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("live.db");
+        let writer = Connection::open(&path).unwrap();
+        writer
+            .execute_batch(
+                "PRAGMA journal_mode=WAL; PRAGMA wal_autocheckpoint=0;
+                 CREATE TABLE gen_metadata (idx integer, data blob, size integer);",
+            )
+            .unwrap();
+        for (idx, response_id) in ["resp-1", "resp-2"].into_iter().enumerate() {
+            writer
+                .execute(
+                    "INSERT INTO gen_metadata (idx, data, size) VALUES (?1, ?2, 0)",
+                    params![
+                        idx as i64,
+                        build_row(Some("gemini-3-flash-a"), None, response_id)
+                    ],
+                )
+                .unwrap();
+        }
+        let wal = dir.path().join("live.db-wal");
+        assert!(std::fs::metadata(&wal).unwrap().len() > 0);
+
+        let messages = parse_antigravity_cli_file(&path);
+        assert_eq!(messages.len(), 2);
+        drop(writer);
     }
 
     #[test]
@@ -2219,12 +2383,25 @@ mod tests {
         let path = dir.path().join("session-1118.db");
 
         let session_created_ms = 1_781_502_653_000_i64; // build_trajectory_meta
-        let two_days_ago = recent_epoch_seconds() - 2 * 24 * 60 * 60;
-        let now_ish = recent_epoch_seconds();
+        // Pinned one and three days into the session rather than read off the
+        // clock. Each row stores raw micros bytes, and for some clock values
+        // the byte-reversed mirror is also a plausible time, which the parser
+        // declines as ambiguous and dates at the session start instead. That
+        // made this test fail on roughly one run in a hundred; see
+        // `agy_1_1_18_gen9_field_10_dates_the_turn` for the same pin. Past
+        // stamps never leave the session window, which only extends forward.
+        let first_turn = 1_781_589_053_i64; // 2026-06-16
+        let second_turn = 1_781_761_853_i64; // 2026-06-18
 
         let row = |seconds: i64, id: &str| {
+            let micros = (seconds * 1_000_000) as u64;
+            assert_eq!(
+                epoch_scalar_with_unit(micros.swap_bytes()),
+                None,
+                "the fixture's mirror reading must not be a time"
+            );
             let mut gen9 = enc_varint(2, u64::MAX); // the unset sentinel
-            gen9.extend(enc_len(10, &((seconds * 1_000_000) as u64).to_le_bytes()));
+            gen9.extend(enc_len(10, &micros.to_le_bytes()));
             build_row_with_gen9(&gen9, id)
         };
 
@@ -2235,7 +2412,7 @@ mod tests {
                  CREATE TABLE trajectory_metadata_blob (id text, data blob);",
             )
             .unwrap();
-            for (idx, blob) in [row(two_days_ago, "turn-1"), row(now_ish, "turn-2")]
+            for (idx, blob) in [row(first_turn, "turn-1"), row(second_turn, "turn-2")]
                 .iter()
                 .enumerate()
             {
@@ -2254,8 +2431,8 @@ mod tests {
 
         let messages = parse_antigravity_cli_file(&path);
         assert_eq!(messages.len(), 2);
-        assert_eq!(messages[0].timestamp, two_days_ago * 1_000);
-        assert_eq!(messages[1].timestamp, now_ish * 1_000);
+        assert_eq!(messages[0].timestamp, first_turn * 1_000);
+        assert_eq!(messages[1].timestamp, second_turn * 1_000);
         assert!(
             messages.iter().all(|m| m.timestamp != session_created_ms),
             "no row may keep the session-created stamp once #9.#10 decodes"

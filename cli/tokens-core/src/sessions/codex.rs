@@ -4,10 +4,9 @@
 //! `~/.codex/archived_sessions/` (where Codex CLI moves older sessions). Both
 //! directories share an identical JSONL schema, so a single parser handles
 //! both; the scan-root wiring that discovers `archived_sessions` lives in
-//! `crate::scanner`. Session identity for dedup is derived from in-file
-//! `session_meta` content (not the file path), so a session that happens to
-//! be present in both directories at once is still counted only once — see
-//! `codex_token_count_dedup_key`.
+//! `crate::scanner`. In-file `session_meta` or a standard rollout filename
+//! identifies copies of the same thread. A matching basename alone does not
+//! identify an otherwise anonymous rollout.
 //! Note: This parser has stateful logic to track model and delta calculations.
 
 use super::utils::{
@@ -20,7 +19,9 @@ use crate::speed::InferenceSpeed;
 use crate::TokenBreakdown;
 use serde::Deserialize;
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use std::borrow::Cow;
+use std::cell::OnceCell;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::Path;
 
@@ -132,8 +133,48 @@ pub struct CodexTokenUsage {
     pub output_tokens: Option<i64>,
     pub cached_input_tokens: Option<i64>,
     pub cache_read_input_tokens: Option<i64>,
+    #[serde(default, deserialize_with = "deserialize_lenient_i64")]
+    pub cache_write_input_tokens: Option<i64>,
+    #[serde(default, deserialize_with = "deserialize_lenient_i64")]
+    pub cache_creation_input_tokens: Option<i64>,
     pub reasoning_output_tokens: Option<i64>,
     pub total_tokens: Option<i64>,
+}
+
+impl CodexTokenUsage {
+    fn has_breakdown_counters(&self) -> bool {
+        matches!(self.input_tokens, Some(0..))
+            || matches!(self.output_tokens, Some(0..))
+            || matches!(self.cached_input_tokens, Some(0..))
+            || matches!(self.cache_read_input_tokens, Some(0..))
+            || matches!(self.cache_write_input_tokens, Some(0..))
+            || matches!(self.cache_creation_input_tokens, Some(0..))
+            || matches!(self.reasoning_output_tokens, Some(0..))
+    }
+
+    fn has_counters(&self) -> bool {
+        self.has_breakdown_counters() || reported_total_tokens(self).is_some()
+    }
+
+    fn is_explicit_zero(&self) -> bool {
+        // A subset counter cannot prove zero usage. No reported counter may
+        // contradict the aggregate or the pair of primary zero counters.
+        (self.total_tokens == Some(0)
+            || (self.input_tokens == Some(0) && self.output_tokens == Some(0)))
+            && [
+                self.input_tokens,
+                self.output_tokens,
+                self.cached_input_tokens,
+                self.cache_read_input_tokens,
+                self.cache_write_input_tokens,
+                self.cache_creation_input_tokens,
+                self.reasoning_output_tokens,
+                self.total_tokens,
+            ]
+            .into_iter()
+            .flatten()
+            .all(|counter| counter == 0)
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -141,19 +182,49 @@ pub(crate) struct CodexTotals {
     input: i64,
     output: i64,
     cached: i64,
+    cache_write: i64,
     reasoning: i64,
 }
 
 impl CodexTotals {
-    fn from_usage(usage: &CodexTokenUsage) -> Self {
+    pub(crate) fn from_usage(usage: &CodexTokenUsage) -> Self {
+        let input = usage.input_tokens.unwrap_or(0).max(0);
+        let output = usage.output_tokens.unwrap_or(0).max(0);
+        let cached = usage
+            .cached_input_tokens
+            .unwrap_or(0)
+            .max(usage.cache_read_input_tokens.unwrap_or(0))
+            .max(0);
+        let cache_write = usage
+            .cache_write_input_tokens
+            .unwrap_or(0)
+            .max(usage.cache_creation_input_tokens.unwrap_or(0))
+            .max(0);
+
+        // Codex's cache counts are subsets of input. TRAE's creation counter
+        // can also appear with disjoint input, so normalize to inclusive
+        // input before comparing or subtracting cumulative snapshots.
+        let input = if usage.cache_creation_input_tokens.is_some() {
+            let all_cache = cached.saturating_add(cache_write);
+            let extra = input
+                .checked_add(output)
+                .zip(usage.total_tokens)
+                .and_then(|(base, total)| total.checked_sub(base));
+            let disjoint = match extra {
+                Some(0) => 0,
+                Some(extra) if extra == all_cache || extra == cache_write => extra,
+                _ if usage.cached_input_tokens.is_none() => all_cache,
+                _ => 0,
+            };
+            input.saturating_add(disjoint)
+        } else {
+            input
+        };
         Self {
-            input: usage.input_tokens.unwrap_or(0).max(0),
-            output: usage.output_tokens.unwrap_or(0).max(0),
-            cached: usage
-                .cached_input_tokens
-                .unwrap_or(0)
-                .max(usage.cache_read_input_tokens.unwrap_or(0))
-                .max(0),
+            input,
+            output,
+            cached,
+            cache_write,
             reasoning: usage.reasoning_output_tokens.unwrap_or(0).max(0),
         }
     }
@@ -162,6 +233,7 @@ impl CodexTotals {
         if self.input < previous.input
             || self.output < previous.output
             || self.cached < previous.cached
+            || self.cache_write < previous.cache_write
             || self.reasoning < previous.reasoning
         {
             return None;
@@ -171,6 +243,7 @@ impl CodexTotals {
             input: self.input - previous.input,
             output: self.output - previous.output,
             cached: self.cached - previous.cached,
+            cache_write: self.cache_write - previous.cache_write,
             reasoning: self.reasoning - previous.reasoning,
         })
     }
@@ -180,6 +253,7 @@ impl CodexTotals {
             input: self.input.saturating_add(other.input),
             output: self.output.saturating_add(other.output),
             cached: self.cached.saturating_add(other.cached),
+            cache_write: self.cache_write.saturating_add(other.cache_write),
             reasoning: self.reasoning.saturating_add(other.reasoning),
         }
     }
@@ -188,6 +262,7 @@ impl CodexTotals {
         self.input
             .saturating_add(self.output)
             .saturating_add(self.cached)
+            .saturating_add(self.cache_write)
             .saturating_add(self.reasoning)
     }
 
@@ -195,6 +270,7 @@ impl CodexTotals {
         self.input <= baseline.input
             && self.output <= baseline.output
             && self.cached <= baseline.cached
+            && self.cache_write <= baseline.cache_write
             && self.reasoning <= baseline.reasoning
     }
 
@@ -215,10 +291,12 @@ impl CodexTotals {
             || current_total.saturating_add(last_total.saturating_mul(2)) >= previous_total
     }
 
-    fn into_tokens(self) -> TokenBreakdown {
+    pub(crate) fn into_tokens(self) -> TokenBreakdown {
         // Clamp cached to not exceed input to prevent inflated totals when
         // malformed data reports more cached tokens than input tokens.
         let clamped_cached = self.cached.min(self.input).max(0);
+        let uncached_input = (self.input - clamped_cached).max(0);
+        let clamped_write = self.cache_write.clamp(0, uncached_input);
         // `reasoning_output_tokens` is a SUBSET of `output_tokens`, not a
         // sibling of it: every Codex snapshot satisfies
         // `total_tokens == input_tokens + output_tokens`, with the reasoning
@@ -234,10 +312,10 @@ impl CodexTotals {
         // `candidatesTokenCount`) must keep feeding it unmodified.
         let clamped_reasoning = self.reasoning.max(0).min(self.output.max(0));
         TokenBreakdown {
-            input: (self.input - clamped_cached).max(0),
+            input: uncached_input - clamped_write,
             output: (self.output.max(0) - clamped_reasoning).max(0),
             cache_read: clamped_cached,
-            cache_write: 0,
+            cache_write: clamped_write,
             reasoning: clamped_reasoning,
         }
     }
@@ -432,6 +510,10 @@ pub(crate) const OPENCLAW_CLIENT_ID: &str = "openclaw";
 pub(crate) fn thread_id_from_rollout_path(path: &Path) -> Option<String> {
     let path = uncompressed_rollout_path(path);
     let stem = path.file_stem()?.to_str()?;
+    rollout_thread_from_stem(stem).map(str::to_owned)
+}
+
+fn rollout_thread_from_stem(stem: &str) -> Option<&str> {
     let stem = stem.strip_prefix("rollout-")?;
     // `2026-08-30T10-00-00-` is 20 chars; everything after is the thread id.
     let candidate = stem.get(20..)?;
@@ -443,7 +525,21 @@ pub(crate) fn thread_id_from_rollout_path(path: &Path) -> Option<String> {
                 8 | 13 | 18 | 23 => byte == b'-',
                 _ => byte.is_ascii_hexdigit(),
             });
-    is_uuid.then(|| candidate.to_string())
+    is_uuid.then_some(candidate)
+}
+
+pub(crate) fn rollout_response_key(client: &str, owner: &str, response_id: &str) -> String {
+    format!("{client}:response:{owner}:{response_id}")
+}
+
+/// Anonymous rollouts in different directories are not proven copies. A
+/// plain file and its `.zst` variant use the same uncompressed path here.
+pub(crate) fn rollout_path_scope(uncompressed_path: &Path) -> String {
+    #[cfg(windows)]
+    let hash = crate::message_cache::windows_path_digest(uncompressed_path).finalize();
+    #[cfg(not(windows))]
+    let hash = Sha256::digest(uncompressed_path.as_os_str().as_encoded_bytes());
+    format!("file-{hash:x}")
 }
 
 /// True when a `session_meta.originator` identifies OpenClaw as the client
@@ -459,6 +555,8 @@ fn codex_originator_is_openclaw(originator: Option<&str>) -> bool {
 #[derive(Debug, Clone)]
 pub(crate) struct ParsedCodexFile {
     pub messages: Vec<UnifiedMessage>,
+    /// A selected, thread-owned token_count increment explicitly reported zero usage.
+    pub has_explicit_zero_token_count: bool,
     pub fallback_timestamp_indices: Vec<usize>,
     pub consumed_offset: u64,
     pub parse_succeeded: bool,
@@ -467,7 +565,7 @@ pub(crate) struct ParsedCodexFile {
     pub state: CodexParseState,
 }
 
-fn codex_workspace_from_cwd(cwd: &str) -> (Option<String>, Option<String>) {
+pub(crate) fn codex_workspace_from_cwd(cwd: &str) -> (Option<String>, Option<String>) {
     let workspace_key = normalize_codex_workspace_key(cwd);
     let workspace_label = workspace_key.as_deref().and_then(workspace_label_from_key);
 
@@ -502,23 +600,30 @@ fn looks_like_explicit_workspace_path(path: &str) -> bool {
 
 fn parse_codex_reader<R: BufRead>(
     mut reader: R,
-    session_id: &str,
+    path: &Path,
     fallback_timestamp: i64,
     start_offset: u64,
     mut state: CodexParseState,
+    history_turn: Option<fn(&str) -> bool>,
 ) -> ParsedCodexFile {
+    let uncompressed_path = uncompressed_rollout_path(path);
+    let session_id = session_id_from_path(&uncompressed_path);
+    let session_id = session_id.as_str();
+    let filename_thread = rollout_thread_from_stem(session_id);
+    let path_scope = OnceCell::new();
     let mut messages = Vec::with_capacity(64);
     let mut fallback_timestamp_indices = Vec::new();
     let mut buffer = Vec::with_capacity(4096);
-    let mut line = String::with_capacity(4096);
+    let mut line = Vec::with_capacity(4096);
     let mut consumed_offset = start_offset;
     let mut parse_succeeded = true;
     let mut pending_model_messages = Vec::new();
     let mut unresolved_model_events = false;
+    let mut has_explicit_zero_token_count = false;
 
     loop {
         line.clear();
-        let bytes_read = match reader.read_line(&mut line) {
+        let bytes_read = match reader.read_until(b'\n', &mut line) {
             Ok(0) => break,
             Ok(bytes_read) => bytes_read,
             Err(_) => {
@@ -528,6 +633,10 @@ fn parse_codex_reader<R: BufRead>(
         };
         consumed_offset += bytes_read as u64;
 
+        let Ok(line) = std::str::from_utf8(&line) else {
+            parse_succeeded = false;
+            continue;
+        };
         let trimmed = line.trim();
         if trimmed.is_empty() {
             continue;
@@ -604,66 +713,19 @@ fn parse_codex_reader<R: BufRead>(
                     handled = true;
                 }
 
-                if state.forked_child_waiting_for_turn_context {
-                    if entry.entry_type == "turn_context"
-                        && forked_child_turn_starts_own_session(&state, payload.turn_id.as_deref())
-                    {
-                        state.forked_child_waiting_for_turn_context = false;
-                        state.forked_child_replay_session_id = None;
-                        state.forked_child_task_started_turn_ids.clear();
-                        state.forked_child_is_user_fork = false;
-                        if let Some(ref id) = state.forked_child_session_id {
-                            state.session_id_from_meta = Some(id.clone());
+                if state.skip_replayed_entry(
+                    &entry.entry_type,
+                    payload.payload_type.as_deref(),
+                    payload.id.as_deref(),
+                    payload.turn_id.as_deref(),
+                    payload.started_at,
+                ) {
+                    if is_token_count {
+                        if let Some(info) = payload.info.as_ref() {
+                            remember_forked_child_inherited_baseline(&mut state, info);
                         }
-                        state.current_model = payload_model.clone();
-                        handled = true;
-                    } else {
-                        if entry.entry_type == "event_msg"
-                            && payload.payload_type.as_deref() == Some("task_started")
-                        {
-                            // The child's own turn is introduced by a
-                            // `task_started`; remember it only when its id or
-                            // timestamp places it at/after the child session.
-                            // Nested child logs can replay ancestor task_started
-                            // events before the child's live turn.
-                            if forked_child_task_starts_own_session(
-                                &state,
-                                payload.turn_id.as_deref(),
-                                payload.started_at,
-                            ) {
-                                // Safety of this branch is coupled to
-                                // `forked_child_task_starts_own_session`
-                                // returning false when `turn_id` is `None`.
-                                if let Some(turn_id) = payload.turn_id.as_deref() {
-                                    state
-                                        .forked_child_task_started_turn_ids
-                                        .insert(turn_id.to_string());
-                                }
-                            }
-                        }
-                        if entry.entry_type == "session_meta" {
-                            if let Some(ref id) = payload.id {
-                                if state
-                                    .forked_child_session_id
-                                    .as_deref()
-                                    .is_some_and(|child_id| child_id != id)
-                                {
-                                    // Newer Codex fork logs can embed the
-                                    // parent session metadata before replaying
-                                    // parent token_count history. Keep
-                                    // skipping while that copied upstream
-                                    // transcript is active.
-                                    state.forked_child_replay_session_id = Some(id.clone());
-                                }
-                            }
-                        }
-                        if is_token_count {
-                            if let Some(info) = payload.info.as_ref() {
-                                remember_forked_child_inherited_baseline(&mut state, info);
-                            }
-                        }
-                        continue;
                     }
+                    continue;
                 }
 
                 if entry.entry_type == "token_usage_record" {
@@ -671,19 +733,28 @@ fn parse_codex_reader<R: BufRead>(
                         .forked_child_session_id
                         .as_deref()
                         .or(state.session_id_from_meta.as_deref())
-                        .unwrap_or(session_id);
-                    state.pending_compaction = if payload
-                        .thread_id
-                        .as_deref()
-                        .is_none_or(|id| id == owner)
+                        .or(filename_thread);
+                    let recorded_owner = payload.thread_id.as_deref();
+                    state.pending_compaction = if owner
+                        .zip(recorded_owner)
+                        .is_some_and(|(owner, recorded)| owner != recorded)
                     {
+                        None
+                    } else {
                         payload
                             .usage
                             .as_ref()
-                            .zip(payload.response_id.as_ref())
-                            .map(|(usage, id)| (CodexTotals::from_usage(usage), id.clone(), false))
-                    } else {
-                        None
+                            .zip(payload.response_id.as_deref())
+                            .map(|(usage, response_id)| {
+                                let owner = owner.or(recorded_owner).unwrap_or_else(|| {
+                                    path_scope.get_or_init(|| rollout_path_scope(&uncompressed_path))
+                                });
+                                (
+                                    CodexTotals::from_usage(usage),
+                                    rollout_response_key("codex", owner, response_id),
+                                    false,
+                                )
+                            })
                     };
                 } else if entry.entry_type == "compacted" {
                     if let Some((_, _, compacted)) = &mut state.pending_compaction {
@@ -741,28 +812,12 @@ fn parse_codex_reader<R: BufRead>(
                         }
                         state.session_id_from_meta = Some(id.clone());
                     }
-                    let forked_from_id = payload
-                        .forked_from_id
-                        .as_deref()
-                        .filter(|id| !id.is_empty())
-                        .or_else(|| forked_from_id_from_source(payload.source.as_ref()));
-                    if let Some(forked_from_id) = forked_from_id {
-                        let repeated_active_child_meta = !state
-                            .forked_child_waiting_for_turn_context
-                            && payload.id.as_deref().is_some()
-                            && state.forked_child_session_id.as_deref() == payload.id.as_deref();
-                        state.session_forked_from_id = Some(forked_from_id.to_string());
-                        state.forked_child_session_id = payload.id.clone();
-                        if !repeated_active_child_meta {
-                            state.forked_child_waiting_for_turn_context = true;
-                            state.forked_child_replay_session_id = None;
-                            state.forked_child_inherited_baseline = None;
-                            state.forked_child_inherited_reported_total = None;
-                            state.forked_child_task_started_turn_ids.clear();
-                            state.forked_child_is_user_fork =
-                                payload.thread_source.as_deref() == Some("user");
-                        }
-                    }
+                    state.start_fork_from_meta(
+                        payload.id.as_deref(),
+                        payload.forked_from_id.as_deref(),
+                        payload.source.as_ref(),
+                        payload.thread_source.as_deref(),
+                    );
                     if let Some(ref provider) = payload.model_provider {
                         state.session_provider = Some(provider.clone());
                     }
@@ -846,11 +901,17 @@ fn parse_codex_reader<R: BufRead>(
                     handled = true;
                 }
 
+                if entry.entry_type == "history_mutation"
+                    && history_turn.is_some_and(|is_human| is_human(trimmed))
+                {
+                    state.pending_turn_start = true;
+                    handled = true;
+                }
+
                 // Process token_count events
                 if is_token_count {
-                    let info = match payload.info {
-                        Some(i) => i,
-                        None => continue,
+                    let Some(info) = payload.info else {
+                        continue;
                     };
 
                     let model = payload_model
@@ -870,31 +931,46 @@ fn parse_codex_reader<R: BufRead>(
                     // Upstream totals are mutable snapshots (compaction, context-window
                     // capping can rewrite them), so we only use total_token_usage for
                     // dedup and monotonicity checks — never as a direct delta source.
-                    let total_usage = info.total_token_usage.as_ref().map(CodexTotals::from_usage);
-                    let last_usage = info.last_token_usage.as_ref().map(CodexTotals::from_usage);
-                    let compaction = state.pending_compaction.take().filter(|(_, _, compacted)| {
-                        *compacted
-                            && total_usage.is_some()
-                            && total_usage == Some(state.previous_totals.unwrap_or_default())
-                            && last_usage == Some(CodexTotals::default())
-                    });
-
+                    let total_snapshot = info.total_token_usage.as_ref();
+                    let last_snapshot = info.last_token_usage.as_ref();
+                    let raw_totals = total_snapshot.map(CodexTotals::from_usage);
+                    // Empty cumulative objects can match a replay, but cannot
+                    // establish or replace a cumulative baseline.
+                    let total_usage = raw_totals
+                        .filter(|_| total_snapshot.is_some_and(CodexTokenUsage::has_counters));
+                    // Match compaction against the raw shapes: the producer can
+                    // write {} for either snapshot, even before any baseline.
+                    let last_usage = last_snapshot.map(CodexTotals::from_usage);
+                    let matches_compaction = state.pending_compaction.as_ref().is_some_and(
+                        |(_, _, compacted)| {
+                            *compacted
+                                && raw_totals == Some(state.previous_totals.unwrap_or_default())
+                                && last_usage == Some(CodexTotals::default())
+                        },
+                    );
+                    if !matches_compaction
+                        && total_usage.is_none()
+                        && !last_snapshot.is_some_and(CodexTokenUsage::has_counters)
+                    {
+                        continue;
+                    }
                     // Forked child logs can replay more than one parent
                     // token_count row after the first child turn_context,
                     // often with child-local timestamps. Keep the inherited
                     // baseline active until totals move beyond it.
-                    if forked_child_should_skip_inherited_snapshot(
-                        &state,
-                        info.total_token_usage.as_ref(),
-                        total_usage,
-                    ) {
-                        continue;
+                    if !matches_compaction {
+                        if forked_child_should_skip_inherited_snapshot(&state, total_snapshot, raw_totals) {
+                            // A late parent replay neither settles nor cancels
+                            // the child's pending compaction.
+                            continue;
+                        }
+                        state.forked_child_inherited_baseline = None;
+                        state.forked_child_inherited_reported_total = None;
                     }
-                    state.forked_child_inherited_baseline = None;
-                    state.forked_child_inherited_reported_total = None;
+                    let compaction = state.pending_compaction.take().filter(|_| matches_compaction);
 
                     let (tokens, next_totals) = if let Some((usage, _, _)) = &compaction {
-                        (usage.into_tokens(), total_usage)
+                        (usage.into_tokens(), total_usage.or(state.previous_totals))
                     } else {
                         match (total_usage, last_usage, state.previous_totals) {
                             // Both present with previous baseline (standard path)
@@ -940,11 +1016,15 @@ fn parse_codex_reader<R: BufRead>(
 
                     // Skip zero-token snapshots without advancing the baseline so
                     // that post-compaction zero totals don't inflate later deltas.
-                    if tokens.input == 0
-                        && tokens.output == 0
-                        && tokens.cache_read == 0
-                        && tokens.reasoning == 0
-                    {
+                    if tokens.total() == 0 {
+                        if !has_explicit_zero_token_count && compaction.is_none() {
+                            // Only the snapshot used for this increment can
+                            // suppress per-response fallback without tokens.
+                            has_explicit_zero_token_count = last_snapshot
+                                .filter(|usage| usage.has_counters())
+                                .or(total_snapshot)
+                                .is_some_and(CodexTokenUsage::is_explicit_zero);
+                        }
                         continue;
                     }
 
@@ -993,9 +1073,6 @@ fn parse_codex_reader<R: BufRead>(
                         0.0,
                         agent,
                     );
-                    if let Some((_, response_id, _)) = compaction {
-                        message.dedup_key = Some(format!("codex:response:{response_id}"));
-                    }
                     message.duration_ms = duration_ms;
                     state.turn_coverage.record(state.current_turn_id.as_deref());
                     // The announced turn has produced usage, so it is under
@@ -1014,27 +1091,46 @@ fn parse_codex_reader<R: BufRead>(
                         message.is_turn_start = true;
                         state.pending_turn_start = false;
                     }
-                    if parsed_timestamp.is_some() || total_usage.is_some() {
-                        // Fork/subagent children replay the same upstream
-                        // token_count history into many sibling files. Those
-                        // replays carry identical cumulative totals but a
-                        // distinct per-file session id, so a session-scoped key
-                        // never collapses them and the totals get counted once
-                        // per sibling. Scope the key to the fork parent instead
-                        // so sibling replays share one key. Unrelated sessions
-                        // keep their own id and never merge.
-                        let dedup_scope_id = state
-                            .session_forked_from_id
-                            .as_deref()
-                            .or(state.session_id_from_meta.as_deref())
-                            .unwrap_or(session_id);
-                        set_codex_dedup_key(
-                            &mut message,
-                            model.as_deref().unwrap_or("unknown"),
-                            dedup_scope_id,
-                            total_usage,
-                        );
-                    }
+                    let identity = if let Some((_, response_key, _)) = compaction {
+                        TokenCountIdentity::Exact(response_key)
+                    } else {
+                        let meta_owner = state.session_id_from_meta.as_deref();
+                        let owner = meta_owner.or(filename_thread).unwrap_or_else(|| {
+                            path_scope.get_or_init(|| rollout_path_scope(&uncompressed_path))
+                        });
+                        if let Some(totals) = total_usage {
+                            TokenCountIdentity::Cumulative {
+                                scope: Cow::Borrowed(
+                                    state.session_forked_from_id.as_deref().unwrap_or(owner),
+                                ),
+                                totals,
+                            }
+                        } else if let Some(ended_at) = parsed_timestamp {
+                            TokenCountIdentity::TimedLast {
+                                owner: Cow::Borrowed(owner),
+                                turn: payload
+                                    .turn_id
+                                    .as_deref()
+                                    .filter(|id| !id.is_empty())
+                                    .or(state.current_turn_id.as_deref())
+                                    .unwrap_or_default()
+                                    .into(),
+                                ended_at,
+                            }
+                        } else {
+                            // Position distinguishes repeated increments.
+                            // Without metadata, matching positions in files
+                            // with the same name need not hold the same row.
+                            let row_start = consumed_offset - bytes_read as u64;
+                            let key = if meta_owner.is_some() {
+                                format!("codex:token_count-offset:{owner}:{row_start}")
+                            } else {
+                                let hash = Sha256::digest(trimmed.as_bytes());
+                                format!("codex:token_count-offset:{owner}:{row_start}:{hash:x}")
+                            };
+                            TokenCountIdentity::Exact(key)
+                        }
+                    };
                     message.set_workspace(
                         state.session_workspace_key.clone(),
                         state.session_workspace_label.clone(),
@@ -1048,12 +1144,18 @@ fn parse_codex_reader<R: BufRead>(
                         }
                     }
                     if model.is_some() {
+                        message.dedup_key = Some(identity.into_key(&message));
                         messages.push(message);
                         if parsed_timestamp.is_none() {
                             fallback_timestamp_indices.push(messages.len() - 1);
                         }
                     } else {
-                        pending_model_messages.push((message, parsed_timestamp.is_none()));
+                        pending_model_messages.push(PendingModelMessage {
+                            message,
+                            identity: identity.into_owned(),
+                            used_fallback_timestamp: parsed_timestamp.is_none(),
+                            infer_provider: state.session_provider.is_none(),
+                        });
                     }
                     handled = true;
                 }
@@ -1158,6 +1260,7 @@ fn parse_codex_reader<R: BufRead>(
 
     ParsedCodexFile {
         messages,
+        has_explicit_zero_token_count,
         fallback_timestamp_indices,
         consumed_offset,
         parse_succeeded,
@@ -1193,6 +1296,83 @@ fn forked_from_id_from_source(source: Option<&Value>) -> Option<&str> {
         .get("parent_thread_id")?
         .as_str()
         .filter(|id| !id.is_empty())
+}
+
+impl CodexParseState {
+    pub(crate) fn start_fork_from_meta(
+        &mut self,
+        id: Option<&str>,
+        forked_from_id: Option<&str>,
+        source: Option<&Value>,
+        thread_source: Option<&str>,
+    ) {
+        let Some(parent_id) = forked_from_id
+            .filter(|id| !id.is_empty())
+            .or_else(|| forked_from_id_from_source(source))
+        else {
+            return;
+        };
+        let repeated_active_child_meta = !self.forked_child_waiting_for_turn_context
+            && id.is_some()
+            && self.forked_child_session_id.as_deref() == id;
+        self.session_forked_from_id = Some(parent_id.to_string());
+        self.forked_child_session_id = id.map(str::to_string);
+        if !repeated_active_child_meta {
+            self.forked_child_waiting_for_turn_context = true;
+            self.forked_child_replay_session_id = None;
+            self.forked_child_inherited_baseline = None;
+            self.forked_child_inherited_reported_total = None;
+            self.forked_child_task_started_turn_ids.clear();
+            self.forked_child_is_user_fork = thread_source == Some("user");
+        }
+    }
+
+    pub(crate) fn skip_replayed_entry(
+        &mut self,
+        entry_type: &str,
+        event_type: Option<&str>,
+        id: Option<&str>,
+        turn_id: Option<&str>,
+        started_at: Option<i64>,
+    ) -> bool {
+        if !self.forked_child_waiting_for_turn_context {
+            return false;
+        }
+
+        match entry_type {
+            "turn_context" if forked_child_turn_starts_own_session(self, turn_id) => {
+                self.forked_child_waiting_for_turn_context = false;
+                self.forked_child_replay_session_id = None;
+                self.forked_child_task_started_turn_ids.clear();
+                self.forked_child_is_user_fork = false;
+                if let Some(id) = &self.forked_child_session_id {
+                    self.session_id_from_meta = Some(id.clone());
+                }
+                return false;
+            }
+            "event_msg" if event_type == Some("task_started") => {
+                // A nested child can replay ancestor task_started events.
+                if let Some(turn_id) = turn_id
+                    .filter(|id| forked_child_task_starts_own_session(self, Some(id), started_at))
+                {
+                    self.forked_child_task_started_turn_ids
+                        .insert(turn_id.to_string());
+                }
+            }
+            "session_meta" => {
+                // The copied metadata marks a replayed ancestor transcript.
+                if let Some(id) = id.filter(|id| {
+                    self.forked_child_session_id
+                        .as_deref()
+                        .is_some_and(|child_id| child_id != *id)
+                }) {
+                    self.forked_child_replay_session_id = Some(id.to_string());
+                }
+            }
+            _ => {}
+        }
+        true
+    }
 }
 
 fn forked_child_turn_starts_own_session(state: &CodexParseState, turn_id: Option<&str>) -> bool {
@@ -1325,70 +1505,111 @@ fn duration_between_ms(start_ms: Option<i64>, end_ms: Option<i64>) -> Option<i64
     (duration > 0).then_some(duration)
 }
 
-fn codex_token_count_dedup_key(
-    message: &UnifiedMessage,
-    model: &str,
-    upstream_session_id: &str,
-    total_usage: Option<CodexTotals>,
-) -> String {
-    if let Some(total) = total_usage {
-        // Codex fork/subagent logs can replay the same upstream token_count
-        // history into many child files with child-local timestamps. The
-        // cumulative total is the stable upstream identity; timestamp is only
-        // a fallback when older rows do not carry totals.
-        return format!(
-            "codex:token_count-total:{}:{}:{}:{}:{}:{}:{}",
-            upstream_session_id,
-            message.provider_id,
-            model,
-            total.input,
-            total.output,
-            total.cached,
-            total.reasoning
-        );
-    }
-
-    format!(
-        "codex:token_count:{}:{}:{}:{}:{}:{}:{}:{}",
-        message.timestamp,
-        message.provider_id,
-        model,
-        message.tokens.input,
-        message.tokens.output,
-        message.tokens.cache_read,
-        message.tokens.cache_write,
-        message.tokens.reasoning
-    )
+/// Request evidence captured at the accounting event, before report timestamps
+/// or later model metadata can change which thread and turn a row belongs to.
+enum TokenCountIdentity<'a> {
+    Exact(String),
+    Cumulative {
+        scope: Cow<'a, str>,
+        totals: CodexTotals,
+    },
+    TimedLast {
+        owner: Cow<'a, str>,
+        turn: Cow<'a, str>,
+        ended_at: i64,
+    },
 }
 
-fn set_codex_dedup_key(
-    message: &mut UnifiedMessage,
-    model: &str,
-    upstream_session_id: &str,
-    total_usage: Option<CodexTotals>,
-) {
-    if message.dedup_key.is_none() {
-        message.dedup_key = Some(codex_token_count_dedup_key(
-            message,
-            model,
-            upstream_session_id,
-            total_usage,
-        ));
+impl TokenCountIdentity<'_> {
+    fn into_owned(self) -> TokenCountIdentity<'static> {
+        match self {
+            Self::Exact(key) => TokenCountIdentity::Exact(key),
+            Self::Cumulative { scope, totals } => TokenCountIdentity::Cumulative {
+                scope: Cow::Owned(scope.into_owned()),
+                totals,
+            },
+            Self::TimedLast {
+                owner,
+                turn,
+                ended_at,
+            } => TokenCountIdentity::TimedLast {
+                owner: Cow::Owned(owner.into_owned()),
+                turn: Cow::Owned(turn.into_owned()),
+                ended_at,
+            },
+        }
     }
+
+    fn into_key(self, message: &UnifiedMessage) -> String {
+        let provider = &message.provider_id;
+        let model = &message.model_id;
+        match self {
+            Self::Exact(key) => key,
+            // Forks can replay one cumulative snapshot at many local times.
+            Self::Cumulative { scope, totals } => format!(
+                "codex:token_count-total:{}:{scope}:{}:{provider}:{}:{}:{}:{}:{}:{model}",
+                scope.len(),
+                provider.len(),
+                totals.input,
+                totals.output,
+                totals.cached,
+                totals.cache_write,
+                totals.reasoning,
+            ),
+            Self::TimedLast {
+                owner,
+                turn,
+                ended_at,
+            } => {
+                let tokens = &message.tokens;
+                format!(
+                    "codex:token_count:{}:{owner}:{ended_at}:{}:{turn}:{}:{provider}:{}:{}:{}:{}:{}:{model}",
+                    owner.len(),
+                    turn.len(),
+                    provider.len(),
+                    tokens.input,
+                    tokens.output,
+                    tokens.cache_read,
+                    tokens.cache_write,
+                    tokens.reasoning,
+                )
+            }
+        }
+    }
+}
+
+struct PendingModelMessage {
+    message: UnifiedMessage,
+    identity: TokenCountIdentity<'static>,
+    used_fallback_timestamp: bool,
+    infer_provider: bool,
 }
 
 fn flush_pending_model_messages(
-    pending_model_messages: &mut Vec<(UnifiedMessage, bool)>,
+    pending_model_messages: &mut Vec<PendingModelMessage>,
     messages: &mut Vec<UnifiedMessage>,
     fallback_timestamp_indices: &mut Vec<usize>,
     model: &str,
 ) {
-    for (mut message, used_fallback_timestamp) in pending_model_messages.drain(..) {
-        if !used_fallback_timestamp {
-            let upstream_session_id = message.session_id.clone();
-            set_codex_dedup_key(&mut message, model, &upstream_session_id, None);
+    let inferred_provider = OnceCell::new();
+    for PendingModelMessage {
+        mut message,
+        identity,
+        used_fallback_timestamp,
+        infer_provider,
+    } in pending_model_messages.drain(..)
+    {
+        if model != "unknown" {
+            message.model_id.replace_range(.., model);
+            if infer_provider {
+                let provider =
+                    inferred_provider.get_or_init(|| inferred_provider_from_model(model));
+                if let Some(provider) = provider {
+                    message.provider_id.replace_range(.., provider);
+                }
+            }
         }
-        message.model_id = model.to_string();
+        message.dedup_key = Some(identity.into_key(&message));
         messages.push(message);
         if used_fallback_timestamp {
             fallback_timestamp_indices.push(messages.len() - 1);
@@ -1397,7 +1618,7 @@ fn flush_pending_model_messages(
 }
 
 fn flush_pending_model_messages_as_unknown(
-    pending_model_messages: &mut Vec<(UnifiedMessage, bool)>,
+    pending_model_messages: &mut Vec<PendingModelMessage>,
     messages: &mut Vec<UnifiedMessage>,
     fallback_timestamp_indices: &mut Vec<usize>,
     unresolved_model_events: &mut bool,
@@ -1424,14 +1645,14 @@ pub fn parse_codex_file(path: &Path) -> Vec<UnifiedMessage> {
 /// Upper bound on the decoded size of one compressed rollout. The archive is
 /// decoded as a stream, so this does not bound memory; it stops a corrupt or
 /// hostile archive from expanding without end. Real rollouts stay far below it.
-const MAX_CODEX_ARCHIVE_BYTES: u64 = 1024 * 1024 * 1024;
+pub(crate) const MAX_CODEX_ARCHIVE_BYTES: u64 = 1024 * 1024 * 1024;
 
 /// The name a compressed rollout had before Codex compressed it in place:
 /// `rollout-….jsonl.zst` -> `rollout-….jsonl`. Identities derived from the
 /// file name (the fallback session id, the rollout thread id) then agree
 /// between the plain and compressed copies of one session, so the dedup keys
 /// built from them collapse the copies instead of counting both.
-fn uncompressed_rollout_path(path: &Path) -> Cow<'_, Path> {
+pub(crate) fn uncompressed_rollout_path(path: &Path) -> Cow<'_, Path> {
     if is_zst_path(path) {
         Cow::Owned(path.with_extension(""))
     } else {
@@ -1467,13 +1688,14 @@ impl<R: Read> Read for FailureTrackingReader<R> {
 /// rather than whatever prefix decoded before the failure.
 fn parse_codex_archive(
     path: &Path,
-    session_id: &str,
     fallback_timestamp: i64,
     start_offset: u64,
     state: CodexParseState,
+    history_turn: Option<fn(&str) -> bool>,
 ) -> ParsedCodexFile {
     let unusable = |state: CodexParseState| ParsedCodexFile {
         messages: Vec::new(),
+        has_explicit_zero_token_count: false,
         fallback_timestamp_indices: Vec::new(),
         consumed_offset: start_offset,
         parse_succeeded: false,
@@ -1496,7 +1718,7 @@ fn parse_codex_archive(
         inner: decoder.take(MAX_CODEX_ARCHIVE_BYTES + 1),
         failed: false,
     });
-    let parsed = parse_codex_reader(&mut reader, session_id, fallback_timestamp, 0, state);
+    let parsed = parse_codex_reader(&mut reader, path, fallback_timestamp, 0, state, history_turn);
     if reader.get_ref().failed {
         tracing::warn!(path = %path.display(), "Skipping corrupt or truncated Codex archive");
         return unusable(initial_state);
@@ -1513,7 +1735,11 @@ fn reported_total_tokens(usage: &CodexTokenUsage) -> Option<i64> {
 }
 
 fn remember_forked_child_inherited_baseline(state: &mut CodexParseState, info: &CodexInfo) {
-    let Some(total_usage) = info.total_token_usage.as_ref() else {
+    let Some(total_usage) = info
+        .total_token_usage
+        .as_ref()
+        .filter(|usage| usage.has_counters())
+    else {
         return;
     };
 
@@ -1548,10 +1774,18 @@ pub(crate) fn parse_codex_file_incremental(
     start_offset: u64,
     state: CodexParseState,
 ) -> ParsedCodexFile {
-    let session_id = session_id_from_path(&uncompressed_rollout_path(path));
+    parse_rollout(path, start_offset, state, None)
+}
+
+pub(super) fn parse_rollout(
+    path: &Path,
+    start_offset: u64,
+    state: CodexParseState,
+    history_turn: Option<fn(&str) -> bool>,
+) -> ParsedCodexFile {
     let fallback_timestamp = file_modified_timestamp_ms(path);
     if is_zst_path(path) {
-        return parse_codex_archive(path, &session_id, fallback_timestamp, start_offset, state);
+        return parse_codex_archive(path, fallback_timestamp, start_offset, state, history_turn);
     }
 
     let mut file = match std::fs::File::open(path) {
@@ -1559,6 +1793,7 @@ pub(crate) fn parse_codex_file_incremental(
         Err(_) => {
             return ParsedCodexFile {
                 messages: Vec::new(),
+                has_explicit_zero_token_count: false,
                 fallback_timestamp_indices: Vec::new(),
                 consumed_offset: start_offset,
                 parse_succeeded: false,
@@ -1571,6 +1806,7 @@ pub(crate) fn parse_codex_file_incremental(
     if file.seek(SeekFrom::Start(start_offset)).is_err() {
         return ParsedCodexFile {
             messages: Vec::new(),
+            has_explicit_zero_token_count: false,
             fallback_timestamp_indices: Vec::new(),
             consumed_offset: start_offset,
             parse_succeeded: false,
@@ -1580,7 +1816,14 @@ pub(crate) fn parse_codex_file_incremental(
     }
 
     let reader = BufReader::new(file);
-    parse_codex_reader(reader, &session_id, fallback_timestamp, start_offset, state)
+    parse_codex_reader(
+        reader,
+        path,
+        fallback_timestamp,
+        start_offset,
+        state,
+        history_turn,
+    )
 }
 
 fn extract_model(payload: &CodexPayload) -> Option<String> {
@@ -1605,6 +1848,7 @@ struct CodexHeadlessUsage {
     input: i64,
     output: i64,
     cached: i64,
+    cache_write: i64,
     model: Option<String>,
     timestamp_ms: Option<i64>,
 }
@@ -1632,7 +1876,7 @@ fn parse_codex_headless_line(
         .unwrap_or_else(|| "unknown".to_string());
     let timestamp = usage.timestamp_ms.unwrap_or(fallback_timestamp);
 
-    if usage.input == 0 && usage.output == 0 && usage.cached == 0 {
+    if usage.input == 0 && usage.output == 0 && usage.cached == 0 && usage.cache_write == 0 {
         return None;
     }
 
@@ -1656,7 +1900,7 @@ fn parse_codex_headless_line(
                 input: usage.input.max(0),
                 output: usage.output.max(0),
                 cache_read: usage.cached.max(0),
-                cache_write: 0,
+                cache_write: usage.cache_write,
                 reasoning: 0,
             },
             0.0,
@@ -1685,15 +1929,20 @@ fn extract_headless_usage(value: &Value) -> Option<CodexHeadlessUsage> {
         .or_else(|| extract_i64(usage.get("cache_read_input_tokens")))
         .or_else(|| extract_i64(usage.get("cached_tokens")))
         .unwrap_or(0);
+    let uncached = input_tokens.saturating_sub(cached_tokens);
+    let cache_write = extract_i64(usage.get("cache_write_input_tokens"))
+        .unwrap_or(0)
+        .clamp(0, uncached.max(0));
 
     let model = extract_model_from_value(value)
         .or_else(|| value.get("data").and_then(extract_model_from_value));
     let timestamp_ms = extract_timestamp_from_value(value);
 
     Some(CodexHeadlessUsage {
-        input: input_tokens.saturating_sub(cached_tokens),
+        input: uncached - cache_write,
         output: output_tokens,
         cached: cached_tokens,
+        cache_write,
         model,
         timestamp_ms,
     })
@@ -1745,7 +1994,7 @@ const CODEX_SYSTEM_INJECTED_PREFIXES: [&str; 3] = [
 /// `<div>`, pasting an XML snippet, etc.). The `kind` field can't be used to
 /// distinguish them: both human and injected bodies appear as `kind:"plain"` or
 /// with no `kind` at all.
-fn codex_message_is_human_turn(message: Option<&str>) -> bool {
+pub(crate) fn codex_message_is_human_turn(message: Option<&str>) -> bool {
     match message {
         Some(text) => {
             let trimmed = text.trim_start();
@@ -1879,22 +2128,30 @@ mod tests {
 
     #[test]
     fn compaction_incremental_parse_matches_full_parse_at_every_line() {
-        let full = parse_codex_reader(
-            Cursor::new(CODEX_COMPACTION_FIXTURE),
-            "session",
-            0,
-            0,
-            CodexParseState::default(),
+        let empty_last = CODEX_COMPACTION_FIXTURE.replace(
+            r#""last_token_usage":{"input_tokens":0,"cached_input_tokens":0,"output_tokens":0}"#,
+            r#""last_token_usage":{}"#,
         );
-        let mut state = CodexParseState::default();
-        let mut messages = Vec::new();
-        for line in CODEX_COMPACTION_FIXTURE.split_inclusive('\n') {
-            let parsed = parse_codex_reader(Cursor::new(line), "session", 0, 0, state);
-            messages.extend(parsed.messages);
-            state = bincode::deserialize(&bincode::serialize(&parsed.state).unwrap()).unwrap();
+        let path = Path::new("session.jsonl");
+        for fixture in [CODEX_COMPACTION_FIXTURE, empty_last.as_str()] {
+            let full = parse_codex_reader(
+                Cursor::new(fixture),
+                path,
+                0,
+                0,
+                CodexParseState::default(),
+                None,
+            );
+            let mut state = CodexParseState::default();
+            let mut messages = Vec::new();
+            for line in fixture.split_inclusive('\n') {
+                let parsed = parse_codex_reader(Cursor::new(line), path, 0, 0, state, None);
+                messages.extend(parsed.messages);
+                state = bincode::deserialize(&bincode::serialize(&parsed.state).unwrap()).unwrap();
+            }
+            assert_eq!(messages, full.messages);
+            assert_eq!(messages.iter().map(|m| m.tokens.total()).sum::<i64>(), 705);
         }
-        assert_eq!(messages, full.messages);
-        assert_eq!(messages.iter().map(|m| m.tokens.total()).sum::<i64>(), 705);
     }
 
     #[test]
@@ -1935,25 +2192,15 @@ mod tests {
 
     impl BufRead for FailAfterFirstLine {
         fn fill_buf(&mut self) -> std::io::Result<&[u8]> {
+            if self.fail_next_read {
+                return Err(Error::new(ErrorKind::InvalidData, "synthetic read failure"));
+            }
             self.inner.fill_buf()
         }
 
         fn consume(&mut self, amt: usize) {
             self.inner.consume(amt);
-        }
-
-        fn read_line(&mut self, buf: &mut String) -> std::io::Result<usize> {
-            if self.fail_next_read {
-                return Err(Error::new(
-                    ErrorKind::InvalidData,
-                    "synthetic line decode failure",
-                ));
-            }
-            let bytes_read = self.inner.read_line(buf)?;
-            if bytes_read > 0 {
-                self.fail_next_read = true;
-            }
-            Ok(bytes_read)
+            self.fail_next_read |= amt != 0;
         }
     }
 
@@ -2259,7 +2506,14 @@ mod tests {
             "\n"
         ));
 
-        let parsed = parse_codex_reader(reader, "session", 0, 0, CodexParseState::default());
+        let parsed = parse_codex_reader(
+            reader,
+            Path::new("session.jsonl"),
+            0,
+            0,
+            CodexParseState::default(),
+            None,
+        );
 
         assert!(!parsed.parse_succeeded);
         assert!(parsed.messages.is_empty());
@@ -2616,6 +2870,15 @@ mod tests {
         assert_eq!(parsed.state.turn_coverage, CodexTurnCoverage::default());
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn anonymous_rollout_scope_uses_windows_path_identity() {
+        let scope = |p: &str| rollout_path_scope(Path::new(p));
+        assert_eq!(scope(r"C:\home/.codex/sessions\a.jsonl"), scope(r"C:\home\.codex\sessions\a.jsonl"));
+        assert_ne!(scope(r"C:\a\session.jsonl"), scope(r"C:\b\session.jsonl"));
+        assert_ne!(scope(r"\\?\C:\a/b.jsonl"), scope(r"\\?\C:\a\b.jsonl"));
+    }
+
     #[test]
     fn test_thread_id_from_rollout_path() {
         assert_eq!(
@@ -2681,20 +2944,23 @@ mod tests {
         let line2 = r#"{"timestamp":"2026-01-01T00:00:01Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"cached_input_tokens":20,"output_tokens":30,"reasoning_output_tokens":5},"last_token_usage":{"input_tokens":100,"cached_input_tokens":20,"output_tokens":30,"reasoning_output_tokens":5}}}}"#;
         let line3 = r#"{"timestamp":"2026-01-01T00:00:02Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":10,"cached_input_tokens":2,"output_tokens":3,"reasoning_output_tokens":1}}}}"#;
         let line4 = r#"{"timestamp":"2026-01-01T00:00:03Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":110,"cached_input_tokens":22,"output_tokens":33,"reasoning_output_tokens":6},"last_token_usage":{"input_tokens":10,"cached_input_tokens":2,"output_tokens":3,"reasoning_output_tokens":1}}}}"#;
-        let content = format!("{}\n{}\n{}\n{}", line1, line2, line3, line4);
-        let file = create_test_file(&content);
+        let empty_total = r#"{"timestamp":"2026-01-01T00:00:02Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{},"last_token_usage":{"input_tokens":10,"cached_input_tokens":2,"output_tokens":3,"reasoning_output_tokens":1}}}}"#;
+        for line3 in [line3, empty_total] {
+            let content = format!("{}\n{}\n{}\n{}", line1, line2, line3, line4);
+            let file = create_test_file(&content);
 
-        let messages = parse_codex_file(file.path());
+            let messages = parse_codex_file(file.path());
 
-        assert_eq!(messages.len(), 2);
-        assert_eq!(messages[0].tokens.input, 80);
-        assert_eq!(messages[0].tokens.output, 25);
-        assert_eq!(messages[0].tokens.cache_read, 20);
-        assert_eq!(messages[0].tokens.reasoning, 5);
-        assert_eq!(messages[1].tokens.input, 8);
-        assert_eq!(messages[1].tokens.output, 2);
-        assert_eq!(messages[1].tokens.cache_read, 2);
-        assert_eq!(messages[1].tokens.reasoning, 1);
+            assert_eq!(messages.len(), 2);
+            assert_eq!(messages[0].tokens.input, 80);
+            assert_eq!(messages[0].tokens.output, 25);
+            assert_eq!(messages[0].tokens.cache_read, 20);
+            assert_eq!(messages[0].tokens.reasoning, 5);
+            assert_eq!(messages[1].tokens.input, 8);
+            assert_eq!(messages[1].tokens.output, 2);
+            assert_eq!(messages[1].tokens.cache_read, 2);
+            assert_eq!(messages[1].tokens.reasoning, 1);
+        }
     }
 
     #[test]
@@ -2738,6 +3004,7 @@ mod tests {
             output: 63_820,
             cached: 16_358_912,
             reasoning: 24_882,
+            cache_write: 0,
         };
         let reported_total = totals.input + totals.output; // 16_909_180
 
@@ -2762,6 +3029,7 @@ mod tests {
             output: 10,
             cached: 0,
             reasoning: 999,
+            cache_write: 0,
         };
 
         let tokens = totals.into_tokens();
@@ -2780,6 +3048,7 @@ mod tests {
             output: 30,
             cached: 100, // More than input — malformed
             reasoning: 5,
+            cache_write: 0,
         };
         let tokens = totals.into_tokens();
         assert_eq!(tokens.cache_read, 50); // Clamped to input
@@ -2921,6 +3190,24 @@ mod tests {
         assert_eq!(messages[1].tokens.output, 4);
         assert_eq!(messages[1].tokens.cache_read, 2);
         assert_eq!(messages[1].tokens.reasoning, 1);
+    }
+
+    #[test]
+    fn test_empty_last_does_not_charge_resumed_totals() {
+        let file = create_test_file(concat!(
+            r#"{"type":"turn_context","payload":{"model":"gpt-5.2"}}"#,
+            "\n",
+            r#"{"timestamp":"2026-01-01T00:00:01Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":5000,"output_tokens":800},"last_token_usage":{}}}}"#,
+            "\n",
+            r#"{"timestamp":"2026-01-01T00:00:02Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":5012,"output_tokens":805},"last_token_usage":{"input_tokens":12,"output_tokens":5}}}}"#,
+            "\n",
+        ));
+
+        let messages = parse_codex_file(file.path());
+
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].tokens.input, 12);
+        assert_eq!(messages[0].tokens.output, 5);
     }
 
     #[test]
@@ -3645,11 +3932,42 @@ mod tests {
             output_tokens: Some(30),
             cached_input_tokens: Some(10),
             cache_read_input_tokens: Some(20),
+            cache_write_input_tokens: None,
+            cache_creation_input_tokens: None,
             reasoning_output_tokens: Some(5),
             total_tokens: None,
         };
         let totals = CodexTotals::from_usage(&usage);
         assert_eq!(totals.cached, 20);
+    }
+
+    #[test]
+    fn test_codex_rollout_and_headless_input_include_cache_writes() {
+        let rollout = create_test_file("");
+        let record = r#"{"type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":100,"cached_input_tokens":40,"cache_write_input_tokens":10,"output_tokens":12,"total_tokens":112}}}}"#;
+        std::fs::write(rollout.path(), [&b"\xff\n"[..], record.as_bytes()].concat()).unwrap();
+        let headless = create_test_file(
+            r#"{"type":"turn.completed","usage":{"input_tokens":100,"cached_input_tokens":40,"cache_write_input_tokens":10,"output_tokens":12}}"#,
+        );
+
+        for file in [rollout, headless] {
+            let messages = parse_codex_file(file.path());
+            assert_eq!(messages.len(), 1);
+            let tokens = &messages[0].tokens;
+            assert_eq!(tokens.input, 50);
+            assert_eq!(tokens.cache_read, 40);
+            assert_eq!(tokens.cache_write, 10);
+            assert_eq!(tokens.output, 12);
+            assert_eq!(tokens.total(), 112);
+        }
+
+        let write_only = create_test_file(
+            r#"{"type":"turn.completed","usage":{"input_tokens":10,"cache_write_input_tokens":10}}"#,
+        );
+        let messages = parse_codex_file(write_only.path());
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].tokens.input, 0);
+        assert_eq!(messages[0].tokens.cache_write, 10);
     }
 
     #[test]

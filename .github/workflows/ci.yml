@@ -57,8 +57,9 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: "1.100.0"
           components: clippy
 
       - uses: actions/cache@v5
@@ -68,8 +69,8 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
             cli/target/
-          key: ci-${{ matrix.os }}-${{ hashFiles('cli/Cargo.lock') }}
-          restore-keys: ci-${{ matrix.os }}-
+          key: ci-${{ matrix.os }}-rust-1.100.0-${{ hashFiles('cli/Cargo.lock') }}
+          restore-keys: ci-${{ matrix.os }}-rust-1.100.0-
 
       # tokens-core already carries `#![deny(clippy::all)]`, but tokens-cli does
       # not, so `-D warnings` is what actually holds the line there. The

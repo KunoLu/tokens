@@ -817,6 +817,10 @@ pub enum ClientFilter {
     Hindsight,
     #[value(name = "craft-agent")]
     CraftAgent,
+    Qoder,
+    Kwwk,
+    #[value(name = "trae-cli")]
+    TraeCli,
     Synthetic,
 }
 
@@ -881,6 +885,9 @@ impl ClientFilter {
             Self::Unsloth => "unsloth",
             Self::Hindsight => "hindsight",
             Self::CraftAgent => "craft-agent",
+            Self::Qoder => "qoder",
+            Self::Kwwk => "kwwk",
+            Self::TraeCli => "trae-cli",
             Self::Synthetic => "synthetic",
         }
     }
@@ -948,6 +955,9 @@ impl ClientFilter {
             Self::Unsloth => Some(ClientId::Unsloth),
             Self::Hindsight => Some(ClientId::Hindsight),
             Self::CraftAgent => Some(ClientId::CraftAgent),
+            Self::Qoder => Some(ClientId::Qoder),
+            Self::Kwwk => Some(ClientId::Kwwk),
+            Self::TraeCli => Some(ClientId::TraeCli),
             Self::Synthetic => None,
         }
     }
@@ -1011,6 +1021,9 @@ impl ClientFilter {
             ClientId::Unsloth => Self::Unsloth,
             ClientId::Hindsight => Self::Hindsight,
             ClientId::CraftAgent => Self::CraftAgent,
+            ClientId::Qoder => Self::Qoder,
+            ClientId::Kwwk => Self::Kwwk,
+            ClientId::TraeCli => Self::TraeCli,
         }
     }
 
@@ -1555,7 +1568,16 @@ struct TsTokenContributionData {
 /// rollouts only adds usage, so it needs no bump. Devin CLI 2: one API
 /// response stored in several `sessions.db` rows counts once (deduped by
 /// request_id, missuo/tokens#109); the database keeps the whole history, so
-/// the recount covers it. Claude's and Grok's smaller
+/// the recount covers it. Hermes 2: a session's lifetime usage is spread
+/// across the days of its assistant messages instead of its start day
+/// (missuo/tokens#129); the start day's stored total has to be allowed to drop
+/// or the moved usage counts twice. That also lets days shrink for sessions
+/// deleted from state.db, which #129 measured at under 1%, far less than the
+/// double count. Amp 2: message usage is dated by its own timestamp instead of
+/// the thread's creation (missuo/tokens#64), which in threads exported from
+/// ampcode.com moved a fifth of the tokens off the day they were booked on;
+/// Amp does not delete thread files, so the creation day may drop to its real
+/// total. Claude's and Grok's smaller
 /// corrections are deliberately not bumped: both clients delete old session
 /// files, and a bump would let a total that shrank because history vanished
 /// overwrite the stored one.
@@ -1566,6 +1588,8 @@ fn submit_parser_revision(client: &str) -> u32 {
     match client {
         "codex" => 4,
         "devin-cli" => 2,
+        "hermes" => 2,
+        "amp" => 2,
         _ => 1,
     }
 }
@@ -2618,11 +2642,12 @@ fn run_autosubmit_command(subcommand: commands::autosubmit::AutosubmitSubcommand
         AutosubmitSubcommand::Status { json } => commands::autosubmit::status(json),
         AutosubmitSubcommand::Disable => commands::autosubmit::disable(),
         AutosubmitSubcommand::Run { force } => {
-            let now_ms = chrono::Utc::now().timestamp_millis();
-            let (settings, decision) = commands::autosubmit::load_run_config(force, now_ms)?;
+            // Schedulers tick start-to-start; recording finish time made every other tick NotDue.
+            let tick_ms = chrono::Utc::now().timestamp_millis();
+            let (settings, decision) = commands::autosubmit::load_run_config(force, tick_ms)?;
             // No-op unless Windows, enabled, and the task predates tokensw.exe.
             commands::autosubmit::self_heal_windows_task(&settings);
-            match decision {
+            let wait_ms = match decision {
                 AutosubmitRunDecision::Disabled => {
                     println!("{}", t!("cli.autosubmit.disabled"));
                     return Ok(());
@@ -2637,13 +2662,17 @@ fn run_autosubmit_command(subcommand: commands::autosubmit::AutosubmitSubcommand
                     );
                     return Ok(());
                 }
-                AutosubmitRunDecision::Due => {}
-            }
+                AutosubmitRunDecision::Due { wait_ms } => wait_ms,
+            };
 
             let Some(_lock) = commands::autosubmit::try_acquire_run_lock()? else {
                 println!("{}", t!("cli.autosubmit.alreadyRunning"));
                 return Ok(());
             };
+            if wait_ms != 0 {
+                std::thread::sleep(std::time::Duration::from_millis(wait_ms));
+            }
+            let started_at_ms = chrono::Utc::now().timestamp_millis();
 
             let (clients, since, until, year) = commands::autosubmit::submit_filters(&settings);
             match run_submit_command(
@@ -2658,9 +2687,7 @@ fn run_autosubmit_command(subcommand: commands::autosubmit::AutosubmitSubcommand
                 None,
             ) {
                 Ok(()) => {
-                    commands::autosubmit::record_run_success(
-                        chrono::Utc::now().timestamp_millis(),
-                    )?;
+                    commands::autosubmit::record_run_success(started_at_ms)?;
                     Ok(())
                 }
                 Err(err) => {
@@ -3002,6 +3029,12 @@ fn run_submit_command(
         emit_cursor_setup_warnings(&cursor_setup_warnings);
     }
 
+    // `--client claude` reads Claude Code only; the Claude apps keep no local
+    // usage records (missuo/tokens#94).
+    let claude_selected = clients
+        .as_ref()
+        .is_some_and(|s| s.iter().any(|src| src == "claude"));
+
     say!("{}", t!("cli.submit.scanning").bright_black());
 
     let rt = Runtime::new()?;
@@ -3103,6 +3136,9 @@ fn run_submit_command(
     if graph_result.summary.total_tokens == 0 {
         say!();
         say!("{}", t!("cli.submit.noData").yellow());
+        if claude_selected {
+            say!("{}", t!("cli.submit.claudeAppsNotScanned").bright_black());
+        }
         return Ok(());
     }
 
@@ -4336,7 +4372,64 @@ mod submit_parser_revisions {
         assert_eq!(submit_parser_revision("codex"), 4);
         // missuo/tokens#109: rows sharing a request_id count once.
         assert_eq!(submit_parser_revision("devin-cli"), 2);
+        // missuo/tokens#129: usage moves off the session start day.
+        assert_eq!(submit_parser_revision("hermes"), 2);
+        // missuo/tokens#64: usage moves off the thread creation day.
+        assert_eq!(submit_parser_revision("amp"), 2);
         assert_eq!(submit_parser_revision("devin-desktop"), 1);
         assert_eq!(submit_parser_revision("claude"), 1);
+    }
+}
+
+#[cfg(test)]
+mod client_filter_tests {
+    use super::ClientFilter;
+    use clap::ValueEnum;
+
+    #[test]
+    fn qoder_is_a_first_class_filter() {
+        let filter = ClientFilter::from_filter_str("qoder").expect("qoder filter");
+        assert_eq!(filter, ClientFilter::Qoder);
+        assert_eq!(filter.as_filter_str(), "qoder");
+        assert_eq!(
+            filter.to_client_id().map(|client| client.as_str()),
+            Some("qoder")
+        );
+        assert_eq!(
+            ClientFilter::from_client_id(tokens_core::ClientId::Qoder),
+            ClientFilter::Qoder
+        );
+        // `--client qoder` must be the CLI spelling, not the enum variant name.
+        let parsed = ClientFilter::from_str("qoder", true).expect("clap value");
+        assert_eq!(parsed, ClientFilter::Qoder);
+    }
+
+    /// Every filter except the synthetic pseudo-client round-trips through its
+    /// core `ClientId`, so a newly registered client cannot be half-wired (the
+    /// submit default list and the report filter both consume this mapping).
+    #[test]
+    fn every_filter_round_trips_through_its_client_id() {
+        for filter in ClientFilter::value_variants() {
+            // 9Router is a data-source alias for gjc-format transcripts, not a
+            // `ClientId` of its own; the mapping is intentionally one-way.
+            if *filter == ClientFilter::NineRouter {
+                assert_eq!(filter.to_client_id(), ClientFilter::Gjc.to_client_id());
+                continue;
+            }
+            let Some(client) = filter.to_client_id() else {
+                assert_eq!(*filter, ClientFilter::Synthetic);
+                continue;
+            };
+            assert_eq!(filter.as_filter_str(), client.as_str());
+            assert_eq!(ClientFilter::from_client_id(client), *filter);
+            assert_eq!(
+                ClientFilter::from_filter_str(filter.as_filter_str()),
+                Some(*filter)
+            );
+            assert_eq!(
+                tokens_core::ClientId::from_str(filter.as_filter_str()),
+                Some(client)
+            );
+        }
     }
 }

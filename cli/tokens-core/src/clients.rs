@@ -623,7 +623,11 @@ define_clients!(
         display: "Antigravity",
         logo: Some("https://raw.githubusercontent.com/missuo/tokens/main/.github/assets/client-antigravity.png"),root: PathRoot::Config,
         relative: "antigravity-cache/sessions",
-        pattern: "*.jsonl",
+        // The `antigravity sync` JSONL cache lives here; current desktop
+        // builds' `conversations/*.db` are added as built-in scan roots (see
+        // `scanner::antigravity_conversation_roots`). The pattern accepts both
+        // so `extraScanPaths.antigravity` works for either kind of root.
+        pattern: "antigravity-source",
         headless: false,
         parse_local: true,
         submit_default: true
@@ -738,11 +742,12 @@ define_clients!(
         submit_default: true
     },
     // Antigravity CLI stores each conversation as a SQLite `.db` under
-    // `~/.gemini/antigravity-cli/conversations/`. Unlike the IDE-backed
-    // `Antigravity` client (which pulls usage from a running language server
-    // over RPC and caches JSONL under the config dir), the CLI usage sits on
-    // disk and is read directly — no RPC, no `antigravity sync` needed. Honors
-    // `GEMINI_CLI_HOME` so a relocated Gemini home is picked up.
+    // `~/.gemini/antigravity-cli/conversations/`, read directly — no RPC, no
+    // `antigravity sync` needed. Current desktop builds write the same schema
+    // under `~/.gemini/antigravity{,-insiders}/conversations/`; those rows
+    // belong to the `Antigravity` client, which also keeps the older builds'
+    // RPC-synced JSONL cache. Honors `GEMINI_CLI_HOME` so a relocated Gemini
+    // home is picked up.
     AntigravityCli = 31 => {
         id: "antigravity-cli",
         display: "Antigravity CLI",
@@ -1073,6 +1078,62 @@ define_clients!(
         headless: false,
         parse_local: true,
         submit_default: true
+    },
+    // Qoder (Alibaba) ships two fully separate editions — international
+    // (`~/.qoder`, `QODER_CONFIG_DIR`) and China (`~/.qoder-cn`,
+    // `QODERCN_CONFIG_DIR`) — with separate accounts and model pools. Both are
+    // registered under this one client; the scanner adds the other edition's
+    // roots as extra scan paths so a single `--client qoder` filter still
+    // merges them.
+    Qoder = 54 => {
+        id: "qoder",
+        display: "Qoder",
+        logo: None,
+        root: PathRoot::EnvVar {
+            var: "QODER_CONFIG_DIR",
+            fallback_relative: ".qoder",
+        },
+        relative: "projects",
+        pattern: "*.jsonl",
+        headless: false,
+        parse_local: true,
+        submit_default: true
+    },
+    // kwwk (yellowplushq/kwwk) is a Swift port of pi and writes the pi record
+    // format with epoch-millisecond timestamps. The CLI keeps one flat file per
+    // session under `~/.kwwk/sessions`; embedders such as a bot running one
+    // agent per task keep `<task>/.kwwk-sessions/` directories, which users add
+    // as extra scan roots. See `sessions::kwwk` and the `kwwk-session` pattern.
+    Kwwk = 55 => {
+        id: "kwwk",
+        display: "kwwk",
+        logo: Some("https://raw.githubusercontent.com/missuo/tokens/main/.github/assets/client-kwwk.png"),
+        root: PathRoot::Home,
+        relative: ".kwwk/sessions",
+        pattern: "kwwk-session",
+        headless: false,
+        parse_local: true,
+        submit_default: true
+    },
+    // TRAE CLI 2.0 (`traex`, reports itself as `traecli 0.2xx`) is a
+    // closed-source fork of codex-rs and writes Codex rollouts under
+    // `${TRAE_HOME:-~/.trae}/cli/sessions/YYYY/MM/DD/`. The scanner adds
+    // `cli/archived_sessions` and a `TRAECLI_HOME` override; see
+    // `sessions::trae_cli`. Separate from `trae`, which reads the account-level
+    // usage API dump that `tokens trae sync` writes.
+    TraeCli = 56 => {
+        id: "trae-cli",
+        display: "TRAE CLI",
+        logo: None,
+        root: PathRoot::EnvVar {
+            var: "TRAE_HOME",
+            fallback_relative: ".trae",
+        },
+        relative: "cli/sessions",
+        pattern: "*.jsonl|*.jsonl.zst",
+        headless: false,
+        parse_local: true,
+        submit_default: true
     }
 );
 
@@ -1156,6 +1217,8 @@ mod tests {
 
     #[test]
     fn every_registered_client_has_human_readable_display_metadata() {
+        // Products whose own branding is the lowercase id itself.
+        const LOWERCASE_BRANDS: &[ClientId] = &[ClientId::Kwwk];
         for client in ClientId::iter() {
             let display_name = client.display_name();
             assert!(
@@ -1163,6 +1226,9 @@ mod tests {
                 "{} has no display name",
                 client.as_str()
             );
+            if LOWERCASE_BRANDS.contains(&client) {
+                continue;
+            }
             assert_ne!(
                 display_name,
                 client.as_str(),
@@ -1187,9 +1253,70 @@ mod tests {
     }
 
     #[test]
+    fn test_qoder_client_registered_as_local_session_source() {
+        let client = ClientId::from_str("qoder").expect("qoder client should be registered");
+        assert_eq!(client.display_name(), "Qoder");
+        assert_eq!(
+            client.data().root,
+            PathRoot::EnvVar {
+                var: "QODER_CONFIG_DIR",
+                fallback_relative: ".qoder",
+            }
+        );
+        assert_eq!(client.data().relative_path, "projects");
+        assert_eq!(client.data().pattern, "*.jsonl");
+        assert!(client.data().parse_local);
+        assert!(client.data().submit_default);
+        assert!(!client.data().headless);
+    }
+
+    #[test]
+    #[serial]
+    fn test_trae_cli_root_follows_trae_home() {
+        let client = ClientId::from_str("trae-cli").expect("trae-cli client should be registered");
+        assert_eq!(client.display_name(), "TRAE CLI");
+        assert_eq!(client.data().pattern, "*.jsonl|*.jsonl.zst");
+        assert!(client.data().parse_local);
+        assert!(client.data().submit_default);
+
+        let mut env = EnvGuard::capture(&["TRAE_HOME"]);
+        env.remove("TRAE_HOME");
+        assert_eq!(
+            client.data().resolve_path("/tmp/home"),
+            native_join(std::path::Path::new("/tmp/home"), ".trae/cli/sessions")
+        );
+
+        env.set("TRAE_HOME", "/custom/trae");
+        assert_eq!(
+            client.data().resolve_path("/tmp/home"),
+            native_join(std::path::Path::new("/custom/trae"), "cli/sessions")
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn test_qoder_roots_resolve_both_editions() {
+        let mut env = EnvGuard::capture(&["QODER_CONFIG_DIR", "QODERCN_CONFIG_DIR"]);
+        env.remove("QODER_CONFIG_DIR");
+        env.remove("QODERCN_CONFIG_DIR");
+
+        assert_eq!(
+            ClientId::Qoder.data().resolve_path("/tmp/home"),
+            native_join(std::path::Path::new("/tmp/home"), ".qoder/projects")
+        );
+
+        env.set("QODER_CONFIG_DIR", "/custom/qoder");
+        assert_eq!(
+            ClientId::Qoder.data().resolve_path("/tmp/home"),
+            native_join(std::path::Path::new("/custom/qoder"), "projects")
+        );
+    }
+
+    #[test]
     fn test_client_id_count() {
-        // 53 upstream clients plus this fork's Craft Agent.
-        assert_eq!(ClientId::COUNT, 54);
+        // 53 upstream clients plus this fork's Craft Agent, Qoder, kwwk and
+        // TRAE CLI.
+        assert_eq!(ClientId::COUNT, 57);
     }
 
     #[test]

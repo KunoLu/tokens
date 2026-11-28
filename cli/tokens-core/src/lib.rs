@@ -2286,6 +2286,29 @@ fn parse_all_messages_streaming<S: MessageSink>(
                 }),
         );
     }
+    if !scan_result.copilot_session_state_events.is_empty() {
+        // The SDK journals are the same `session-state` files the desktop lane
+        // reads for its own sessions, and OTEL keys Copilot SDK spans by the
+        // same session id, so a session either source already reported is
+        // left to it.
+        let covered_sessions: HashSet<String> = all_messages
+            .iter()
+            .filter(|message| message.client == "copilot")
+            .map(|message| message.session_id.clone())
+            .collect();
+        let session_state_msgs = sessions::copilot_session_state::parse_copilot_session_state_files(
+            &scan_result.copilot_session_state_events,
+        );
+        all_messages.extend(
+            session_state_msgs
+                .into_iter()
+                .filter(|message| !covered_sessions.contains(&message.session_id))
+                .map(|mut message| {
+                    apply_pricing_if_available(&mut message, pricing);
+                    message
+                }),
+        );
+    }
     {
         let existing_dedup_keys: HashSet<String> = all_messages
             .iter()
@@ -2796,6 +2819,50 @@ fn parse_all_messages_streaming<S: MessageSink>(
         sessions::craft_agent::parse_craft_agent_file,
     );
 
+    parse_cached_lane_deduped(
+        &scan_result,
+        &mut source_cache,
+        pricing,
+        &mut all_messages,
+        ClientId::Kwwk,
+        sessions::kwwk::parse_kwwk_file,
+    );
+
+    let trae_cli_identity = message_cache::CacheIdentity::for_client(ClientId::TraeCli);
+    let trae_cli_outcomes: Vec<_> =
+        sessions::trae_cli::rollout_copies(scan_result.get(ClientId::TraeCli))
+            .into_par_iter()
+            .map(|rollout| {
+                if rollout.copies.is_empty() {
+                    let outcome = load_or_parse_source(
+                        trae_cli_identity,
+                        rollout.first,
+                        &source_cache,
+                        pricing,
+                        sessions::trae_cli::parse_trae_cli_file,
+                    );
+                    (outcome.messages, outcome.cache_entry)
+                } else {
+                    // Copy coverage depends on the current scan, not on an
+                    // individual file's fingerprint.
+                    let mut messages = rollout.parse();
+                    apply_pricing_to_messages(&mut messages, pricing);
+                    (messages, None)
+                }
+            })
+            .collect();
+    let mut trae_cli_seen = HashSet::new();
+    for (messages, cache_entry) in trae_cli_outcomes {
+        all_messages.extend(
+            messages
+                .into_iter()
+                .filter(|message| should_keep_deduped_message(&mut trae_cli_seen, message)),
+        );
+        if let Some(entry) = cache_entry {
+            source_cache.insert(entry);
+        }
+    }
+
     let augment_outcomes: Vec<CachedParseOutcome> = scan_result
         .get(ClientId::Augment)
         .par_iter()
@@ -3104,6 +3171,27 @@ fn parse_all_messages_streaming<S: MessageSink>(
         sessions::qwen::parse_qwen_file,
     );
 
+    // Qoder and Qoder CN. One client lane fed by three local sources:
+    //
+    // - CLI transcripts under `<config>/projects/` (both editions, the China
+    //   root is added by the scanner as an extra scan path),
+    // - structured segment logs under `<config>/logs/sessions/**/segments/`,
+    //   which are the only record of `--no-session-persistence` calls,
+    // - the desktop IDE's `chat_message` SQLite store, whose `token_info`
+    //   survives even when the embedded agent reports zeroed token columns.
+    //
+    // The three sources overlap: a persisted session's request appears both in
+    // its transcript and in a segment log. Every per-request record is keyed on
+    // Qoder's own `request_id`, and `collapse_qoder_messages` keeps one row per
+    // key, so the scan order of the sources and of the files inside them cannot
+    // change the total. Rows whose usage Qoder zeroed (managed-model credits)
+    // never reach this lane: they carry no measurable tokens, and the parser
+    // does not estimate them.
+    let qoder_cache = (cache_policy == SourceCachePolicy::Persistent).then_some(&mut source_cache);
+    let mut qoder_messages = sessions::qoder::parse_qoder_lane(&scan_result, qoder_cache);
+    apply_pricing_to_messages(&mut qoder_messages, pricing);
+    all_messages.extend(qoder_messages);
+
     let roocode_outcomes: Vec<CachedParseOutcome> = scan_result
         .get(ClientId::RooCode)
         .par_iter()
@@ -3231,15 +3319,11 @@ fn parse_all_messages_streaming<S: MessageSink>(
         all_messages.extend(kilo_messages);
     }
 
-    let mut hermes_seen: HashSet<String> = HashSet::new();
-    for db_path in scan_result.hermes_db_paths() {
-        let hermes_messages = parse_hermes_sqlite_with_pricing(&db_path, pricing);
-        all_messages.extend(
-            hermes_messages
-                .into_iter()
-                .filter(|message| should_keep_deduped_message(&mut hermes_seen, message)),
-        );
-    }
+    // Rows shared by several Hermes databases are deduped inside the parser.
+    all_messages.extend(parse_hermes_databases_with_pricing(
+        &scan_result.hermes_db_paths(),
+        pricing,
+    ));
 
     if let Some(db_path) = &scan_result.goose_db {
         let goose_messages: Vec<UnifiedMessage> = sessions::goose::parse_goose_sqlite(db_path)
@@ -3360,19 +3444,16 @@ fn parse_all_messages_streaming<S: MessageSink>(
         all_messages.extend(crush_messages);
     }
 
-    let antigravity_messages: Vec<UnifiedMessage> = scan_result
-        .get(ClientId::Antigravity)
-        .par_iter()
-        .flat_map(|path| {
-            sessions::antigravity::parse_antigravity_file(path)
-                .into_iter()
-                .map(|mut msg| {
-                    apply_pricing_if_available(&mut msg, pricing);
-                    msg
-                })
-                .collect::<Vec<_>>()
-        })
-        .collect();
+    // Sync-cache JSONL and on-disk conversation databases are merged (and
+    // de-duplicated per session) by `parse_antigravity_sources`.
+    let antigravity_messages: Vec<UnifiedMessage> =
+        sessions::antigravity::parse_antigravity_sources(scan_result.get(ClientId::Antigravity))
+            .into_iter()
+            .map(|mut msg| {
+                apply_pricing_if_available(&mut msg, pricing);
+                msg
+            })
+            .collect();
     all_messages.extend(antigravity_messages);
 
     let antigravity_cli_messages: Vec<UnifiedMessage> = scan_result
@@ -5139,11 +5220,11 @@ fn merge_claude_cross_file_duplicate(
     apply_pricing_if_available(existing, pricing);
 }
 
-fn parse_hermes_sqlite_with_pricing(
-    db_path: &Path,
+fn parse_hermes_databases_with_pricing(
+    db_paths: &[PathBuf],
     pricing: Option<&pricing::PricingService>,
 ) -> Vec<UnifiedMessage> {
-    sessions::hermes::parse_hermes_sqlite(db_path)
+    sessions::hermes::parse_hermes_databases(db_paths)
         .into_iter()
         .map(|mut msg| {
             if msg.cost <= 0.0 {
@@ -5447,6 +5528,19 @@ pub fn parse_local_clients(options: LocalParseOptions) -> Result<ParsedMessages,
                 .filter(|message| !otel_sessions.contains(&message.session_id)),
         );
     }
+    if !scan_result.copilot_session_state_events.is_empty() {
+        let covered_sessions: HashSet<String> = copilot_unified_msgs
+            .iter()
+            .map(|message| message.session_id.clone())
+            .collect();
+        copilot_unified_msgs.extend(
+            sessions::copilot_session_state::parse_copilot_session_state_files(
+                &scan_result.copilot_session_state_events,
+            )
+            .into_iter()
+            .filter(|message| !covered_sessions.contains(&message.session_id)),
+        );
+    }
     {
         let existing_dedup_keys: HashSet<String> = copilot_unified_msgs
             .iter()
@@ -5475,7 +5569,7 @@ pub fn parse_local_clients(options: LocalParseOptions) -> Result<ParsedMessages,
     }
     let copilot_msgs: Vec<ParsedMessage> =
         copilot_unified_msgs.iter().map(unified_to_parsed).collect();
-    let copilot_count = copilot_msgs.len() as i32;
+    let copilot_count = summed_parsed_message_count(&copilot_msgs);
     counts.set(ClientId::Copilot, copilot_count);
     messages.extend(copilot_msgs);
 
@@ -5782,6 +5876,36 @@ pub fn parse_local_clients(options: LocalParseOptions) -> Result<ParsedMessages,
     counts.set(ClientId::CraftAgent, craft_agent_count);
     messages.extend(craft_agent_msgs);
 
+    let kwwk_msgs_raw: Vec<UnifiedMessage> = scan_result
+        .get(ClientId::Kwwk)
+        .par_iter()
+        .flat_map(|path| sessions::kwwk::parse_kwwk_file(path))
+        .collect();
+    let mut kwwk_seen: HashSet<String> = HashSet::new();
+    let kwwk_msgs: Vec<ParsedMessage> = kwwk_msgs_raw
+        .into_iter()
+        .filter(|message| should_keep_deduped_message(&mut kwwk_seen, message))
+        .map(|message| unified_to_parsed(&message))
+        .collect();
+    let kwwk_count = kwwk_msgs.len() as i32;
+    counts.set(ClientId::Kwwk, kwwk_count);
+    messages.extend(kwwk_msgs);
+
+    let trae_cli_msgs_raw: Vec<_> =
+        sessions::trae_cli::rollout_copies(scan_result.get(ClientId::TraeCli))
+            .into_par_iter()
+            .flat_map_iter(|rollout| rollout.parse())
+            .collect();
+    let mut trae_cli_seen = HashSet::new();
+    let trae_cli_msgs: Vec<ParsedMessage> = trae_cli_msgs_raw
+        .into_iter()
+        .filter(|message| should_keep_deduped_message(&mut trae_cli_seen, message))
+        .map(|message| unified_to_parsed(&message))
+        .collect();
+    let trae_cli_count = trae_cli_msgs.len() as i32;
+    counts.set(ClientId::TraeCli, trae_cli_count);
+    messages.extend(trae_cli_msgs);
+
     let augment_msgs_raw: Vec<UnifiedMessage> = scan_result
         .get(ClientId::Augment)
         .par_iter()
@@ -6015,6 +6139,16 @@ pub fn parse_local_clients(options: LocalParseOptions) -> Result<ParsedMessages,
     counts.set(ClientId::Qwen, qwen_count);
     messages.extend(qwen_msgs);
 
+    // Qoder / Qoder CN: transcripts, segment logs and the IDE database all
+    // collapse onto one row per request id, just as in the submit lane.
+    let qoder_msgs: Vec<ParsedMessage> = sessions::qoder::parse_qoder_lane(&scan_result, None)
+        .iter()
+        .map(unified_to_parsed)
+        .collect();
+    let qoder_count = summed_parsed_message_count(&qoder_msgs);
+    counts.set(ClientId::Qoder, qoder_count);
+    messages.extend(qoder_msgs);
+
     let roocode_msgs: Vec<ParsedMessage> = scan_result
         .get(ClientId::RooCode)
         .par_iter()
@@ -6113,13 +6247,12 @@ pub fn parse_local_clients(options: LocalParseOptions) -> Result<ParsedMessages,
 
     let hermes_db_paths = scan_result.hermes_db_paths();
     if !hermes_db_paths.is_empty() {
-        let mut hermes_seen: HashSet<String> = HashSet::new();
-        let hermes_msgs: Vec<ParsedMessage> = hermes_db_paths
-            .iter()
-            .flat_map(|db_path| sessions::hermes::parse_hermes_sqlite(db_path))
-            .filter(|msg| should_keep_deduped_message(&mut hermes_seen, msg))
-            .map(|msg| unified_to_parsed(&msg))
-            .collect();
+        // Rows shared by several databases are deduped inside the parser.
+        let hermes_msgs: Vec<ParsedMessage> =
+            sessions::hermes::parse_hermes_databases(&hermes_db_paths)
+                .iter()
+                .map(unified_to_parsed)
+                .collect();
         let count = summed_parsed_message_count(&hermes_msgs);
         counts.set(ClientId::Hermes, count);
         messages.extend(hermes_msgs);
@@ -6191,16 +6324,11 @@ pub fn parse_local_clients(options: LocalParseOptions) -> Result<ParsedMessages,
     counts.set(ClientId::Crush, crush_count);
     messages.extend(crush_msgs);
 
-    let antigravity_msgs: Vec<ParsedMessage> = scan_result
-        .get(ClientId::Antigravity)
-        .par_iter()
-        .flat_map(|path| {
-            sessions::antigravity::parse_antigravity_file(path)
-                .into_iter()
-                .map(|msg| unified_to_parsed(&msg))
-                .collect::<Vec<_>>()
-        })
-        .collect();
+    let antigravity_msgs: Vec<ParsedMessage> =
+        sessions::antigravity::parse_antigravity_sources(scan_result.get(ClientId::Antigravity))
+            .iter()
+            .map(unified_to_parsed)
+            .collect();
     let antigravity_count = antigravity_msgs.len() as i32;
     counts.set(ClientId::Antigravity, antigravity_count);
     messages.extend(antigravity_msgs);
@@ -17041,6 +17169,97 @@ mod tests {
         assert_eq!(messages[0].provider_id, "synthetic");
     }
 
+    /// VS Code's Agent mode "Copilot" harness runs the Copilot SDK in the Agent
+    /// Host, which journals sessions under `~/.copilot/session-state` rather
+    /// than `workspaceStorage/*/chatSessions` (#131). A session the desktop
+    /// app's `data.db` already reports must not be counted again from its
+    /// journal, and both lanes must count the same SDK input buckets.
+    #[test]
+    fn test_copilot_session_state_journals_are_parsed_once_per_session() {
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let copilot_home = temp_dir.path().join(".copilot");
+        const CHECKPOINT: &str = r#"{"type":"session.usage_checkpoint","data":{"totalNanoAiu":0,"providerModelMetrics":[{"modelId":"gpt-5.4","provider":{"id":"github-copilot","kind":"copilot","label":"GitHub Copilot"},"metrics":{"requests":{"count":2,"cost":1},"usage":{"inputTokens":1000,"outputTokens":100,"cacheReadTokens":400,"cacheWriteTokens":200,"reasoningTokens":20}}}]},"id":"checkpoint","timestamp":"2026-11-18T10:05:00.000Z","parentId":"start"}"#;
+        const SHUTDOWN: &str = r#"{"type":"session.shutdown","data":{"shutdownType":"routine","modelMetrics":{"gpt-5.4":{"requests":{"count":2,"cost":1},"usage":{"inputTokens":1000,"outputTokens":100,"cacheReadTokens":400,"cacheWriteTokens":200,"reasoningTokens":20}}}},"id":"shutdown","timestamp":"2026-11-18T10:05:00.000Z","parentId":"start"}"#;
+        for (session, event) in [
+            ("agent-host-session", CHECKPOINT),
+            ("desktop-session", SHUTDOWN),
+            ("journal-only-session", SHUTDOWN),
+        ] {
+            let dir = copilot_home.join("session-state").join(session);
+            std::fs::create_dir_all(&dir).unwrap();
+            let journal = format!(
+                "{}\n{event}\n",
+                format_args!(
+                    r#"{{"type":"session.start","data":{{"sessionId":"{session}","version":1,"producer":"copilot-agent","copilotVersion":"1.0.111-0","startTime":"2026-11-18T10:00:00.000Z","context":{{"cwd":"/project"}}}},"id":"start","timestamp":"2026-11-18T10:00:00.000Z","parentId":null}}"#
+                ),
+            );
+            std::fs::write(dir.join("events.jsonl"), journal).unwrap();
+        }
+        let conn = rusqlite::Connection::open(copilot_home.join("data.db")).unwrap();
+        conn.execute_batch(
+            r#"CREATE TABLE sessions (id TEXT, title TEXT, model TEXT, total_input_tokens INTEGER,
+                total_output_tokens INTEGER, total_cached_tokens INTEGER, total_reasoning_tokens INTEGER,
+                total_nano_aiu INTEGER, created_at TEXT);
+            INSERT INTO sessions VALUES ('desktop-session', 't', 'gpt-5.4', 1000, 100, 400, 20, 0, '2026-11-18T10:00:00Z');"#,
+        )
+        .unwrap();
+        drop(conn);
+
+        let streamed = parse_all_messages_with_pricing_with_cache_policy(
+            temp_dir.path().to_str().unwrap(),
+            &["copilot".to_string()],
+            None,
+            false,
+            &scanner::ScannerSettings::default(),
+            SourceCachePolicy::InMemory,
+        );
+        assert!(streamed.iter().any(|message| {
+            message.dedup_key.as_deref()
+                == Some("copilot-desktop:desktop-session:shutdown:shutdown:gpt-5.4")
+        }));
+        assert!(streamed.iter().any(|message| {
+            message.dedup_key.as_deref()
+                == Some("copilot-session-state:journal-only-session:shutdown:gpt-5.4")
+        }));
+        let streamed: Vec<_> = streamed.iter().map(unified_to_parsed).collect();
+
+        let local = parse_local_clients(LocalParseOptions {
+            home_dir: Some(temp_dir.path().to_str().unwrap().to_string()),
+            use_env_roots: false,
+            clients: Some(vec!["copilot".to_string()]),
+            since: None,
+            until: None,
+            year: None,
+            scanner_settings: scanner::ScannerSettings::default(),
+        })
+        .unwrap();
+        assert_eq!(local.counts.get(ClientId::Copilot), 5);
+        let expected = [
+            ("agent-host-session", 2),
+            ("desktop-session", 1),
+            ("journal-only-session", 2),
+        ];
+        for messages in [&streamed[..], &local.messages[..]] {
+            assert_eq!(messages.len(), expected.len());
+            for (session, request_count) in expected {
+                let message = messages.iter().find(|m| m.session_id == session).unwrap();
+                assert_eq!(
+                    (
+                        message.timestamp,
+                        message.input,
+                        message.output,
+                        message.cache_read,
+                        message.cache_write,
+                        message.reasoning,
+                        message.message_count,
+                    ),
+                    (1_794_996_300_000, 400, 100, 400, 200, 20, request_count),
+                    "{session}",
+                );
+            }
+        }
+    }
+
     #[test]
     fn test_parse_local_clients_preserves_gateway_message_client_counts() {
         let temp_dir = tempfile::TempDir::new().unwrap();
@@ -18628,7 +18847,13 @@ mod tests {
     #[test]
     #[serial_test::serial]
     fn test_prime_agent_rejects_damaged_child_lineage_and_timestamp_cold_and_warm() {
-        for damage in ["parent-value", "timestamp-value"] {
+        for damage in [
+            "parent-value",
+            "timestamp-value",
+            "timestamp-bool",
+            "timestamp-object",
+            "timestamp-null",
+        ] {
             let cache_home = tempfile::TempDir::new().unwrap();
             let source_home = tempfile::TempDir::new().unwrap();
             let _cache_env = redirect_cache_home(cache_home.path());
@@ -18663,11 +18888,16 @@ mod tests {
             } else {
                 child.extend_from_slice(format!("{{\"type\":\"session\",\"version\":3,\"id\":\"child\",\"cwd\":\"/tmp/project\",\"parentSession\":{clean_parent},\"rlmDepth\":1}}\n").as_bytes());
             }
-            if damage == "timestamp-value" {
-                child.extend_from_slice(b"{\"type\":\"message\",\"id\":\"child-message\",\"timestamp\":\"2026-08-08T00:00:0\xffZ\",\"message\":{\"role\":\"assistant\",\"provider\":\"anthropic\",\"model\":\"claude-opus-5\",\"usage\":{\"input\":50,\"output\":0}}}\n");
-            } else {
-                child.extend_from_slice(b"{\"type\":\"message\",\"id\":\"child-message\",\"timestamp\":\"2026-08-08T00:00:02.000Z\",\"message\":{\"role\":\"assistant\",\"provider\":\"anthropic\",\"model\":\"claude-opus-5\",\"usage\":{\"input\":50,\"output\":0}}}\n");
-            }
+            let timestamp: &[u8] = match damage {
+                "timestamp-value" => b"\"2026-08-08T00:00:0\xffZ\"",
+                "timestamp-bool" => b"true",
+                "timestamp-object" => b"{}",
+                "timestamp-null" => b"null",
+                _ => b"\"2026-08-08T00:00:02.000Z\"",
+            };
+            child.extend_from_slice(br#"{"type":"message","id":"child-message","timestamp":"#);
+            child.extend_from_slice(timestamp);
+            child.extend_from_slice(b",\"message\":{\"role\":\"assistant\",\"provider\":\"anthropic\",\"model\":\"claude-opus-5\",\"usage\":{\"input\":50,\"output\":0}}}\n");
             std::fs::write(child_path, child).unwrap();
 
             let clients = ["prime-agent".to_string()];

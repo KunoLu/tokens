@@ -7,7 +7,7 @@ use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
-use crate::clients::ClientId;
+use crate::clients::{ClientId, PathRoot};
 use crate::sessions::{normalize_workspace_key, workspace_label_from_key};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -127,6 +127,16 @@ pub struct ScanResult {
     /// VS Code Copilot chat session JSONL files discovered under
     /// `workspaceStorage/*/chatSessions/*.jsonl`.
     pub copilot_vscode_sessions: Vec<PathBuf>,
+    /// Copilot SDK session journals at
+    /// `<COPILOT_HOME>/session-state/<sessionId>/events.jsonl`, written by
+    /// Copilot CLI and by VS Code's Agent mode "Copilot" harness.
+    pub copilot_session_state_events: Vec<PathBuf>,
+    /// Qoder and Qoder CN desktop IDE databases
+    /// (`<app data>/Qoder[CN]/SharedClientCache/cache/db/local.db`), which keep
+    /// per-message `token_info` for the IDE's chat panel. Nonstandard layouts
+    /// are only read when the user explicitly selects a `local.db` file.
+    pub qoder_ide_dbs: Vec<(PathBuf, crate::sessions::qoder::QoderSource)>,
+    qoder_config_roots: Vec<(PathBuf, crate::sessions::qoder::QoderSource)>,
 }
 
 impl Default for ScanResult {
@@ -148,11 +158,24 @@ impl Default for ScanResult {
             opencode_json_dir: None,
             devin_dbs: Vec::new(),
             copilot_vscode_sessions: Vec::new(),
+            copilot_session_state_events: Vec::new(),
+            qoder_ide_dbs: Vec::new(),
+            qoder_config_roots: Vec::new(),
         }
     }
 }
 
 impl ScanResult {
+    pub(crate) fn qoder_source(&self, path: &Path) -> crate::sessions::qoder::QoderSource {
+        self.qoder_config_roots
+            .iter()
+            .find(|(root, _)| path.starts_with(root))
+            .map_or_else(
+                || crate::sessions::qoder::QoderSource::from_path(path),
+                |(_, source)| *source,
+            )
+    }
+
     pub fn get(&self, client: ClientId) -> &Vec<PathBuf> {
         &self.files[client as usize]
     }
@@ -446,9 +469,24 @@ pub fn scan_directory(root: &str, pattern: &str) -> Vec<PathBuf> {
     // and merely unpruned.
     let prune_extension_siblings = pattern == "codebuddy-extension-log";
 
-    let mut paths: Vec<PathBuf> = WalkDir::new(root)
+    // kwwk: sessions sit directly in the root (`~/.kwwk/sessions/<id>.jsonl`)
+    // or in a `.kwwk-sessions` directory one level below an embedder's task
+    // directory (`<tasks>/<task>/.kwwk-sessions/<id>.jsonl`). Those task
+    // directories also hold full code checkouts with `node_modules`, so cap the
+    // depth at the deepest layout and skip dependency / VCS trees outright.
+    let kwwk_sessions = pattern == "kwwk-session";
+    let mut walker = WalkDir::new(root);
+    if kwwk_sessions {
+        walker = walker.max_depth(3);
+    }
+
+    let mut paths: Vec<PathBuf> = walker
         .into_iter()
         .filter_entry(|e| {
+            if kwwk_sessions && e.depth() > 0 && e.file_type().is_dir() {
+                let name = e.file_name().to_string_lossy();
+                return !matches!(name.as_ref(), "node_modules" | ".git" | ".build" | "Pods" | "DerivedData");
+            }
             if !prune_extension_siblings || !e.file_type().is_dir() {
                 return true;
             }
@@ -486,6 +524,16 @@ pub fn scan_directory(root: &str, pattern: &str) -> Vec<PathBuf> {
                 "*.json" => file_name.ends_with(".json"),
                 "*.json|*.jsonl" => file_name.ends_with(".json") || file_name.ends_with(".jsonl"),
                 "*.jsonl" => file_name.ends_with(".jsonl"),
+                // Qoder CLI segment logs: `<session>/segments/*.jsonl`. The
+                // parent-directory check keeps every other diagnostic file
+                // under `logs/sessions` out of the token lane.
+                "qoder-segments" => {
+                    file_name.ends_with(".jsonl")
+                        && path
+                            .parent()
+                            .and_then(Path::file_name)
+                            .is_some_and(|dir| dir == "segments")
+                }
                 // Codex: live rollouts plus the zstd form Codex rewrites older
                 // ones into. Only the exact `.jsonl.zst` suffix is a
                 // transcript; other `.zst` files and in-flight temporaries
@@ -534,6 +582,13 @@ pub fn scan_directory(root: &str, pattern: &str) -> Vec<PathBuf> {
                             }
                             _ => false,
                         }
+                }
+                "kwwk-session" => {
+                    file_name.ends_with(".jsonl")
+                        && path.parent().is_some_and(|dir| {
+                            dir == Path::new(root)
+                                || dir.file_name().is_some_and(|name| name == ".kwwk-sessions")
+                        })
                 }
                 "craft-agent-pi-session" => {
                     file_name.ends_with(".jsonl")
@@ -678,6 +733,9 @@ pub fn scan_directory(root: &str, pattern: &str) -> Vec<PathBuf> {
                 // naturally rejects the `.db-wal`/`.db-shm`/`.db-journal`
                 // sidecars SQLite writes alongside the main file.
                 "*.db" => file_name.ends_with(".db"),
+                // Antigravity: the `antigravity sync` JSONL cache plus the
+                // conversation databases current desktop builds write.
+                "antigravity-source" => file_name.ends_with(".jsonl") || file_name.ends_with(".db"),
                 _ => false,
             }
         })
@@ -763,12 +821,133 @@ fn join_native_path(root: &std::path::Path, relative: &str) -> std::path::PathBu
     path
 }
 
+/// Per-profile Antigravity ACP conversation roots isolated by T3 Code.
+///
+/// T3 Code (pingdotgg/t3code) runs Antigravity over ACP and stores each
+/// profile's sessions at
+/// `<T3CODE_HOME>/userdata/providers/antigravity/<profile>/antigravity-acp/conversations/*.db`,
+/// in the same `gen_metadata` format the `antigravity-cli` client already
+/// parses. `T3CODE_HOME` defaults to `~/.t3`, is trimmed and `~`-expanded the
+/// way T3 Code resolves it itself, and — like every other root override — is
+/// only read when env roots are enabled: an explicit `--home` scan must not
+/// consult the caller's environment. Missing directories and non-directory
+/// profile entries are skipped silently.
+fn t3_antigravity_acp_scan_roots(home_dir: &Path, use_env_roots: bool) -> Vec<PathBuf> {
+    let t3_home = if use_env_roots {
+        std::env::var("T3CODE_HOME")
+            .ok()
+            .map(|value| value.trim().to_owned())
+            .filter(|value| !value.is_empty())
+            .map(|value| expand_tilde_path_with_home(&value, home_dir.to_string_lossy().as_ref()))
+            .unwrap_or_else(|| home_dir.join(".t3"))
+    } else {
+        home_dir.join(".t3")
+    };
+    let Ok(entries) =
+        std::fs::read_dir(join_native_path(&t3_home, "userdata/providers/antigravity"))
+    else {
+        return Vec::new();
+    };
+    let mut roots: Vec<PathBuf> = entries
+        .filter_map(|entry| entry.ok())
+        .map(|entry| join_native_path(&entry.path(), "antigravity-acp/conversations"))
+        .filter(|path| path.is_dir())
+        .collect();
+    roots.sort_unstable();
+    roots
+}
+
+/// Conversation-database roots of the Antigravity desktop app.
+///
+/// Current Antigravity and Antigravity - Insiders builds store each
+/// conversation as `<gemini home>/<app data dir>/conversations/<cascade>.db`
+/// (the same schema as the Antigravity CLI), where the app data dir is the
+/// language server's `--app_data_dir` (`antigravity`, `antigravity-insiders`).
+/// Older builds wrote encrypted `.pb` files to the same directory; the
+/// `antigravity-source` pattern only admits `.db`/`.jsonl`, so those are
+/// ignored and still come from the `antigravity sync` cache.
+///
+/// The Gemini home honours `GEMINI_CLI_HOME` like the `antigravity-cli` root,
+/// and `~/.gemini` is always scanned too: the desktop app is not known to read
+/// that variable, so a relocated CLI home must not hide desktop usage.
+/// Duplicate roots are collapsed by the scan-task de-duplication.
+pub fn antigravity_conversation_roots(home_dir: &str, use_env_roots: bool) -> Vec<PathBuf> {
+    let mut gemini_homes = vec![join_native_path(Path::new(home_dir), ".gemini")];
+    let env_home = PathRoot::EnvVar {
+        var: "GEMINI_CLI_HOME",
+        fallback_relative: ".gemini",
+    }
+    .resolve_with_env_strategy(home_dir, use_env_roots);
+    let env_home = PathBuf::from(env_home);
+    if env_home != gemini_homes[0]
+        && !std::fs::canonicalize(&env_home).is_ok_and(|resolved| {
+            std::fs::canonicalize(&gemini_homes[0]).is_ok_and(|default| resolved == default)
+        })
+    {
+        gemini_homes.push(env_home);
+    }
+
+    gemini_homes
+        .iter()
+        .flat_map(|gemini_home| {
+            ["antigravity", "antigravity-insiders"]
+                .into_iter()
+                .map(move |app_dir| {
+                    join_native_path(gemini_home, &format!("{app_dir}/conversations"))
+                })
+        })
+        .collect()
+}
+
 pub fn built_in_extra_scan_paths_for(
     home_dir: &str,
     enabled: &HashSet<ClientId>,
     use_env_roots: bool,
 ) -> Vec<(ClientId, PathBuf)> {
     let mut paths = crate::paseo::discover_scan_paths(Path::new(home_dir), enabled, use_env_roots);
+
+    if enabled.contains(&ClientId::Qoder) {
+        // The China edition (`@qodercn-ai/qoderclicn`, Qoder CN CLI/Desktop)
+        // keeps its transcripts in `~/.qoder-cn` and honours its own
+        // `QODERCN_CONFIG_DIR`. Both editions are one client, so requesting
+        // `qoder` must find both.
+        let qoder_cn_root = PathRoot::EnvVar {
+            var: "QODERCN_CONFIG_DIR",
+            fallback_relative: ".qoder-cn",
+        }
+        .resolve_with_env_strategy(home_dir, use_env_roots);
+        paths.push((
+            ClientId::Qoder,
+            PathBuf::from(join_native(&qoder_cn_root, "projects")),
+        ));
+    }
+
+    if enabled.contains(&ClientId::TraeCli) {
+        // TRAE CLI keeps its Codex-format store in `<TRAE_HOME>/cli`:
+        // `traex archive <id>` moves a rollout from `sessions/` into the flat
+        // `archived_sessions/`, as `codex archive` does. `TRAECLI_HOME`
+        // relocates that `cli` directory on its own, so it is read too.
+        let trae_home = ClientId::TraeCli
+            .data()
+            .root
+            .resolve_with_env_strategy(home_dir, use_env_roots);
+        paths.push((
+            ClientId::TraeCli,
+            PathBuf::from(join_native(&trae_home, "cli/archived_sessions")),
+        ));
+        if use_env_roots {
+            let cli_home = std::env::var("TRAECLI_HOME").unwrap_or_default();
+            let cli_home = cli_home.trim();
+            if !cli_home.is_empty() {
+                for relative in ["sessions", "archived_sessions"] {
+                    paths.push((
+                        ClientId::TraeCli,
+                        PathBuf::from(join_native(cli_home, relative)),
+                    ));
+                }
+            }
+        }
+    }
 
     if enabled.contains(&ClientId::Claude) {
         // `transcripts` is a sibling of the registered `projects` root, not a
@@ -841,6 +1020,22 @@ pub fn built_in_extra_scan_paths_for(
             ClientId::Senpi,
             senpi_omo_children_root(Path::new(home_dir), user_state_dir.as_deref()),
         ));
+    }
+
+    if enabled.contains(&ClientId::Antigravity) {
+        paths.extend(
+            antigravity_conversation_roots(home_dir, use_env_roots)
+                .into_iter()
+                .map(|path| (ClientId::Antigravity, path)),
+        );
+    }
+
+    if enabled.contains(&ClientId::AntigravityCli) {
+        paths.extend(
+            t3_antigravity_acp_scan_roots(Path::new(home_dir), use_env_roots)
+                .into_iter()
+                .map(|path| (ClientId::AntigravityCli, path)),
+        );
     }
 
     paths
@@ -1819,6 +2014,47 @@ fn discover_copilot_vscode_sessions(home_dir: &str, use_env_roots: bool) -> Vec<
     files
 }
 
+/// Copilot SDK session journals, `<COPILOT_HOME>/session-state/*/events.jsonl`.
+///
+/// The SDK resolves its home as a non-empty `COPILOT_HOME`, else
+/// `<home>/.copilot` (microsoft/vscode
+/// `src/vs/platform/environment/common/copilotHome.ts`), so both are probed.
+fn discover_copilot_session_state_events(home_dir: &str, use_env_roots: bool) -> Vec<PathBuf> {
+    let mut roots = vec![PathBuf::from(join_native(
+        home_dir,
+        ".copilot/session-state",
+    ))];
+    if use_env_roots {
+        if let Some(copilot_home) = std::env::var_os("COPILOT_HOME")
+            .map(PathBuf::from)
+            .filter(|path| !path.as_os_str().is_empty())
+        {
+            roots.push(copilot_home.join("session-state"));
+        }
+    }
+
+    let mut files = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for root in &roots {
+        let Ok(session_dirs) = std::fs::read_dir(root) else {
+            continue;
+        };
+        for entry in session_dirs.filter_map(|entry| entry.ok()) {
+            let events = entry.path().join("events.jsonl");
+            if !events.is_file() {
+                continue;
+            }
+            let key = std::fs::canonicalize(&events).unwrap_or_else(|_| events.clone());
+            if seen.insert(key) {
+                files.push(events);
+            }
+        }
+    }
+
+    files.sort_unstable();
+    files
+}
+
 /// Scan all session client directories in parallel, with user-controlled
 /// [`ScannerSettings`] merged in.
 ///
@@ -1951,6 +2187,7 @@ fn scan_all_clients_with_env_strategy_inner(
     let mut tasks: Vec<(ClientId, String, &str)> = Vec::new();
     let mut seen_scan_roots: HashSet<(ClientId, PathBuf)> = HashSet::new();
     let mut devin_cli_roots: Vec<PathBuf> = Vec::new();
+    let mut extra_qoder_dbs = Vec::new();
     // Every OpenClaw agents root the scan covers; each is also searched for
     // per-agent SQLite transcript databases once the roots are settled.
     let mut openclaw_agent_roots: Vec<PathBuf> = Vec::new();
@@ -2000,6 +2237,13 @@ fn scan_all_clients_with_env_strategy_inner(
 
     for (client_id, path) in extra_scan_paths_for(scanner_settings, &enabled_with_lookups) {
         warn_if_escapes_home(Path::new(home_dir), client_id, &path);
+        if client_id == ClientId::Qoder
+            && crate::sessions::qoder::is_qoder_ide_db(&path)
+            && path.is_file()
+        {
+            extra_qoder_dbs.push(path);
+            continue;
+        }
         if client_id == ClientId::DevinCli {
             devin_cli_roots.push(path);
         } else if client_id == ClientId::Grok {
@@ -2014,6 +2258,39 @@ fn scan_all_clients_with_env_strategy_inner(
 
     for (client_id, path) in built_in_extra_scan_paths_for(home_dir, &enabled, use_env_roots) {
         push_unique_scan_task(&mut tasks, &mut seen_scan_roots, client_id, path);
+    }
+
+    if enabled.contains(&ClientId::Qoder) {
+        // Qoder CLI 1.1.13+ writes per-request token truth for calls made with
+        // `--print --no-session-persistence` into diagnostic segment logs
+        // rather than a transcript. Only `<session>/segments/*.jsonl` is an
+        // event stream; the siblings under `logs/sessions` (runs, router logs)
+        // are diagnostics and are not scanned.
+        use crate::sessions::qoder::QoderSource;
+        for (var, fallback_relative, source) in [
+            ("QODER_CONFIG_DIR", ".qoder", QoderSource::International),
+            ("QODERCN_CONFIG_DIR", ".qoder-cn", QoderSource::China),
+        ] {
+            let root = PathRoot::EnvVar {
+                var,
+                fallback_relative,
+            }
+            .resolve_with_env_strategy(home_dir, use_env_roots);
+            push_unique_scan_task_with_pattern(
+                &mut tasks,
+                &mut seen_scan_roots,
+                ClientId::Qoder,
+                PathBuf::from(join_native(&root, "logs/sessions")),
+                "qoder-segments",
+            );
+            let root = PathBuf::from(root);
+            let root = crate::sessions::qoder::absolute_source_path(&root).unwrap_or(root);
+            result.qoder_config_roots.push((root, source));
+        }
+        // A user may place one edition's root inside the other's.
+        result
+            .qoder_config_roots
+            .sort_by_key(|(root, _)| std::cmp::Reverse(root.components().count()));
     }
 
     if enabled.contains(&ClientId::CodeBuddy) {
@@ -2599,6 +2876,32 @@ fn scan_all_clients_with_env_strategy_inner(
         }
     }
 
+    if enabled.contains(&ClientId::Qoder) {
+        // Both editions persist IDE chat usage in their own app-data directory.
+        // `PathRoot::AppData` resolves to `%APPDATA%` on Windows,
+        // `~/Library/Application Support` on macOS and the XDG config home on
+        // Linux, and follows the caller's home under `--home`.
+        let app_data = PathRoot::AppData.resolve_with_env_strategy(home_dir, use_env_roots);
+        let mut seen_qoder_dbs: HashSet<PathBuf> = HashSet::new();
+        let mut candidates =
+            crate::sessions::qoder::qoder_ide_db_candidates(Path::new(&app_data), use_env_roots);
+        candidates.extend(extra_qoder_dbs.into_iter().map(|path| {
+            let path = crate::sessions::qoder::absolute_source_path(&path).unwrap_or(path);
+            let source = result.qoder_source(&path);
+            (path, source)
+        }));
+        for (candidate, source) in candidates {
+            if !candidate.is_file() {
+                continue;
+            }
+            let key = std::fs::canonicalize(&candidate).unwrap_or_else(|_| candidate.clone());
+            if seen_qoder_dbs.insert(key) {
+                result.qoder_ide_dbs.push((candidate, source));
+            }
+        }
+        result.qoder_ide_dbs.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+    }
+
     if enabled.contains(&ClientId::Crush) {
         result.crush_dbs = discover_crush_dbs(home_dir, use_env_roots);
     }
@@ -2932,6 +3235,8 @@ fn scan_all_clients_with_env_strategy_inner(
         }
 
         result.copilot_vscode_sessions = discover_copilot_vscode_sessions(home_dir, use_env_roots);
+        result.copilot_session_state_events =
+            discover_copilot_session_state_events(home_dir, use_env_roots);
 
         if let Some(path) = copilot_exporter_path_with_env_strategy(use_env_roots) {
             let key = std::fs::canonicalize(&path).unwrap_or_else(|_| path.clone());
@@ -3915,6 +4220,62 @@ mod tests {
             result.get(ClientId::CraftAgent).as_slice(),
             std::slice::from_ref(&transcript)
         );
+    }
+
+    #[test]
+    fn test_scan_all_clients_reads_kwwk_cli_sessions() {
+        let dir = TempDir::new().unwrap();
+        let sessions = dir.path().join(".kwwk/sessions");
+        fs::create_dir_all(&sessions).unwrap();
+        let transcript = sessions.join("66ff7a63-f706-405b-ba34-e5b4b437f29c.jsonl");
+        File::create(&transcript).unwrap();
+        File::create(sessions.join("index.json")).unwrap();
+
+        let result = scan_all_clients_with_env_strategy(
+            dir.path().to_str().unwrap(),
+            &["kwwk".to_string()],
+            false,
+        );
+
+        assert_eq!(
+            result.get(ClientId::Kwwk).as_slice(),
+            std::slice::from_ref(&transcript)
+        );
+        assert!(result.get(ClientId::Pi).is_empty());
+    }
+
+    #[test]
+    fn test_kwwk_session_pattern_reads_task_session_dirs_only() {
+        // A bot embedding kwwk keeps `<tasks>/<task>/.kwwk-sessions/` next to
+        // full code checkouts; only the session directories may be read.
+        let dir = TempDir::new().unwrap();
+        let tasks = dir.path().join("tasks");
+        let live = tasks.join("T0001/.kwwk-sessions");
+        fs::create_dir_all(&live).unwrap();
+        let session = live.join("a1.jsonl");
+        File::create(&session).unwrap();
+        let flat = tasks.join("loose.jsonl");
+        File::create(&flat).unwrap();
+
+        let checkout = tasks.join("T0001/merchant");
+        let in_deps = checkout.join("node_modules/pkg/.kwwk-sessions");
+        fs::create_dir_all(&in_deps).unwrap();
+        File::create(in_deps.join("dep.jsonl")).unwrap();
+        let fixtures = checkout.join("fixtures");
+        fs::create_dir_all(&fixtures).unwrap();
+        File::create(fixtures.join("events.jsonl")).unwrap();
+        let too_deep = checkout.join("apps/x/.kwwk-sessions");
+        fs::create_dir_all(&too_deep).unwrap();
+        File::create(too_deep.join("deep.jsonl")).unwrap();
+
+        let mut found = scan_directory(tasks.to_str().unwrap(), "kwwk-session");
+        found.sort();
+        let mut expected = vec![session.clone(), flat.clone()];
+        expected.sort();
+        assert_eq!(found, expected);
+
+        // Pointing straight at one task's session directory works too.
+        assert_eq!(scan_directory(live.to_str().unwrap(), "kwwk-session"), vec![session]);
     }
 
     #[test]
@@ -5976,6 +6337,44 @@ mod tests {
     }
 
     #[test]
+    fn test_scan_all_clients_copilot_finds_sdk_session_journals() {
+        let dir = TempDir::new().unwrap();
+        let home = dir.path();
+        let session = home.join(".copilot/session-state/8d3f1c2a-5b6e-4f70-9a81-2c3d4e5f6a7b");
+        fs::create_dir_all(&session).unwrap();
+        File::create(session.join("events.jsonl")).unwrap();
+        // A session directory without a journal yet, and a stray file.
+        fs::create_dir_all(home.join(".copilot/session-state/empty-session")).unwrap();
+        File::create(home.join(".copilot/session-state/session-store.db")).unwrap();
+
+        let result = scan_all_clients_with_env_strategy(
+            home.to_str().unwrap(),
+            &["copilot".to_string()],
+            false,
+        );
+
+        assert_eq!(
+            result.copilot_session_state_events,
+            vec![session.join("events.jsonl")]
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn relative_copilot_home_is_respected_only_for_env_scans() {
+        let tmp = TempDir::new_in(".").unwrap();
+        let folder = tmp.path().file_name().unwrap();
+        let journal = Path::new(folder).join("session-state/rel-session/events.jsonl");
+        fs::create_dir_all(journal.parent().unwrap()).unwrap();
+        fs::write(&journal, b"").unwrap();
+        let mut env = EnvGuard::capture(&["COPILOT_HOME"]);
+        env.set("COPILOT_HOME", folder.to_str().unwrap());
+        let home = TempDir::new().unwrap();
+        assert_eq!(discover_copilot_session_state_events(home.path().to_str().unwrap(), true), [journal]);
+        assert!(discover_copilot_session_state_events(home.path().to_str().unwrap(), false).is_empty());
+    }
+
+    #[test]
     #[serial]
     fn test_scan_all_clients_copilot_includes_explicit_exporter_file() {
         let previous = std::env::var("COPILOT_OTEL_FILE_EXPORTER_PATH").ok();
@@ -6883,6 +7282,58 @@ mod tests {
         );
 
         restore_env("CODEX_HOME", previous_codex);
+    }
+
+    #[test]
+    #[serial]
+    fn test_scan_all_clients_trae_cli_live_archived_and_cli_home() {
+        // TRAE CLI 2.0 writes Codex rollouts under `<TRAE_HOME>/cli`, dated
+        // `sessions/` plus the flat `archived_sessions/`; `TRAECLI_HOME` moves
+        // that `cli` directory. `history.jsonl` beside them holds prompts only.
+        let mut env = EnvGuard::capture(&["TRAE_HOME", "TRAECLI_HOME"]);
+        env.remove("TRAE_HOME");
+        env.remove("TRAECLI_HOME");
+
+        let dir = TempDir::new().unwrap();
+        let home = dir.path();
+        let cli = home.join(".trae/cli");
+        let sessions = cli.join("sessions/2026/08/01");
+        let archived = cli.join("archived_sessions");
+        fs::create_dir_all(&sessions).unwrap();
+        fs::create_dir_all(&archived).unwrap();
+        File::create(sessions.join("rollout-live.jsonl")).unwrap();
+        File::create(archived.join("rollout-archived.jsonl")).unwrap();
+        File::create(cli.join("history.jsonl")).unwrap();
+
+        let relocated = dir.path().join("relocated-cli");
+        fs::create_dir_all(relocated.join("sessions/2026/09/01")).unwrap();
+        File::create(relocated.join("sessions/2026/09/01/rollout-moved.jsonl")).unwrap();
+
+        let scan_names = || {
+            let result = scan_without_extra_dirs(home.to_str().unwrap(), &["trae-cli".to_string()]);
+            let mut names: Vec<String> = result
+                .get(ClientId::TraeCli)
+                .iter()
+                .map(|path| path.file_name().unwrap().to_string_lossy().into_owned())
+                .collect();
+            names.sort();
+            names
+        };
+
+        assert_eq!(
+            scan_names(),
+            vec!["rollout-archived.jsonl", "rollout-live.jsonl"]
+        );
+
+        env.set("TRAECLI_HOME", &relocated);
+        assert_eq!(
+            scan_names(),
+            vec![
+                "rollout-archived.jsonl",
+                "rollout-live.jsonl",
+                "rollout-moved.jsonl"
+            ]
+        );
     }
 
     #[test]
@@ -9131,6 +9582,213 @@ mod tests {
         assert!(
             discover_senpi_omo_children_roots(&temp.path().join("no-such-root"), None).is_empty(),
             "a missing sessions root must discover nothing"
+        );
+    }
+
+    fn setup_t3_antigravity_profile(t3_home: &Path, profile: &str) -> PathBuf {
+        let conversations = join_native_path(
+            t3_home,
+            &format!("userdata/providers/antigravity/{profile}/antigravity-acp/conversations"),
+        );
+        fs::create_dir_all(&conversations).unwrap();
+        conversations
+    }
+
+    #[test]
+    #[serial]
+    fn antigravity_desktop_conversation_dbs_are_scanned() {
+        let home = TempDir::new().unwrap();
+        let mut env = EnvGuard::capture(&["GEMINI_CLI_HOME"]);
+        env.remove("GEMINI_CLI_HOME");
+        let stable = home.path().join(".gemini/antigravity/conversations");
+        let insiders = home
+            .path()
+            .join(".gemini/antigravity-insiders/conversations");
+        fs::create_dir_all(&stable).unwrap();
+        fs::create_dir_all(&insiders).unwrap();
+        // Current builds write `.db`; older ones left encrypted `.pb` files in
+        // the same directory, and SQLite leaves `-wal`/`-shm` sidecars.
+        for name in ["new.db", "new.db-wal", "new.db-shm", "old.pb"] {
+            fs::write(stable.join(name), b"x").unwrap();
+        }
+        fs::write(insiders.join("ins.db"), b"x").unwrap();
+        #[cfg(unix)]
+        {
+            let alias = home.path().join("gemini-alias");
+            std::os::unix::fs::symlink(home.path().join(".gemini"), &alias).unwrap();
+            env.set("GEMINI_CLI_HOME", alias.to_str().unwrap());
+        }
+
+        let enabled = HashSet::from([ClientId::Antigravity]);
+        let roots: Vec<PathBuf> =
+            built_in_extra_scan_paths_for(home.path().to_str().unwrap(), &enabled, true)
+                .into_iter()
+                .filter(|(client_id, _)| *client_id == ClientId::Antigravity)
+                .map(|(_, path)| path)
+                .collect();
+        assert!(roots
+            .iter()
+            .any(|root| root.ends_with("antigravity/conversations")));
+        assert!(roots
+            .iter()
+            .any(|root| root.ends_with("antigravity-insiders/conversations")));
+
+        let pattern = ClientId::Antigravity.file_pattern();
+        let mut found: Vec<PathBuf> = roots
+            .iter()
+            .flat_map(|root| scan_directory(root.to_str().unwrap(), pattern))
+            .collect();
+        found.sort();
+        assert_eq!(found, vec![stable.join("new.db"), insiders.join("ins.db")]);
+
+        // The sync cache root still yields its JSONL rows under the same pattern.
+        let cache = home.path().join("antigravity-cache/sessions");
+        fs::create_dir_all(&cache).unwrap();
+        fs::write(cache.join("s.jsonl"), b"{}").unwrap();
+        assert_eq!(
+            scan_directory(cache.to_str().unwrap(), pattern),
+            vec![cache.join("s.jsonl")]
+        );
+
+        let cli_only = HashSet::from([ClientId::AntigravityCli]);
+        assert!(
+            built_in_extra_scan_paths_for(home.path().to_str().unwrap(), &cli_only, true)
+                .iter()
+                .all(|(client_id, _)| *client_id != ClientId::Antigravity),
+            "desktop roots must not be scanned when antigravity is disabled"
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn t3_antigravity_profiles_are_discovered_sorted_and_filtered() {
+        let home = TempDir::new().unwrap();
+        let t3_home = home.path().join(".t3");
+        let mut env = EnvGuard::capture(&["T3CODE_HOME"]);
+        env.remove("T3CODE_HOME");
+        // Created in reverse order so a sorted result proves ordering does not
+        // come from read_dir.
+        let profile_b = setup_t3_antigravity_profile(&t3_home, "profile-b");
+        let profile_a = setup_t3_antigravity_profile(&t3_home, "profile-a");
+        // A profile without `antigravity-acp/conversations`, and a
+        // non-directory entry under the provider root, must be skipped.
+        fs::create_dir_all(
+            t3_home.join("userdata/providers/antigravity/profile-empty/antigravity-acp"),
+        )
+        .unwrap();
+        fs::write(
+            t3_home.join("userdata/providers/antigravity/not-a-profile"),
+            b"x",
+        )
+        .unwrap();
+
+        let enabled = HashSet::from([ClientId::AntigravityCli]);
+        let roots: Vec<PathBuf> =
+            built_in_extra_scan_paths_for(home.path().to_str().unwrap(), &enabled, true)
+                .into_iter()
+                .filter(|(client_id, _)| *client_id == ClientId::AntigravityCli)
+                .map(|(_, path)| path)
+                .collect();
+        // Compare OsStr, not PathBuf: Path::eq folds `/` and `\` into the same
+        // components on Windows, so only the raw spelling fails if the roots
+        // stop carrying native separators.
+        assert_eq!(
+            roots
+                .iter()
+                .map(|path| path.as_os_str())
+                .collect::<Vec<_>>(),
+            vec![profile_a.as_os_str(), profile_b.as_os_str()]
+        );
+
+        let claude_only = HashSet::from([ClientId::Claude]);
+        assert!(
+            built_in_extra_scan_paths_for(home.path().to_str().unwrap(), &claude_only, true)
+                .iter()
+                .all(|(client_id, _)| *client_id != ClientId::AntigravityCli),
+            "T3 roots must not be scanned when antigravity-cli is disabled"
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn t3_home_env_override_applies_only_to_env_roots() {
+        let home = TempDir::new().unwrap();
+        let custom = TempDir::new().unwrap();
+        let custom_profile = setup_t3_antigravity_profile(custom.path(), "profile-a");
+        let home_profile = setup_t3_antigravity_profile(&home.path().join(".t3"), "profile-b");
+        let mut env = EnvGuard::capture(&["T3CODE_HOME"]);
+        env.set("T3CODE_HOME", custom.path());
+        let enabled = HashSet::from([ClientId::AntigravityCli]);
+
+        assert_eq!(
+            built_in_extra_scan_paths_for(home.path().to_str().unwrap(), &enabled, true),
+            vec![(ClientId::AntigravityCli, custom_profile)],
+            "T3CODE_HOME must relocate the provider root when env roots are enabled"
+        );
+        assert_eq!(
+            built_in_extra_scan_paths_for(home.path().to_str().unwrap(), &enabled, false),
+            vec![(ClientId::AntigravityCli, home_profile.clone())],
+            "an explicit --home must resolve T3 roots against it and ignore T3CODE_HOME"
+        );
+
+        // Blank and whitespace-only overrides are unset, and `~` expands
+        // against the scan home — the way T3 Code resolves T3CODE_HOME itself.
+        for value in ["", "   "] {
+            env.set("T3CODE_HOME", value);
+            assert_eq!(
+                built_in_extra_scan_paths_for(home.path().to_str().unwrap(), &enabled, true),
+                vec![(ClientId::AntigravityCli, home_profile.clone())],
+                "blank T3CODE_HOME ({value:?}) must fall back to <home>/.t3"
+            );
+        }
+        let tilde_profile =
+            setup_t3_antigravity_profile(&home.path().join("custom-t3"), "profile-c");
+        env.set("T3CODE_HOME", "~/custom-t3");
+        assert_eq!(
+            built_in_extra_scan_paths_for(home.path().to_str().unwrap(), &enabled, true),
+            vec![(ClientId::AntigravityCli, tilde_profile)],
+            "T3CODE_HOME must expand ~ against the scan home"
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn scan_discovers_t3_antigravity_acp_databases() {
+        let home = TempDir::new().unwrap();
+        // The developer machine may have T3CODE_HOME / GEMINI_CLI_HOME set for
+        // real installs; both must not leak into the synthetic home.
+        let mut env = EnvGuard::capture(&["T3CODE_HOME", "GEMINI_CLI_HOME"]);
+        env.remove("T3CODE_HOME");
+        env.remove("GEMINI_CLI_HOME");
+        // The native `~/.gemini` conversations root must keep being scanned
+        // alongside the T3 Code roots.
+        let cli_conversations =
+            join_native_path(home.path(), ".gemini/antigravity-cli/conversations");
+        fs::create_dir_all(&cli_conversations).unwrap();
+        let cli_db = cli_conversations.join("session-cli.db");
+        let t3_home = home.path().join(".t3");
+        let db_b = setup_t3_antigravity_profile(&t3_home, "profile-b").join("session-b.db");
+        let db_a = setup_t3_antigravity_profile(&t3_home, "profile-a").join("session-a.db");
+        for db in [&cli_db, &db_a, &db_b] {
+            // A synthetic SQLite database in the shape the parser reads.
+            let conn = rusqlite::Connection::open(db).unwrap();
+            conn.execute_batch("CREATE TABLE gen_metadata (idx integer, data blob, size integer);")
+                .unwrap();
+        }
+        // SQLite sidecars and non-`.db` files must not be picked up.
+        fs::write(db_a.with_extension("db-wal"), b"").unwrap();
+        fs::write(db_a.with_extension("txt"), b"").unwrap();
+
+        let result = scan_without_extra_dirs(
+            home.path().to_str().unwrap(),
+            &["antigravity-cli".to_string()],
+        );
+
+        // The native root registers before the T3 roots, which arrive in
+        // sorted profile order — the scan result must preserve that ordering.
+        assert_eq!(
+            result.get(ClientId::AntigravityCli),
+            &vec![cli_db, db_a, db_b]
         );
     }
 }

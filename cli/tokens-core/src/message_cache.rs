@@ -12,6 +12,8 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use std::time::UNIX_EPOCH;
 
+pub(crate) mod qoder;
+
 // CACHE_FORMAT_VERSION changes only when the serialized storage layout or a
 // cross-client type such as UnifiedMessage changes incompatibly. Parser-only
 // changes belong in parser_version() so one client cannot evict every other
@@ -399,6 +401,15 @@ impl SourceFingerprint {
             cached,
             ContentHashMode::SamplesOnly,
         )
+    }
+
+    pub(crate) fn check_qoder_path(
+        path: &Path,
+        cached: Option<&Self>,
+    ) -> Option<FingerprintStatus> {
+        let related = crate::sessions::qoder::subagent_meta_path(path)
+            .map(|meta| ("subagent-meta".to_owned(), meta));
+        Self::check_path_with_related_mode(path, related, cached, ContentHashMode::SamplesOnly)
     }
 
     pub(crate) fn check_sqlite_path(
@@ -902,6 +913,24 @@ const VERBATIM_PREFIX_UTF16: [u16; 4] = [
     BACKSLASH_UTF16,
 ];
 
+#[cfg(windows)]
+fn windows_identity_units(units: impl Iterator<Item = u16> + Clone) -> impl Iterator<Item = u16> {
+    let verbatim = units.clone().take(4).eq(VERBATIM_PREFIX_UTF16);
+    units.map(move |unit| {
+        if !verbatim && unit == FORWARD_SLASH_UTF16 { BACKSLASH_UTF16 } else { unit }
+    })
+}
+
+#[cfg(windows)]
+pub(crate) fn windows_path_digest(path: &Path) -> Sha256 {
+    use std::os::windows::ffi::OsStrExt;
+    let mut hasher = Sha256::new();
+    for unit in windows_identity_units(path.as_os_str().encode_wide()) {
+        hasher.update(unit.to_le_bytes());
+    }
+    hasher
+}
+
 /// The stored spelling is kept verbatim so [`CachedPath::to_path_buf`] hands
 /// back exactly the path that was cached, but *identity* — equality, hashing
 /// and the shard digest — folds `/` into `\` first. See [`CachedPath::
@@ -953,14 +982,7 @@ impl CachedPath {
     /// so folding case could merge two real files. Separator folding has no such
     /// exception outside the verbatim namespace, which is why only it is safe.
     fn identity_units(&self) -> impl Iterator<Item = u16> + '_ {
-        let verbatim = self.0.starts_with(&VERBATIM_PREFIX_UTF16);
-        self.0.iter().map(move |unit| {
-            if !verbatim && *unit == FORWARD_SLASH_UTF16 {
-                BACKSLASH_UTF16
-            } else {
-                *unit
-            }
-        })
+        windows_identity_units(self.0.iter().copied())
     }
 
     fn update_digest(&self, hasher: &mut Sha256) {
@@ -1026,6 +1048,13 @@ impl CacheIdentity {
         }
     }
 
+    pub(crate) fn for_qoder_source(source: crate::sessions::qoder::QoderSource) -> Self {
+        Self {
+            namespace: source.as_str(),
+            parser_version: parser_version(ClientId::Qoder),
+        }
+    }
+
     pub(crate) const fn synthetic() -> Self {
         Self {
             namespace: "synthetic",
@@ -1037,6 +1066,9 @@ impl CacheIdentity {
         if namespace == "synthetic" {
             return Some(Self::synthetic());
         }
+        if namespace == "qoder-cn" {
+            return Some(Self::for_qoder_source(crate::sessions::qoder::QoderSource::China));
+        }
         ClientId::from_str(namespace).map(Self::for_client)
     }
 
@@ -1044,6 +1076,9 @@ impl CacheIdentity {
     fn all() -> impl Iterator<Item = Self> {
         ClientId::iter()
             .map(Self::for_client)
+            .chain(std::iter::once(Self::for_qoder_source(
+                crate::sessions::qoder::QoderSource::China,
+            )))
             .chain(std::iter::once(Self::synthetic()))
     }
 }
@@ -1145,7 +1180,12 @@ const SHARED_PARSER_FAMILIES: &[SharedParserFamily] = &[
             // Fork (missuo/tokens#48): Craft Agent rides the standard lane.
             // +1 (#122): entry-identity-first keys, as for Pi above.
             (ClientId::CraftAgent, 2),
-            // +3 for Prime Agent's independent history. v1->v2 strips a
+            // Compaction requests, billed cost and 1h writes are kwwk-specific.
+            // Stable compaction identities also change replayed usage.
+            // v8 aligns copies by multiplicity within each timestamp/bucket group.
+            // v9 includes the recorded model and provider in each group.
+            (ClientId::Kwwk, 6),
+            // Prime Agent's independent history: v1->v2 strips a
             // leading BOM and recovers records containing undecodable
             // bytes; its accounting scan also continues past those records
             // instead of truncating and misaligning message indices. The
@@ -1158,8 +1198,10 @@ const SHARED_PARSER_FAMILIES: &[SharedParserFamily] = &[
             // damaged lineage and usage structural keys before
             // reconciliation bookkeeping. v3->v4 rejects damaged lineage
             // values and matching-critical child timestamps while
-            // preserving unrelated damaged usage extensions.
-            (ClientId::PrimeAgent, 3),
+            // preserving unrelated damaged usage extensions. Later bumps
+            // reject wrong-typed child timestamps, including explicit null.
+            // Numeric entry timestamps are not Prime's ISO timestamp format.
+            (ClientId::PrimeAgent, 6),
         ],
     },
     SharedParserFamily {
@@ -1323,7 +1365,16 @@ fn parser_version(client: ClientId) -> u32 {
         // decoded, and their name-derived session ids drop the `.zst` so a
         // session present in both forms dedups (missuo/tokens#109, upstream
         // junhoyeo/tokscale#1423).
-        ClientId::Codex => 13,
+        // v13->v14 preserves the native cache-write bucket in rollout usage.
+        // v15 ignores empty usage events when resolving fork baselines.
+        // v16 distinguishes bucket evidence from the shape of a delta snapshot.
+        // v17 selects fallback ownership from the accounted increment and
+        // preserves replay identity independently of cumulative baselines.
+        // v18 scopes snapshot identity across sessions and rollout copies.
+        // v19 preserves response and turn identity across late model attribution.
+        // v20 uses cache-equivalent Windows path separators for anonymous rollouts.
+        // v21 preserves child compactions settled against the inherited baseline.
+        ClientId::Codex => 21,
         // v4->v5: jcode's assistant-message timestamp is now back-calculated
         // to the turn start (timestamp - tool_duration_ms) instead of using
         // the recorded (end-anchored) timestamp directly. Follow-up to #890.
@@ -1440,7 +1491,12 @@ fn parser_version(client: ClientId) -> u32 {
         // v1->v2: per-model token attribution now comes from
         // session_model_usage instead of crediting the whole session to
         // sessions.model, and dedup keys are namespaced per (session, model).
-        ClientId::Hermes => 2,
+        // v2->v3 spreads each lifetime usage row across the assistant
+        // messages in its window instead of booking it on the session's start
+        // day (missuo/tokens#129).
+        // v4 reconciles legacy/SMU duplicates across databases and excludes
+        // ambiguous assistant timestamps from overlapping model windows.
+        ClientId::Hermes => 4,
         // v1->v2: Unsloth Studio now reads the responding model and provider
         // route from scalar responseDetails fields. Reparse cached rows so
         // local usage stays authoritatively free, metered providers receive
@@ -1523,6 +1579,14 @@ fn parser_version(client: ClientId) -> u32 {
         // byte-identical before and after, so only this bump discards the v1
         // rows still holding a provider-reported zero.
         ClientId::Fx => 2,
+        // v1->v2: message usage is dated by its own `usage.timestamp` (present
+        // in every thread exported from ampcode.com) instead of thread
+        // creation plus one second per message id. An unchanged thread file
+        // parses onto different days, so only this bump re-dates cached rows.
+        // The same version also drops an upstream org prefix from the model
+        // (`zai-org/GLM-5.3-Flash` -> `GLM-5.3-Flash`); both shipped together.
+        // v3 keeps malformed trailing-slash model names rather than an empty id.
+        ClientId::Amp => 3,
         // The remaining clients parse their own formats and have never
         // shipped a parser-only change that leaves byte-identical input
         // parsing differently, so all of them are at version 1. Repeating
@@ -1537,7 +1601,10 @@ fn parser_version(client: ClientId) -> u32 {
         // either added to a shared family (its version then derives from
         // the family's driver base) or given an explicit independent arm.
         ClientId::Gemini => 1,
-        ClientId::Amp => 1,
+        // Qoder / Qoder CN. Independent history: the parser owns the transcript,
+        // segment-log and IDE-SQLite merge rules, so a parse change bumps
+        // `QODER_PARSER_BASE_VERSION` here and nowhere else.
+        ClientId::Qoder => crate::sessions::qoder::QODER_PARSER_BASE_VERSION,
         ClientId::Qwen => 1,
         ClientId::Mux => 1,
         ClientId::Crush => 1,
@@ -1554,6 +1621,12 @@ fn parser_version(client: ClientId) -> u32 {
         ClientId::Mcode => 1,
         ClientId::LmStudio => 1,
         ClientId::Hindsight => 1,
+        // TRAE CLI rollouts go through the Codex parser before the
+        // `trae_cli` relabel and `token_usage_record` fallback, so a Codex
+        // parser bump moves this one too.
+        ClientId::TraeCli => {
+            parser_version(ClientId::Codex) + crate::sessions::trae_cli::TRAE_CLI_PARSER_OFFSET
+        }
         // Shared-family members are versioned by `SHARED_PARSER_FAMILIES`
         // through the roster lookup at the top of this function. Listing
         // them here keeps the match exhaustive at compile time; reaching
@@ -1565,6 +1638,7 @@ fn parser_version(client: ClientId) -> u32 {
         | ClientId::Omp
         | ClientId::Senpi
         | ClientId::CraftAgent
+        | ClientId::Kwwk
         | ClientId::PrimeAgent
         | ClientId::RooCode
         | ClientId::KiloCode
@@ -3968,8 +4042,18 @@ mod tests {
         // compaction usage, and v12->v13 decodes `.jsonl.zst` rollouts.
         // Each bump is what stops an existing cache from replaying the old
         // rows, so it has to be asserted rather than assumed.
-        assert_eq!(parser_version(ClientId::Codex), 13);
+        assert_eq!(parser_version(ClientId::Codex), 21);
         assert_eq!(parser_version(ClientId::Claude), 2);
+    }
+
+    #[test]
+    fn trae_cli_parser_version_follows_the_codex_parser() {
+        // TRAE CLI rollouts are parsed by the Codex parser; a Codex bump must
+        // invalidate their cached rows as well.
+        assert_eq!(
+            parser_version(ClientId::TraeCli),
+            parser_version(ClientId::Codex) + crate::sessions::trae_cli::TRAE_CLI_PARSER_OFFSET
+        );
     }
 
     #[test]
@@ -4097,7 +4181,7 @@ mod tests {
 
     #[test]
     fn test_lossy_jsonl_parser_versions_invalidate_v3_entries() {
-        assert_eq!(parser_version(ClientId::PrimeAgent), 5);
+        assert_eq!(parser_version(ClientId::PrimeAgent), 9);
         assert_eq!(parser_version(ClientId::Reasonix), 4);
     }
 
@@ -4108,9 +4192,10 @@ mod tests {
     #[test]
     fn test_pi_format_parser_version_invalidates_v1_entries() {
         // pi-format base 1 -> 2, applied to every family member's offset
-        // (the standard-lane members took a further +1 for #122, below).
-        assert_eq!(parser_version(ClientId::Kimchi), 3);
-        assert_eq!(parser_version(ClientId::PrimeAgent), 5);
+        // (the standard-lane members took a further +1 for #122, below),
+        // plus the base 2 -> 3 speed bump.
+        assert_eq!(parser_version(ClientId::Kimchi), 4);
+        assert_eq!(parser_version(ClientId::PrimeAgent), 9);
     }
 
     /// #122: the standard cross-session lane (Pi, OMP, Senpi, Craft Agent)
@@ -4119,10 +4204,20 @@ mod tests {
     /// response-level keys that collapse distinct requests sharing one id.
     #[test]
     fn test_pi_entry_identity_dedup_parser_version_invalidates_prior_entries() {
-        assert_eq!(parser_version(ClientId::Pi), 5);
-        assert_eq!(parser_version(ClientId::Omp), 4);
-        assert_eq!(parser_version(ClientId::Senpi), 4);
-        assert_eq!(parser_version(ClientId::CraftAgent), 4);
+        // Each includes the base 2 -> 3 speed bump.
+        assert_eq!(parser_version(ClientId::Pi), 6);
+        assert_eq!(parser_version(ClientId::Omp), 5);
+        assert_eq!(parser_version(ClientId::Senpi), 5);
+        assert_eq!(parser_version(ClientId::CraftAgent), 5);
+    }
+
+    /// pi-format v3 reads the provider-reported `usage.speed` (kwwk copies
+    /// Anthropic's value verbatim). A warm v2 cache holds those records with
+    /// no speed evidence, so every family member moves with the base.
+    #[test]
+    fn test_pi_format_speed_parser_version_invalidates_v2_entries() {
+        assert_eq!(crate::sessions::pi::PI_FORMAT_PARSER_BASE_VERSION, 3);
+        assert_eq!(parser_version(ClientId::Kwwk), 9);
     }
 
     #[test]
@@ -4218,8 +4313,13 @@ mod tests {
     }
 
     #[test]
-    fn test_hermes_parser_version_invalidates_v1_entries() {
-        assert_eq!(parser_version(ClientId::Hermes), 2);
+    fn test_hermes_parser_version_invalidates_overlapping_window_counts() {
+        assert_eq!(parser_version(ClientId::Hermes), 4);
+    }
+
+    #[test]
+    fn test_amp_parser_version_invalidates_empty_model_ids() {
+        assert_eq!(parser_version(ClientId::Amp), 3);
     }
 
     #[test]
@@ -5102,7 +5202,8 @@ mod tests {
                     (ClientId::Omp, 2),
                     (ClientId::Senpi, 2),
                     (ClientId::CraftAgent, 2),
-                    (ClientId::PrimeAgent, 3),
+                    (ClientId::Kwwk, 6),
+                    (ClientId::PrimeAgent, 6),
                 ],
             ),
             (

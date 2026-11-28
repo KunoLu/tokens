@@ -41,34 +41,30 @@ pub(crate) struct LossyLines<R> {
 /// Read one line into `buf`, stripping the line terminator and a leading BOM.
 ///
 /// Returns the offset in `buf` at which the line's payload starts, so callers
-/// can borrow it without allocating, or `None` at end of input.
+/// can borrow it without allocating, `None` at end of input, or a read error.
 fn read_line_payload<R: BufRead>(
     reader: &mut R,
     buf: &mut Vec<u8>,
     at_start: &mut bool,
-) -> Option<usize> {
+) -> std::io::Result<Option<usize>> {
     buf.clear();
-    match reader.read_until(b'\n', buf) {
-        Ok(0) => None,
-        Ok(_) => {
-            if buf.last() == Some(&b'\n') {
-                buf.pop();
-                if buf.last() == Some(&b'\r') {
-                    buf.pop();
-                }
-            }
-
-            let bom = "\u{feff}".as_bytes();
-            if std::mem::take(at_start) && buf.starts_with(bom) {
-                Some(bom.len())
-            } else {
-                Some(0)
-            }
-        }
-        // A hard I/O error (vanished mount, EIO) does not consume input, so
-        // retrying would spin on the same failing read forever. Stop instead.
-        Err(_) => None,
+    if reader.read_until(b'\n', buf)? == 0 {
+        return Ok(None);
     }
+    if buf.last() == Some(&b'\n') {
+        buf.pop();
+        if buf.last() == Some(&b'\r') {
+            buf.pop();
+        }
+    }
+
+    let bom = "\u{feff}".as_bytes();
+    let start = if std::mem::take(at_start) && buf.starts_with(bom) {
+        bom.len()
+    } else {
+        0
+    };
+    Ok(Some(start))
 }
 
 fn read_lossy_line<R: BufRead>(
@@ -76,7 +72,7 @@ fn read_lossy_line<R: BufRead>(
     buf: &mut Vec<u8>,
     at_start: &mut bool,
 ) -> Option<String> {
-    let start = read_line_payload(reader, buf, at_start)?;
+    let start = read_line_payload(reader, buf, at_start).ok().flatten()?;
     Some(String::from_utf8_lossy(&buf[start..]).into_owned())
 }
 
@@ -105,12 +101,19 @@ pub(crate) fn for_each_json_line(path: &Path, sink: &mut dyn FnMut(usize, &str))
         return;
     };
 
-    let mut reader = std::io::BufReader::new(file);
+    let _ = read_json_lines(&mut std::io::BufReader::new(file), sink);
+}
+
+/// Deliver JSONL lines like [`for_each_json_line`], but report read failures.
+pub(crate) fn read_json_lines(
+    reader: &mut impl BufRead,
+    sink: &mut dyn FnMut(usize, &str),
+) -> std::io::Result<()> {
     let mut buf = Vec::new();
     let mut at_start = true;
     let mut index = 0usize;
 
-    while let Some(start) = read_line_payload(&mut reader, &mut buf, &mut at_start) {
+    while let Some(start) = read_line_payload(reader, &mut buf, &mut at_start)? {
         let text = String::from_utf8_lossy(&buf[start..]);
         let trimmed = text.trim();
         if !trimmed.is_empty() {
@@ -118,6 +121,7 @@ pub(crate) fn for_each_json_line(path: &Path, sink: &mut dyn FnMut(usize, &str))
         }
         index += 1;
     }
+    Ok(())
 }
 
 /// One line of a JSONL transcript, borrowed out of the driver's reusable
@@ -162,7 +166,7 @@ pub(crate) fn for_each_json_line_with_bytes(
     let mut buf = Vec::new();
     let mut at_start = true;
 
-    while let Some(start) = read_line_payload(&mut reader, &mut buf, &mut at_start) {
+    while let Ok(Some(start)) = read_line_payload(&mut reader, &mut buf, &mut at_start) {
         let bytes = &buf[start..];
         let text = String::from_utf8_lossy(bytes);
         let trimmed = text.trim();

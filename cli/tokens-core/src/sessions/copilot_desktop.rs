@@ -3,6 +3,9 @@
 //! The macOS desktop app stores aggregate token totals in `~/.copilot/data.db`
 //! and per-session event metadata in `~/.copilot/session-state/{session_id}`.
 
+use super::copilot_session_state::{
+    sdk_token_breakdown, sdk_usage_buckets, TrackerPeak, UsageBuckets,
+};
 use super::utils::{lossy_lines, sqlite_for_each_row};
 use super::{normalize_workspace_key, workspace_label_from_key, UnifiedMessage};
 use crate::provider_identity::inferred_provider_from_model;
@@ -67,38 +70,7 @@ struct ShutdownUsage {
     model: String,
     /// Concrete model active for this shutdown when the tracker key is `auto`.
     attributed_model: Option<String>,
-    input: i64,
-    output: i64,
-    cache_read: i64,
-    cache_write: i64,
-    reasoning: i64,
-}
-
-/// The five token buckets a shutdown record reports, in a fixed order so
-/// cumulative snapshots can be differenced bucket-by-bucket.
-type UsageBuckets = [i64; 5];
-
-impl ShutdownUsage {
-    fn buckets(&self) -> UsageBuckets {
-        [
-            self.input,
-            self.output,
-            self.cache_read,
-            self.cache_write,
-            self.reasoning,
-        ]
-    }
-
-    fn with_buckets(self, buckets: UsageBuckets) -> Self {
-        Self {
-            input: buckets[0],
-            output: buckets[1],
-            cache_read: buckets[2],
-            cache_write: buckets[3],
-            reasoning: buckets[4],
-            ..self
-        }
-    }
+    buckets: UsageBuckets,
 }
 
 /// What one session's shutdown snapshots resolve to: the increments to emit,
@@ -127,10 +99,10 @@ struct ShutdownAttribution {
 /// A snapshot that reports *less* than one before it (the tracker restarted
 /// with the session, or the records arrived out of order) contributes nothing
 /// rather than a negative bucket: each model's running peak is the baseline.
-/// Cache-read growth is additionally capped by inclusive-input growth in the
-/// same snapshot, because input includes cache reads and the two cannot safely
-/// advance independently. Anything the snapshots leave unexplained is still
-/// reconciled by the caller's residual against the `sessions` row.
+/// Both cache buckets are subsets of SDK input. Reclassify cache growth
+/// only within the inclusive input these snapshots added.
+/// Anything they leave unexplained is reconciled by the caller's residual
+/// against the `sessions` row.
 ///
 /// `complete_from_start` says whether the log still begins where the session
 /// did. When it does, the first snapshot seen for a model really is that
@@ -158,84 +130,47 @@ fn shutdown_deltas(
     // says; the sort is stable, so records sharing a timestamp keep file order.
     snapshots.sort_by_key(|snapshot| snapshot.timestamp_ms);
 
-    let mut peaks: HashMap<String, UsageBuckets> = HashMap::new();
-    let mut deltas = Vec::with_capacity(snapshots.len());
-    for snapshot in snapshots {
-        let current = snapshot.buckets();
-        let baseline = match peaks.get(&snapshot.model) {
-            Some(peak) => Some(*peak),
-            None if complete_from_start => Some(UsageBuckets::default()),
-            None => None,
+    let mut peaks: HashMap<String, TrackerPeak<5>> = HashMap::new();
+    for snapshot in &mut snapshots {
+        let current = &snapshot.buckets;
+        snapshot.buckets = if let Some(peak) = peaks.get_mut(snapshot.model.as_str()) {
+            peak.observe(current)
+        } else {
+            let mut peak = TrackerPeak::new(current, complete_from_start);
+            let delta = peak.observe(current);
+            peaks.insert(snapshot.model.clone(), peak);
+            delta
         };
-
-        let peak = peaks.entry(snapshot.model.clone()).or_insert(current);
-        for (index, value) in current.iter().enumerate() {
-            peak[index] = peak[index].max(*value);
-        }
-
-        let Some(baseline) = baseline else {
-            continue;
-        };
-        let mut delta = UsageBuckets::default();
-        for (index, value) in current.iter().enumerate() {
-            delta[index] = value.saturating_sub(baseline[index]).max(0);
-        }
-        // `inputTokens` includes cache reads. If a reset/out-of-order snapshot
-        // lowers inclusive input while raising cache reads, emitting that cache
-        // growth independently would mint tokens: normalization would subtract
-        // it from a zero input delta and then retain it as a cache bucket. Any
-        // cache-read increment is therefore bounded by the inclusive-input
-        // increment observed in the same snapshot.
-        delta[2] = delta[2].min(delta[0]);
-        if delta.iter().all(|bucket| *bucket == 0) {
-            continue;
-        }
-        deltas.push(snapshot.with_buckets(delta));
     }
 
-    // A later reset can reveal a higher cache-read composition without any
-    // inclusive-input growth. The cap above prevents minting tokens, then this
-    // pass uses spare cache capacity in already-authorized input increments so
-    // the emitted bucket totals still match the final cache high-water. Newest
-    // authorized increments receive the reclassification first; no increment
-    // can hold more cache reads than inclusive input.
-    for (model, peak) in &peaks {
-        let target_cache = peak[2].min(peak[0]);
-        let assigned_cache: i64 = deltas
-            .iter()
-            .filter(|delta| delta.model == *model)
-            .map(|delta| delta.cache_read)
-            .sum();
-        let mut remaining_cache = target_cache.saturating_sub(assigned_cache);
-        for delta in deltas
-            .iter_mut()
-            .rev()
-            .filter(|delta| delta.model == *model)
-        {
-            let capacity = delta.input.saturating_sub(delta.cache_read);
-            let reassigned = capacity.min(remaining_cache);
-            delta.cache_read = delta.cache_read.saturating_add(reassigned);
-            remaining_cache = remaining_cache.saturating_sub(reassigned);
-            if remaining_cache == 0 {
-                break;
-            }
+    // Reclassify only cache growth after the baseline, newest increment first.
+    if peaks.values().any(TrackerPeak::has_unassigned_cache) {
+        for snapshot in snapshots.iter_mut().rev() {
+            peaks
+                .get_mut(snapshot.model.as_str())
+                .unwrap()
+                .reclassify_cache(&mut snapshot.buckets);
         }
     }
+    snapshots.retain(|snapshot| snapshot.buckets != UsageBuckets::default());
 
     // Every model's peak is the highest total it was ever observed holding, so
     // summing the peaks is what the snapshots account for whether or not each
     // one was emitted. Using the emitted deltas instead would hand a swallowed
     // baseline back to the residual and re-date it to `created_at`.
     let consumed = peaks
-        .values()
+        .into_values()
         .fold(UsageBuckets::default(), |mut total, peak| {
-            for (index, value) in peak.iter().enumerate() {
-                total[index] = total[index].saturating_add(*value);
+            for (total, value) in total.iter_mut().zip(peak.into_buckets()) {
+                *total = total.saturating_add(value);
             }
             total
         });
 
-    ShutdownAttribution { deltas, consumed }
+    ShutdownAttribution {
+        deltas: snapshots,
+        consumed,
+    }
 }
 
 pub fn parse_copilot_desktop_db(db_path: &Path) -> Vec<UnifiedMessage> {
@@ -342,11 +277,9 @@ fn session_row_to_messages(db_path: &Path, row: CopilotDesktopSessionRow) -> Vec
     };
 
     let mut messages = Vec::with_capacity(metadata.shutdowns.len() + 1);
-    // The SQLite row is authoritative for every bucket it stores. The sidecar
-    // and DB are separate files, so a shutdown can be observed before the row
-    // catches up; consume a per-row budget to prevent that race from emitting
-    // more lifetime usage than the row. Cache-write has no SQLite column and
-    // remains sidecar-authoritative.
+    // If the sidecar is ahead of SQLite, cap it by the row's lifetime totals.
+    // SQLite does not store cache writes. They come from shutdown records
+    // only and still occupy part of the inclusive input budget.
     let mut remaining_input = row.total_input_tokens.max(0);
     let mut remaining_output = row.total_output_tokens.max(0);
     let mut remaining_cache_read = row.total_cached_tokens.max(0);
@@ -362,21 +295,17 @@ fn session_row_to_messages(db_path: &Path, row: CopilotDesktopSessionRow) -> Vec
             .attributed_model
             .clone()
             .unwrap_or_else(|| fallback_model.clone());
-        let input = shutdown.input.min(remaining_input);
-        let output = shutdown.output.min(remaining_output);
-        let cache_read = shutdown.cache_read.min(remaining_cache_read).min(input);
-        let reasoning = shutdown.reasoning.min(remaining_reasoning);
-        remaining_input = remaining_input.saturating_sub(input);
-        remaining_output = remaining_output.saturating_sub(output);
-        remaining_cache_read = remaining_cache_read.saturating_sub(cache_read);
-        remaining_reasoning = remaining_reasoning.saturating_sub(reasoning);
-        let tokens = super::copilot::normalize_input_tokens(
-            input,
-            output,
-            cache_read,
-            shutdown.cache_write,
-            reasoning,
-        );
+        let [input, output, cache_read, cache_write, reasoning] = shutdown.buckets;
+        let input = input.min(remaining_input);
+        let output = output.min(remaining_output);
+        let cache_read = cache_read.min(remaining_cache_read).min(input);
+        let cache_write = cache_write.min(input - cache_read);
+        let reasoning = reasoning.min(remaining_reasoning);
+        remaining_input -= input;
+        remaining_output -= output;
+        remaining_cache_read -= cache_read;
+        remaining_reasoning -= reasoning;
+        let tokens = sdk_token_breakdown([input, output, cache_read, cache_write, reasoning]);
         if tokens.total() == 0 {
             continue;
         }
@@ -397,20 +326,25 @@ fn session_row_to_messages(db_path: &Path, row: CopilotDesktopSessionRow) -> Vec
     // On a first-ever scan of an already-truncated log this deliberately
     // under-reports instead; no remaining record can distinguish those cases
     // (see shutdown_deltas' safety tradeoff above).
-    let consumed = metadata.consumed;
-    // The row's own cache-write column does not exist, so the shutdown records
-    // are the only source for that bucket and there is nothing to reconcile.
-    let residual_input = (row.total_input_tokens - consumed[0]).max(0);
-    let residual_cache_read = (row.total_cached_tokens - consumed[2])
+    let [consumed_input, consumed_output, consumed_cache_read, _, consumed_reasoning] =
+        metadata.consumed;
+    // Subtract gross input. The DB has no cache-write column, so the
+    // remaining input cannot be independently classified as cache writes.
+    let residual_input = row.total_input_tokens.saturating_sub(consumed_input).max(0);
+    let residual_cache_read = row
+        .total_cached_tokens
+        .saturating_sub(consumed_cache_read)
         .max(0)
         .min(residual_input);
-    let residual = super::copilot::normalize_input_tokens(
+    let residual = sdk_token_breakdown([
         residual_input,
-        (row.total_output_tokens - consumed[1]).max(0),
+        row.total_output_tokens.saturating_sub(consumed_output).max(0),
         residual_cache_read,
         0,
-        (row.total_reasoning_tokens - consumed[4]).max(0),
-    );
+        row.total_reasoning_tokens
+            .saturating_sub(consumed_reasoning)
+            .max(0),
+    ]);
 
     if residual.total() > 0 {
         messages.push(build(
@@ -557,35 +491,24 @@ fn collect_shutdown_usage(event: &Value, out: &mut Vec<ShutdownUsage>) {
         .map(str::to_string);
 
     for (model, entry) in metrics {
-        let Some(usage) = entry.get("usage") else {
+        let Some(buckets) = sdk_usage_buckets(entry) else {
             continue;
         };
-        let read = |key: &str| usage.get(key).and_then(Value::as_i64).unwrap_or(0).max(0);
+        if buckets == UsageBuckets::default() {
+            continue;
+        }
         let tracker_model = model.trim().to_string();
         let attributed_model = match tracker_model.as_str() {
             "" | "auto" => current_model.clone(),
             _ => Some(tracker_model.clone()),
         };
-        let shutdown = ShutdownUsage {
+        out.push(ShutdownUsage {
             event_id: event_id.clone(),
             timestamp_ms,
             model: tracker_model,
             attributed_model,
-            input: read("inputTokens"),
-            output: read("outputTokens"),
-            cache_read: read("cacheReadTokens"),
-            cache_write: read("cacheWriteTokens"),
-            reasoning: read("reasoningTokens"),
-        };
-        if shutdown.input == 0
-            && shutdown.output == 0
-            && shutdown.cache_read == 0
-            && shutdown.cache_write == 0
-            && shutdown.reasoning == 0
-        {
-            continue;
-        }
-        out.push(shutdown);
+            buckets,
+        });
     }
 }
 
@@ -939,6 +862,7 @@ mod tests {
             .iter()
             .find(|message| message.timestamp == 1_782_950_400_000)
             .expect("shutdown message");
+        assert_eq!(shutdown.tokens.input, 68);
         assert_eq!(shutdown.tokens.cache_write, 7);
     }
 
@@ -1292,17 +1216,17 @@ mod tests {
             "session-1",
             &[
                 SESSION_START,
-                r#"{"type":"session.shutdown","data":{"modelMetrics":{"gpt-5.1-codex":{"usage":{"inputTokens":200,"outputTokens":100,"cacheReadTokens":80,"cacheWriteTokens":7,"reasoningTokens":20}}}},"id":"9f2c6f0e-1d5a-4a7e-9b30-2c8d4e6f1a01","timestamp":"2026-07-01T20:00:00.000Z","parentId":null}"#,
+                r#"{"type":"session.shutdown","data":{"modelMetrics":{"gpt-5.1-codex":{"usage":{"inputTokens":200,"outputTokens":100,"cacheReadTokens":80,"cacheWriteTokens":90,"reasoningTokens":20}}}},"id":"9f2c6f0e-1d5a-4a7e-9b30-2c8d4e6f1a01","timestamp":"2026-07-01T20:00:00.000Z","parentId":null}"#,
             ],
         );
 
         let messages = parse_copilot_desktop_db(&db_path);
         assert_eq!(messages.len(), 1);
-        assert_eq!(messages[0].tokens.input, 75);
+        assert_eq!(messages[0].tokens.input, 0);
         assert_eq!(messages[0].tokens.cache_read, 25);
         assert_eq!(messages[0].tokens.output, 50);
         assert_eq!(messages[0].tokens.reasoning, 10);
-        assert_eq!(messages[0].tokens.cache_write, 7);
+        assert_eq!(messages[0].tokens.cache_write, 75);
     }
 
     /// Cache is a subset of inclusive input. A sidecar that accounts for all
@@ -1340,9 +1264,8 @@ mod tests {
         );
     }
 
-    /// Inclusive input and cache reads are not independent totals. A reset or
-    /// out-of-order snapshot may lower inclusive input while raising the cache
-    /// sub-bucket, but that cannot authorize more lifetime input usage.
+    /// Cache reads and writes are subsets of inclusive input. A reset can
+    /// reveal higher cache totals, but cannot authorize more input usage.
     #[test]
     fn cache_growth_without_inclusive_input_growth_does_not_mint_tokens() {
         let dir = tempfile::tempdir().unwrap();
@@ -1356,41 +1279,61 @@ mod tests {
             &[
                 SESSION_START,
                 r#"{"type":"session.shutdown","data":{"modelMetrics":{"gpt-5.1-codex":{"usage":{"inputTokens":100,"cacheReadTokens":80}}}},"id":"9f2c6f0e-1d5a-4a7e-9b30-2c8d4e6f1a01","timestamp":"2026-07-01T20:00:00.000Z","parentId":null}"#,
-                r#"{"type":"session.shutdown","data":{"modelMetrics":{"gpt-5.1-codex":{"usage":{"inputTokens":90,"cacheReadTokens":90}}}},"id":"9f2c6f0e-1d5a-4a7e-9b30-2c8d4e6f1a02","timestamp":"2026-07-02T00:00:00.000Z","parentId":null}"#,
+                r#"{"type":"session.shutdown","data":{"modelMetrics":{"gpt-5.1-codex":{"usage":{"inputTokens":99,"cacheReadTokens":90,"cacheWriteTokens":9}}}},"id":"9f2c6f0e-1d5a-4a7e-9b30-2c8d4e6f1a02","timestamp":"2026-07-02T00:00:00.000Z","parentId":null}"#,
             ],
         );
 
         let messages = parse_copilot_desktop_db(&db_path);
-        let total_input: i64 = messages
-            .iter()
-            .map(|message| message.tokens.input + message.tokens.cache_read)
-            .sum();
+        assert_eq!(messages.len(), 1);
+        let message = &messages[0];
+        assert_eq!(
+            (
+                message.tokens.input,
+                message.tokens.cache_read,
+                message.tokens.cache_write,
+            ),
+            (1, 90, 9),
+            "both cache buckets reclassify the original 100 input tokens"
+        );
+        assert_eq!(message.timestamp, 1_782_936_000_000);
+    }
 
-        assert_eq!(
-            total_input, 100,
-            "the row lifetime input remains authoritative"
+    #[test]
+    fn truncated_shutdowns_do_not_reclassify_baseline_cache() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("data.db");
+        let conn = create_copilot_desktop_db(&db_path);
+        insert_session(&conn, "session-1", "gpt-5.1-codex", 150, 0, 45, 0);
+        drop(conn);
+        write_events(
+            dir.path(),
+            "session-1",
+            &[
+                r#"{"type":"session.shutdown","data":{"modelMetrics":{"gpt-5.1-codex":{"usage":{"inputTokens":100,"cacheReadTokens":40,"cacheWriteTokens":20}}}},"id":"first","timestamp":"2026-07-01T20:00:00.000Z"}"#,
+                r#"{"type":"session.shutdown","data":{"modelMetrics":{"gpt-5.1-codex":{"usage":{"inputTokens":150,"cacheReadTokens":45,"cacheWriteTokens":25}}}},"id":"second","timestamp":"2026-07-02T00:00:00.000Z"}"#,
+            ],
         );
+
+        let messages = parse_copilot_desktop_db(&db_path);
+        let [message] = messages.as_slice() else {
+            panic!("only the second shutdown's increment should remain");
+        };
+        assert_eq!(message.timestamp, 1_782_950_400_000);
         assert_eq!(
-            messages
-                .iter()
-                .map(|message| message.tokens.cache_read)
-                .sum::<i64>(),
-            90,
-            "the final cache high-water is preserved without increasing total input"
-        );
-        assert!(
-            !messages
-                .iter()
-                .any(|message| message.timestamp == 1_782_950_400_000),
-            "cache growth without inclusive input growth is not emitted"
+            (
+                message.tokens.input,
+                message.tokens.cache_read,
+                message.tokens.cache_write,
+            ),
+            (40, 5, 5)
         );
     }
 
     /// Re-attribution only moves usage between days; it never creates or
     /// destroys any. Summing every emitted message — the per-day increments
     /// plus the remainder — reproduces the row's lifetime total exactly, with
-    /// `input + cache_read` compared against the row's input because the
-    /// normalizer moves the cached portion out of `input` into its own bucket.
+    /// `input + cache_read + cache_write` compared against the row's input
+    /// because the normalizer moves both cache counts to separate buckets.
     ///
     /// This invariant is what makes the placement change safe to reconcile:
     /// the day a token is credited to changes, the total does not.
@@ -1406,8 +1349,8 @@ mod tests {
             "session-1",
             &[
                 SESSION_START,
-                r#"{"type":"session.shutdown","data":{"shutdownType":"error","modelMetrics":{"gpt-5.1-codex":{"usage":{"inputTokens":100,"outputTokens":50,"cacheReadTokens":25,"cacheWriteTokens":0,"reasoningTokens":10}}}},"id":"9f2c6f0e-1d5a-4a7e-9b30-2c8d4e6f1a01","timestamp":"2026-07-01T20:00:00.000Z","parentId":null}"#,
-                r#"{"type":"session.shutdown","data":{"shutdownType":"routine","modelMetrics":{"gpt-5.1-codex":{"usage":{"inputTokens":150,"outputTokens":75,"cacheReadTokens":40,"cacheWriteTokens":0,"reasoningTokens":15}}}},"id":"9f2c6f0e-1d5a-4a7e-9b30-2c8d4e6f1a02","timestamp":"2026-07-02T00:00:00.000Z","parentId":null}"#,
+                r#"{"type":"session.shutdown","data":{"shutdownType":"error","modelMetrics":{"gpt-5.1-codex":{"usage":{"inputTokens":100,"outputTokens":50,"cacheReadTokens":25,"cacheWriteTokens":7,"reasoningTokens":10}}}},"id":"9f2c6f0e-1d5a-4a7e-9b30-2c8d4e6f1a01","timestamp":"2026-07-01T20:00:00.000Z","parentId":null}"#,
+                r#"{"type":"session.shutdown","data":{"shutdownType":"routine","modelMetrics":{"gpt-5.1-codex":{"usage":{"inputTokens":150,"outputTokens":75,"cacheReadTokens":40,"cacheWriteTokens":14,"reasoningTokens":15}}}},"id":"9f2c6f0e-1d5a-4a7e-9b30-2c8d4e6f1a02","timestamp":"2026-07-02T00:00:00.000Z","parentId":null}"#,
             ],
         );
 
@@ -1415,12 +1358,15 @@ mod tests {
 
         let sum = |pick: fn(&UnifiedMessage) -> i64| -> i64 { messages.iter().map(pick).sum() };
         assert_eq!(
-            sum(|message| message.tokens.input) + sum(|message| message.tokens.cache_read),
+            sum(|message| {
+                message.tokens.input + message.tokens.cache_read + message.tokens.cache_write
+            }),
             200,
             "input is conserved once the cached portion is added back"
         );
         assert_eq!(sum(|message| message.tokens.output), 100);
         assert_eq!(sum(|message| message.tokens.cache_read), 50);
+        assert_eq!(sum(|message| message.tokens.cache_write), 14);
         assert_eq!(sum(|message| message.tokens.reasoning), 20);
 
         let mut days: Vec<i64> = messages.iter().map(|message| message.timestamp).collect();
@@ -1430,6 +1376,13 @@ mod tests {
             vec![1_782_909_296_000, 1_782_936_000_000, 1_782_950_400_000],
             "the same total is spread over the creation day and both shutdown days"
         );
+        let residual = messages
+            .iter()
+            .find(|message| message.timestamp == 1_782_909_296_000)
+            .unwrap();
+        assert_eq!(residual.tokens.input, 40);
+        assert_eq!(residual.tokens.cache_read, 10);
+        assert_eq!(residual.tokens.cache_write, 0);
     }
 
     /// A model's running peak, the verbatim-record dedup, and the dedup key the
