@@ -16,8 +16,8 @@
 //!
 //! Newer TRAE CLI rollouts carry the transcript in `history_mutation` records
 //! and per-response usage in `token_usage_record.payload.usage`. A
-//! thread-owned `token_count` snapshot takes precedence if it has bucketable
-//! usage or explicitly reports zero. Like Codex, TRAE can report inclusive
+//! thread-owned `token_count` takes precedence when it contributes usage or
+//! explicitly reports a zero increment. Like Codex, TRAE can report inclusive
 //! input; its `total_tokens` also identifies disjoint cache buckets when
 //! recorded separately.
 //!
@@ -50,7 +50,7 @@ const TRAE_CLI_AGENT: &str = "TRAE CLI";
 
 pub fn parse_trae_cli_file(path: &Path) -> Vec<UnifiedMessage> {
     let parsed = codex::parse_codex_file_incremental(path, 0, CodexParseState::default());
-    let mut messages = if parsed.messages.is_empty() && !parsed.has_owned_token_count {
+    let mut messages = if parsed.messages.is_empty() && !parsed.has_explicit_zero_token_count {
         parse_token_usage_records(path)
     } else {
         parsed.messages
@@ -123,7 +123,7 @@ fn history_mutation_has_human_turn(payload: &Value) -> bool {
     })
 }
 
-/// Read per-response usage after the Codex pass found no owned usage snapshot.
+/// Read per-response usage after the Codex pass found no authoritative usage.
 /// Replayed or usage-free events do not establish the child's usage dialect.
 fn parse_token_usage_records(path: &Path) -> Vec<UnifiedMessage> {
     let is_archive = is_zst_path(path);
@@ -444,7 +444,8 @@ mod tests {
             .replace(
                 r#""reasoning_output_tokens":64"#,
                 r#""reasoning_output_tokens":0"#,
-            );
+            )
+            .replace(r#""total_tokens":4380"#, r#""total_tokens":0"#);
         let usage_record = r#"{"timestamp":"2026-08-01T18:07:14.000Z","type":"token_usage_record","payload":{"response_id":"resp_1","usage":{"input_tokens":10,"output_tokens":1}}}"#;
         let content = format!("{zeroed}{usage_record}\n");
         let path = write_rollout(&dir, "rollout-zero.jsonl", &content);

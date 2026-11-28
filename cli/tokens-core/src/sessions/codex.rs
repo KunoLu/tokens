@@ -155,13 +155,24 @@ impl CodexTokenUsage {
         self.has_breakdown_counters() || reported_total_tokens(self).is_some()
     }
 
-    fn can_account_for_usage(&self, totals: CodexTotals) -> bool {
-        // Normalized input and output contain all cache and reasoning buckets.
-        // Explicit bucket zeros take precedence over a contradictory aggregate.
-        totals.input > 0
-            || totals.output > 0
-            || (totals == CodexTotals::default()
-                && (self.total_tokens == Some(0) || self.has_breakdown_counters()))
+    fn is_explicit_zero(&self) -> bool {
+        // A subset counter cannot prove zero usage. No reported counter may
+        // contradict the aggregate or the pair of primary zero counters.
+        (self.total_tokens == Some(0)
+            || (self.input_tokens == Some(0) && self.output_tokens == Some(0)))
+            && [
+                self.input_tokens,
+                self.output_tokens,
+                self.cached_input_tokens,
+                self.cache_read_input_tokens,
+                self.cache_write_input_tokens,
+                self.cache_creation_input_tokens,
+                self.reasoning_output_tokens,
+                self.total_tokens,
+            ]
+            .into_iter()
+            .flatten()
+            .all(|counter| counter == 0)
     }
 }
 
@@ -525,8 +536,8 @@ fn codex_originator_is_openclaw(originator: Option<&str>) -> bool {
 #[derive(Debug, Clone)]
 pub(crate) struct ParsedCodexFile {
     pub messages: Vec<UnifiedMessage>,
-    /// A token_count outside inherited fork history with bucketable usage or explicit zeros.
-    pub has_owned_token_count: bool,
+    /// A selected, thread-owned token_count increment explicitly reported zero usage.
+    pub has_explicit_zero_token_count: bool,
     pub fallback_timestamp_indices: Vec<usize>,
     pub consumed_offset: u64,
     pub parse_succeeded: bool,
@@ -583,7 +594,7 @@ fn parse_codex_reader<R: BufRead>(
     let mut parse_succeeded = true;
     let mut pending_model_messages = Vec::new();
     let mut unresolved_model_events = false;
-    let mut has_owned_token_count = false;
+    let mut has_explicit_zero_token_count = false;
 
     loop {
         line.clear();
@@ -886,20 +897,23 @@ fn parse_codex_reader<R: BufRead>(
                     // establish or replace a cumulative baseline.
                     let total_usage = raw_totals
                         .filter(|_| total_snapshot.is_some_and(CodexTokenUsage::has_counters));
-                    if total_usage.is_none()
+                    // Match compaction against the raw shapes: the producer can
+                    // write {} for either snapshot, even before any baseline.
+                    let last_usage = last_snapshot.map(CodexTotals::from_usage);
+                    let matches_compaction = state.pending_compaction.as_ref().is_some_and(
+                        |(_, _, compacted)| {
+                            *compacted
+                                && raw_totals == Some(state.previous_totals.unwrap_or_default())
+                                && last_usage == Some(CodexTotals::default())
+                        },
+                    );
+                    if !matches_compaction
+                        && total_usage.is_none()
                         && !last_snapshot.is_some_and(CodexTokenUsage::has_counters)
                     {
                         continue;
                     }
-                    // An empty last snapshot is still present for delta dispatch
-                    // and for matching the zero increment after compaction.
-                    let last_usage = last_snapshot.map(CodexTotals::from_usage);
-                    let compaction = state.pending_compaction.take().filter(|(_, _, compacted)| {
-                        *compacted
-                            && total_usage.is_some()
-                            && total_usage == Some(state.previous_totals.unwrap_or_default())
-                            && last_usage == Some(CodexTotals::default())
-                    });
+                    let compaction = state.pending_compaction.take().filter(|_| matches_compaction);
 
                     // Forked child logs can replay more than one parent
                     // token_count row after the first child turn_context,
@@ -909,19 +923,11 @@ fn parse_codex_reader<R: BufRead>(
                     {
                         continue;
                     }
-                    if !has_owned_token_count {
-                        has_owned_token_count = last_snapshot
-                            .zip(last_usage)
-                            .is_some_and(|(usage, totals)| usage.can_account_for_usage(totals))
-                            || total_snapshot
-                                .zip(total_usage)
-                                .is_some_and(|(usage, totals)| usage.can_account_for_usage(totals));
-                    }
                     state.forked_child_inherited_baseline = None;
                     state.forked_child_inherited_reported_total = None;
 
                     let (tokens, next_totals) = if let Some((usage, _, _)) = &compaction {
-                        (usage.into_tokens(), total_usage)
+                        (usage.into_tokens(), total_usage.or(state.previous_totals))
                     } else {
                         match (total_usage, last_usage, state.previous_totals) {
                             // Both present with previous baseline (standard path)
@@ -967,12 +973,14 @@ fn parse_codex_reader<R: BufRead>(
 
                     // Skip zero-token snapshots without advancing the baseline so
                     // that post-compaction zero totals don't inflate later deltas.
-                    if tokens.input == 0
-                        && tokens.output == 0
-                        && tokens.cache_read == 0
-                        && tokens.cache_write == 0
-                        && tokens.reasoning == 0
-                    {
+                    if tokens.total() == 0 {
+                        if !has_explicit_zero_token_count && compaction.is_none() {
+                            // Only the snapshot used for this increment can
+                            // suppress per-response fallback without tokens.
+                            has_explicit_zero_token_count = last_snapshot
+                                .or(total_snapshot)
+                                .is_some_and(CodexTokenUsage::is_explicit_zero);
+                        }
                         continue;
                     }
 
@@ -1021,9 +1029,6 @@ fn parse_codex_reader<R: BufRead>(
                         0.0,
                         agent,
                     );
-                    if let Some((_, response_id, _)) = compaction {
-                        message.dedup_key = Some(format!("codex:response:{response_id}"));
-                    }
                     message.duration_ms = duration_ms;
                     state.turn_coverage.record(state.current_turn_id.as_deref());
                     // The announced turn has produced usage, so it is under
@@ -1042,7 +1047,9 @@ fn parse_codex_reader<R: BufRead>(
                         message.is_turn_start = true;
                         state.pending_turn_start = false;
                     }
-                    if parsed_timestamp.is_some() || total_usage.is_some() {
+                    if let Some((_, response_id, _)) = compaction {
+                        message.dedup_key = Some(format!("codex:response:{response_id}"));
+                    } else if parsed_timestamp.is_some() || total_usage.is_some() {
                         // Fork/subagent children replay the same upstream
                         // token_count history into many sibling files. Those
                         // replays carry identical cumulative totals but a
@@ -1062,6 +1069,14 @@ fn parse_codex_reader<R: BufRead>(
                             dedup_scope_id,
                             total_usage,
                         );
+                    } else {
+                        // Untimed increments have no cumulative identity. The
+                        // decoded row position survives copies and appends,
+                        // without merging identical calls in the same rollout.
+                        let owner = state.session_id_from_meta.as_deref().unwrap_or(session_id);
+                        let row_start = consumed_offset - bytes_read as u64;
+                        message.dedup_key =
+                            Some(format!("codex:token_count-offset:{owner}:{row_start}"));
                     }
                     message.set_workspace(
                         state.session_workspace_key.clone(),
@@ -1186,7 +1201,7 @@ fn parse_codex_reader<R: BufRead>(
 
     ParsedCodexFile {
         messages,
-        has_owned_token_count,
+        has_explicit_zero_token_count,
         fallback_timestamp_indices,
         consumed_offset,
         parse_succeeded,
@@ -1581,7 +1596,7 @@ fn parse_codex_archive(
 ) -> ParsedCodexFile {
     let unusable = |state: CodexParseState| ParsedCodexFile {
         messages: Vec::new(),
-        has_owned_token_count: false,
+        has_explicit_zero_token_count: false,
         fallback_timestamp_indices: Vec::new(),
         consumed_offset: start_offset,
         parse_succeeded: false,
@@ -1671,7 +1686,7 @@ pub(crate) fn parse_codex_file_incremental(
         Err(_) => {
             return ParsedCodexFile {
                 messages: Vec::new(),
-                has_owned_token_count: false,
+                has_explicit_zero_token_count: false,
                 fallback_timestamp_indices: Vec::new(),
                 consumed_offset: start_offset,
                 parse_succeeded: false,
@@ -1684,7 +1699,7 @@ pub(crate) fn parse_codex_file_incremental(
     if file.seek(SeekFrom::Start(start_offset)).is_err() {
         return ParsedCodexFile {
             messages: Vec::new(),
-            has_owned_token_count: false,
+            has_explicit_zero_token_count: false,
             fallback_timestamp_indices: Vec::new(),
             consumed_offset: start_offset,
             parse_succeeded: false,

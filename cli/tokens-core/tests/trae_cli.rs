@@ -6,6 +6,7 @@ mod common;
 use std::path::Path;
 
 use tokens_core::scanner::{scan_all_clients_with_scanner_settings, ScannerSettings};
+use tokens_core::sessions::codex::parse_codex_file;
 use tokens_core::sessions::trae_cli::parse_trae_cli_file;
 use tokens_core::{
     parse_local_clients, parse_local_unified_messages_with_pricing_uncached, ClientId,
@@ -265,37 +266,68 @@ fn fork_without_inherited_totals_counts_its_own_last_usage() {
 #[test]
 fn trae_usage_records_yield_only_to_a_usable_token_count() {
     let home = common::temp_home();
+    let response = r#"{"timestamp":"2026-09-01T10:00:03Z","type":"token_usage_record","payload":{"response_id":"resp_1","usage":{"input_tokens":12,"output_tokens":5,"total_tokens":17}}}"#;
     for (name, info, expected) in [
-        ("null", "null", 112),
-        ("metadata-only", r#"{"model_context_window":272000}"#, 112),
+        ("null", "null", 17),
+        ("metadata-only", r#"{"model_context_window":272000}"#, 17),
         (
             "no-counters",
             r#"{"last_token_usage":{},"total_token_usage":{"input_tokens":null}}"#,
-            112,
+            17,
         ),
         (
             "invalid-counters",
             r#"{"last_token_usage":{"input_tokens":-1,"cache_write_input_tokens":"invalid"}}"#,
-            112,
+            17,
         ),
         (
             "positive-total-only",
             r#"{"total_token_usage":{"total_tokens":900}}"#,
-            112,
+            17,
         ),
         (
             "positive-last-aggregate-only",
             r#"{"last_token_usage":{"total_tokens":90}}"#,
-            112,
+            17,
         ),
         (
             "unbucketable-positive-subsets",
             r#"{"last_token_usage":{"cached_input_tokens":40,"reasoning_output_tokens":2}}"#,
-            112,
+            17,
+        ),
+        (
+            "resumed-total-with-empty-last",
+            r#"{"total_token_usage":{"input_tokens":5000,"output_tokens":800},"last_token_usage":{}}"#,
+            17,
+        ),
+        (
+            "partial-zero-with-positive-total",
+            r#"{"last_token_usage":{"cached_input_tokens":0,"total_tokens":112}}"#,
+            17,
+        ),
+        (
+            "partial-zero-only",
+            r#"{"last_token_usage":{"cached_input_tokens":0}}"#,
+            17,
+        ),
+        (
+            "zero-primary-counters-with-positive-total",
+            r#"{"last_token_usage":{"input_tokens":0,"output_tokens":0,"total_tokens":112}}"#,
+            17,
+        ),
+        (
+            "zero-total-with-positive-subset",
+            r#"{"last_token_usage":{"cached_input_tokens":1,"total_tokens":0}}"#,
+            17,
         ),
         (
             "explicit-zero-aggregate-only",
             r#"{"total_token_usage":{"total_tokens":0}}"#,
+            0,
+        ),
+        (
+            "explicit-zero-primary-counters",
+            r#"{"last_token_usage":{"input_tokens":0,"output_tokens":0}}"#,
             0,
         ),
         (
@@ -308,13 +340,77 @@ fn trae_usage_records_yield_only_to_a_usable_token_count() {
         let event = format!(
             r#"{{"timestamp":"2026-09-01T10:00:02.500Z","type":"event_msg","payload":{{"type":"token_count","info":{info}}}}}"#
         );
-        let mut lines = HISTORY_MUTATION_ROLLOUT.to_vec();
-        lines.insert(3, &event);
+        let mut lines = HISTORY_MUTATION_ROLLOUT[..3].to_vec();
+        lines.extend([event.as_str(), response]);
         write_jsonl(&path, &lines);
 
         let messages = parse_trae_cli_file(&path);
         assert_eq!(messages.len(), usize::from(expected != 0), "{name}");
         assert_eq!(total_tokens(&messages), expected, "{name}");
+    }
+}
+
+#[test]
+fn codex_compaction_matches_empty_total_without_establishing_a_baseline() {
+    let home = common::temp_home();
+    let path = home.path().join("rollout-compaction.jsonl");
+    for last in [r#"{"input_tokens":0,"output_tokens":0}"#, "{}"] {
+        let marker = format!(
+            r#"{{"timestamp":"2026-09-01T10:00:03Z","type":"event_msg","payload":{{"type":"token_count","info":{{"total_token_usage":{{}},"last_token_usage":{last}}}}}}}"#
+        );
+        write_jsonl(
+            &path,
+            &[
+                r#"{"type":"session_meta","payload":{"id":"compaction-session"}}"#,
+                r#"{"type":"turn_context","payload":{"turn_id":"turn-1","model":"gpt-5.5"}}"#,
+                r#"{"type":"token_usage_record","payload":{"thread_id":"compaction-session","response_id":"compacted","usage":{"input_tokens":500,"cached_input_tokens":200,"output_tokens":40}}}"#,
+                r#"{"type":"compacted","payload":{}}"#,
+                marker.as_str(),
+                // The next last-only increment cannot advance a nonexistent
+                // baseline; the first usable cumulative snapshot counts in full.
+                r#"{"timestamp":"2026-09-01T10:00:04Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":20,"output_tokens":2}}}}"#,
+                r#"{"timestamp":"2026-09-01T10:00:05Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":40,"output_tokens":4}}}}"#,
+            ],
+        );
+        let messages = parse_codex_file(&path);
+        assert_eq!(
+            messages
+                .iter()
+                .map(|message| message.tokens.total())
+                .collect::<Vec<_>>(),
+            [540, 22, 44],
+            "{last}"
+        );
+        assert_eq!(
+            messages[0].dedup_key.as_deref(),
+            Some("codex:response:compacted")
+        );
+    }
+}
+
+#[tokio::test]
+async fn codex_dedups_untimed_copies_without_merging_distinct_calls() {
+    let home = common::temp_home();
+    let live = home
+        .path()
+        .join(".codex/sessions/2026/09/01/rollout-live.jsonl");
+    let archived = home.path().join(".codex/archived_sessions/rollout-copy.jsonl");
+    let mut lines = vec![
+        r#"{"type":"session_meta","payload":{"id":"untimed-session","model_provider":"openai"}}"#,
+        r#"{"type":"turn_context","payload":{"model":"gpt-5-codex"}}"#,
+    ];
+    let call = r#"{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{},"last_token_usage":{"input_tokens":20,"output_tokens":2}}}}"#;
+    for (count, expected) in [(1, 22), (2, 44)] {
+        lines.push(call);
+        write_jsonl(&live, &lines);
+        write_jsonl(&archived, &lines);
+
+        let messages =
+            parse_local_unified_messages_with_pricing_uncached(options(home.path(), "codex"), None)
+                .await
+                .unwrap();
+        assert_eq!(messages.len(), count);
+        assert_eq!(total_tokens(&messages), expected);
     }
 }
 

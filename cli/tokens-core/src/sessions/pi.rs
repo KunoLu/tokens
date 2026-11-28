@@ -690,7 +690,7 @@ fn pi_emitted_record<'a>(
         return None;
     }
 
-    if (summary_usage.is_some() || options.lossy_line_reader) && usage.has_damaged_key() {
+    if options.lossy_line_reader && usage.has_damaged_key() {
         return None;
     }
     let tokens = usage.to_breakdown();
@@ -837,6 +837,19 @@ fn parse_pi_format_file_inner(
             }
             _ => entry.timestamp.text_millis(),
         };
+        let summary_usage = if is_compaction {
+            match entry.extra_fields.remove("usage") {
+                None | Some(serde_json::Value::Null) => None,
+                Some(value) => match serde_json::from_value::<PiUsage>(value) {
+                    Ok(usage) if !usage.has_damaged_key() => Some(usage),
+                    // kwwk recovery may remove an undecodable entry. It
+                    // cannot identify or renumber a subsequent valid marker.
+                    _ => return ControlFlow::Continue(()),
+                },
+            }
+        } else {
+            None
+        };
         // Two copies can disagree on usage for a marker. Its occurrence
         // identifies the event, not whether this copy reported billable usage.
         let marker_identity = is_compaction.then(|| {
@@ -845,14 +858,6 @@ fn parse_pi_format_file_inner(
             *occurrence += 1;
             (at, *occurrence)
         });
-        let summary_usage = if is_compaction {
-            entry
-                .extra_fields
-                .remove("usage")
-                .and_then(|usage| serde_json::from_value::<PiUsage>(usage).ok())
-        } else {
-            None
-        };
         let Some(PiEmittedRecord {
             provider,
             response_id,

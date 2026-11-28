@@ -188,6 +188,23 @@ mod tests {
     }
 
     #[test]
+    fn removing_a_malformed_marker_does_not_recount_later_usage() {
+        let header = SESSION.lines().next().unwrap();
+        let marker = r#"{"type":"compaction","timestamp":1,"usage":{"input":3}}"#;
+        let damaged = marker.replace(":3", ":\"bad\"");
+        let old = session_file(&format!("{header}\n{damaged}\n{marker}\n"));
+        let recovered = session_file(&format!("{header}\n{marker}\n"));
+        let mut seen = HashSet::new();
+        let inputs: Vec<_> = [old, recovered]
+            .iter()
+            .flat_map(|file| parse_kwwk_file(file.path()))
+            .filter(|row| crate::should_keep_deduped_message(&mut seen, row))
+            .map(|row| row.tokens.input)
+            .collect();
+        assert_eq!(inputs, [3]);
+    }
+
+    #[test]
     fn kwwk_compaction_skips_empty_usage_and_damaged_counter_keys() {
         let summaries = r#"{"type":"compaction","timestamp":1795279800001,"messagesCompacted":1,"replacementMessages":[],"usage":{}}
 {"type":"compaction","timestamp":1795279800002,"messagesCompacted":1,"replacementMessages":[],"usage":{"input":-1,"output":0,"cacheWrite":-10}}

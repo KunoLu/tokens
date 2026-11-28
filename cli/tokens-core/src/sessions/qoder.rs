@@ -66,6 +66,7 @@
 //! name (`qoder/claude-sonnet-4-6` → `claude-sonnet-4-6` + `anthropic`).
 //! Across sources, a model reported for the request beats business fallbacks
 //! and session defaults.
+//! Provider evidence for the winning model is evaluated separately from time.
 
 use super::utils::{
     extract_i64, file_modified_timestamp_ms, for_each_json_line, open_readonly_sqlite,
@@ -74,14 +75,14 @@ use super::utils::{
 use super::{
     normalize_agent_name, normalize_workspace_key, workspace_label_from_key, UnifiedMessage,
 };
-use crate::message_cache::{
-    CacheIdentity, CachedSourceEntry, FingerprintStatus, SourceFingerprint, SourceMessageCache,
-};
+use crate::message_cache::SourceMessageCache;
 use crate::scanner::ScanResult;
 use crate::{ClientId, TokenBreakdown};
 use rayon::prelude::*;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
+use std::cmp::Reverse;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -91,7 +92,8 @@ use std::path::{Path, PathBuf};
 /// - Version 2: edition-scoped source keys and gross-prompt merging.
 /// - Version 3: partial counters, request attribution and fragment timestamps.
 /// - Version 4: measured time and model evidence across all sources.
-pub const QODER_PARSER_BASE_VERSION: u32 = 4;
+/// - Version 5: independent provider evidence and complete Qoder observation snapshots.
+pub const QODER_PARSER_BASE_VERSION: u32 = 5;
 
 /// Public client id. Both editions report under it.
 pub const CLIENT_ID: &str = "qoder";
@@ -211,7 +213,7 @@ fn is_synthetic_placeholder_model(model: &str) -> bool {
     trimmed.is_empty() || trimmed.eq_ignore_ascii_case("<synthetic>")
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 enum ModelKind {
     Unknown,
     Auto,
@@ -280,7 +282,7 @@ fn canonical_qoder_provider(provider: &str) -> Option<String> {
     crate::provider_identity::canonical_provider(provider)
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 enum ModelEvidence {
     Placeholder,
     SessionDefault,
@@ -289,7 +291,7 @@ enum ModelEvidence {
     Reported,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 struct ModelRank {
     evidence: ModelEvidence,
     kind: ModelKind,
@@ -308,11 +310,23 @@ impl ModelRank {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 enum ProviderEvidence {
-    Runtime,
+    Unattributed,
+    Inferred,
+    Configured,
     ModelPrefix,
     Record,
+}
+
+impl ProviderEvidence {
+    fn for_model(evidence: ModelEvidence) -> Self {
+        if evidence == ModelEvidence::Reported {
+            Self::ModelPrefix
+        } else {
+            Self::Configured
+        }
+    }
 }
 
 struct RequestModel {
@@ -340,10 +354,10 @@ impl RequestModel {
             provider: None,
         };
         model.observe_provider(explicit_provider, ProviderEvidence::Record);
-        model.observe_provider(prefix, ProviderEvidence::ModelPrefix);
+        model.observe_provider(prefix, ProviderEvidence::for_model(evidence));
         if model.provider.is_none() && kind == ModelKind::Named {
-            model.provider =
-                runtime_provider.map(|provider| (ProviderEvidence::Runtime, provider.to_string()));
+            model.provider = runtime_provider
+                .map(|provider| (ProviderEvidence::Configured, provider.to_string()));
         }
         model
     }
@@ -385,32 +399,32 @@ impl RequestModel {
                     self.id = id.to_string();
                 }
                 self.rank = self.rank.max(rank);
-                prefix = qualifier;
+                prefix = qualifier.map(|provider| (provider, ProviderEvidence::for_model(evidence)));
             } else if kind >= ModelKind::Slot {
                 return;
             }
         }
         self.observe_provider(explicit_provider, ProviderEvidence::Record);
-        self.observe_provider(prefix, ProviderEvidence::ModelPrefix);
+        if let Some((provider, evidence)) = prefix {
+            self.observe_provider(Some(provider), evidence);
+        }
         if self.provider.is_none() {
             self.provider = prior_request_provider;
         }
     }
 
-    fn into_ids(self) -> (String, String) {
+    fn into_ids(self) -> (String, String, ProviderEvidence) {
         // Never price a router or an unknown model as if it were a vendor model.
-        let provider = if self.rank.kind == ModelKind::Named {
-            self.provider.map(|(_, id)| id).or_else(|| {
+        let (evidence, provider) = if self.rank.kind == ModelKind::Named {
+            self.provider.or_else(|| {
                 crate::provider_identity::inferred_provider_from_model_delimited(&self.id)
-                    .map(str::to_string)
+                    .map(|provider| (ProviderEvidence::Inferred, provider.to_string()))
             })
         } else {
             None
-        };
-        (
-            self.id,
-            provider.unwrap_or_else(|| QODER_PROVIDER.to_string()),
-        )
+        }
+        .unwrap_or_else(|| (ProviderEvidence::Unattributed, QODER_PROVIDER.to_string()));
+        (self.id, provider, evidence)
     }
 }
 
@@ -550,11 +564,12 @@ fn usage_request_id(usage: &Value) -> Option<&str> {
 }
 
 /// One source's account of a request, with evidence used only by the Qoder merge.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QoderObservation {
     message: UnifiedMessage,
     measured_timestamp: bool,
     model_rank: ModelRank,
+    provider_evidence: ProviderEvidence,
 }
 
 impl QoderObservation {
@@ -601,7 +616,7 @@ impl Turn {
         let measured_timestamp = self.prompt_timestamp.or(self.timestamp);
         let timestamp = measured_timestamp.unwrap_or(fallback_timestamp);
         let model_rank = self.model.rank;
-        let (model_id, provider_id) = self.model.into_ids();
+        let (model_id, provider_id, provider_evidence) = self.model.into_ids();
         let mut message = UnifiedMessage::new_with_agent(
             CLIENT_ID,
             model_id,
@@ -624,6 +639,7 @@ impl Turn {
             message,
             measured_timestamp: measured_timestamp.is_some(),
             model_rank,
+            provider_evidence,
         })
     }
 }
@@ -1331,32 +1347,45 @@ pub fn scan_qoder_ide_db(db_path: &Path, source: QoderSource) -> QoderIdeScan {
         collect_ide_rows(&mut rows, row)
     });
     if !scan.prepared() {
-        rows.clear();
-        scan = sqlite_for_each_row_on(&conn, db_path, PLAIN_SQL, None, &mut |row| {
-            collect_ide_rows(&mut rows, row)
-        });
-    }
-
-    if !scan.prepared() {
-        // A pre-usage database is empty only when its schema confirms the
-        // table is absent. Other failures must not become a complete scan.
-        let missing_table = conn
-            .query_row(
-                "SELECT NOT EXISTS (
-                     SELECT 1 FROM main.sqlite_schema
-                     WHERE name = 'chat_message' COLLATE NOCASE AND type IN ('table', 'view')
-                 )",
-                [],
-                |row| row.get::<_, bool>(0),
-            )
-            .unwrap_or(false);
-        if !missing_table {
-            tracing::debug!(db_path = %db_path.display(), "Failed to prepare Qoder IDE usage query");
+        // Only use the plain query after confirming older schema. A lock or
+        // other transient prepare failure must not cache a metadata-free scan.
+        let schema = conn.query_row(
+            "SELECT EXISTS (
+                 SELECT 1 FROM main.sqlite_schema
+                 WHERE name = 'chat_message' COLLATE NOCASE AND type IN ('table', 'view')
+             ), (
+                 SELECT count(*) = 4 FROM pragma_table_info('chat_session')
+                 WHERE name COLLATE NOCASE IN
+                     ('session_id', 'project_uri', 'project_name', 'preferred_model_info')
+             )",
+            [],
+            |row| Ok((row.get::<_, bool>(0)?, row.get::<_, bool>(1)?)),
+        );
+        match schema {
+            Ok((false, _)) => {
+                return QoderIdeScan {
+                    messages: Vec::new(),
+                    complete: true,
+                };
+            }
+            Ok((true, false)) => {
+                scan = sqlite_for_each_row_on(&conn, db_path, PLAIN_SQL, None, &mut |row| {
+                    collect_ide_rows(&mut rows, row)
+                });
+            }
+            Ok((true, true)) | Err(_) => {
+                tracing::debug!(
+                    db_path = %db_path.display(),
+                    "Failed to prepare Qoder IDE usage query"
+                );
+            }
         }
-        return QoderIdeScan {
-            messages: Vec::new(),
-            complete: missing_table,
-        };
+        if !scan.prepared() {
+            return QoderIdeScan {
+                messages: Vec::new(),
+                complete: false,
+            };
+        }
     }
 
     let mut messages = Vec::new();
@@ -1415,7 +1444,7 @@ fn ide_row_message(row: &IdeRow, source: QoderSource) -> Option<QoderObservation
         });
     let model = RequestModel::new(raw_model, evidence, None, None);
     let model_rank = model.rank;
-    let (model_id, provider_id) = model.into_ids();
+    let (model_id, provider_id, provider_evidence) = model.into_ids();
 
     let session_id = if row.session_id.trim().is_empty() {
         "unknown".to_string()
@@ -1452,6 +1481,7 @@ fn ide_row_message(row: &IdeRow, source: QoderSource) -> Option<QoderObservation
         message,
         measured_timestamp: true,
         model_rank,
+        provider_evidence,
     })
 }
 
@@ -1546,8 +1576,11 @@ pub(crate) fn parse_qoder_lane(
     scan: &ScanResult,
     cache: Option<&mut SourceMessageCache>,
 ) -> Vec<UnifiedMessage> {
-    let sources = scan
-        .get(ClientId::Qoder)
+    let paths = scan.get(ClientId::Qoder);
+    if paths.is_empty() && scan.qoder_ide_dbs.is_empty() {
+        return Vec::new();
+    }
+    let sources = paths
         .par_iter()
         .map(|path| (path.as_path(), scan.qoder_source(path)))
         .chain(
@@ -1555,25 +1588,17 @@ pub(crate) fn parse_qoder_lane(
                 .par_iter()
                 .map(|(path, source)| (path.as_path(), *source)),
         );
-    let observations = if let Some(cache) = cache {
-        let reader = &*cache;
-        let outcomes: Vec<_> = sources
-            .map(|(path, source)| load_or_parse_source(path, source, reader))
-            .collect();
-        outcomes
-            .into_iter()
-            .flat_map(|(observations, entry)| {
-                if let Some(entry) = entry {
-                    cache.insert(entry);
-                }
-                observations
-            })
-            .collect()
-    } else {
-        sources
-            .flat_map_iter(|(path, source)| parse_source(path, source, is_qoder_ide_db(path)).0)
-            .collect()
-    };
+    let cache = cache.and_then(|cache| cache.qoder_cache());
+    let observations = sources
+        .flat_map_iter(|(path, source)| {
+            let is_ide = is_qoder_ide_db(path);
+            let parse = || parse_source(path, source, is_ide);
+            match &cache {
+                Some(cache) => cache.load_or_parse(path, source, is_ide, parse),
+                None => parse().0,
+            }
+        })
+        .collect();
     collapse_qoder_messages(observations)
 }
 
@@ -1592,77 +1617,36 @@ fn parse_source(
     }
 }
 
-fn load_or_parse_source(
-    path: &Path,
-    source: QoderSource,
-    cache: &SourceMessageCache,
-) -> (Vec<QoderObservation>, Option<CachedSourceEntry>) {
-    let is_ide = is_qoder_ide_db(path);
-    let identity = CacheIdentity::for_qoder_source(source);
-    let cached = cache.take(identity, path);
-    let previous = cached.as_ref().map(|entry| &entry.fingerprint);
-    let status = if is_ide {
-        SourceFingerprint::check_sqlite_path(path, previous)
-    } else {
-        SourceFingerprint::check_qoder_path(path, previous)
-    };
-    let fingerprint = match status {
-        Some(FingerprintStatus::Unchanged) => {
-            let entry = cached.expect("an uncached source always builds a fingerprint");
-            if !entry.messages.is_empty() {
-                let mut fallback = entry.fallback_timestamp_indices.into_iter().peekable();
-                let observations = entry
-                    .messages
-                    .into_iter()
-                    .enumerate()
-                    .map(|(index, message)| QoderObservation {
-                        model_rank: ModelRank::new(
-                            model_kind(&message.model_id),
-                            ModelEvidence::Reported,
-                        ),
-                        message,
-                        measured_timestamp: fallback.next_if_eq(&index).is_none(),
-                    })
-                    .collect();
-                return (observations, None);
-            }
-            entry.fingerprint
-        }
-        Some(FingerprintStatus::Changed(fingerprint)) => fingerprint,
-        None => return (parse_source(path, source, is_ide).0, None),
-    };
+fn merge_model_evidence(observations: &mut [QoderObservation]) {
+    if observations.len() < 2 {
+        return;
+    }
+    let (model_index, model) = observations
+        .iter()
+        .enumerate()
+        .max_by_key(|(index, observation)| (observation.model_rank, Reverse(*index)))
+        .expect("a request has observations");
+    let (provider_index, _) = observations
+        .iter()
+        .enumerate()
+        .filter(|(_, observation)| {
+            observation.message.model_id.eq_ignore_ascii_case(&model.message.model_id)
+        })
+        .max_by(|(_, left), (_, right)| {
+            left.provider_evidence
+                .cmp(&right.provider_evidence)
+                .then_with(|| right.message.provider_id.cmp(&left.message.provider_id))
+        })
+        .expect("the winning model has a provider, even if unattributed");
 
-    let (observations, complete) = parse_source(path, source, is_ide);
-    // The shared cache can record mtime indices, but cannot store model
-    // provenance. Never serve contextual models or a partial IDE read as a hit.
-    let cacheable = complete
-        && !observations.is_empty()
-        && observations.iter().all(|observation| {
-            observation.model_rank
-                == ModelRank::new(observation.model_rank.kind, ModelEvidence::Reported)
-        });
-    let entry = cacheable.then(|| {
-        let mut fallback_timestamp_indices = Vec::new();
-        let messages = observations
-            .iter()
-            .enumerate()
-            .map(|(index, observation)| {
-                if !observation.measured_timestamp {
-                    fallback_timestamp_indices.push(index);
-                }
-                observation.message.clone()
-            })
-            .collect();
-        CachedSourceEntry::new(
-            identity,
-            path,
-            fingerprint,
-            messages,
-            fallback_timestamp_indices,
-            None,
-        )
-    });
-    (observations, entry)
+    if model_index != 0 {
+        observations[0].message.model_id =
+            std::mem::take(&mut observations[model_index].message.model_id);
+    }
+    if provider_index != 0 {
+        observations[0].message.provider_id =
+            std::mem::take(&mut observations[provider_index].message.provider_id);
+    }
 }
 
 /// Merge duplicates and order the lane deterministically.
@@ -1673,7 +1657,7 @@ fn load_or_parse_source(
 /// request once regardless of the order files were scanned in.
 ///
 /// Keep the earliest measured timestamp and its session, or use mtime if
-/// nothing was measured. Prefer stronger model evidence and keep its provider.
+/// nothing was measured. Select the best model, then its best provider evidence.
 /// Merge gross prompt and cache reads separately before deriving net input.
 /// Callers price the resulting messages, never the individual observations.
 pub fn collapse_qoder_messages(mut observations: Vec<QoderObservation>) -> Vec<UnifiedMessage> {
@@ -1693,9 +1677,16 @@ pub fn collapse_qoder_messages(mut observations: Vec<QoderObservation>) -> Vec<U
             .then_with(|| left.agent.cmp(&right.agent))
             .then_with(|| left.duration_ms.cmp(&right.duration_ms))
     });
+    // Resolve the final model first so evidence for it is not lost if another
+    // model with intermediate rank appears between two observations.
+    for group in observations.chunk_by_mut(|left, right| {
+        left.message.dedup_key.is_some() && left.message.dedup_key == right.message.dedup_key
+    }) {
+        merge_model_evidence(group);
+    }
     observations.dedup_by(|candidate, existing| {
-        let (candidate_rank, candidate) = (candidate.model_rank, &mut candidate.message);
-        let (existing_rank, existing) = (&mut existing.model_rank, &mut existing.message);
+        let candidate = &mut candidate.message;
+        let existing = &mut existing.message;
         if existing.dedup_key.is_none() || existing.dedup_key != candidate.dedup_key {
             return false;
         }
@@ -1727,18 +1718,6 @@ pub fn collapse_qoder_messages(mut observations: Vec<QoderObservation>) -> Vec<U
             {
                 existing.workspace_label = candidate.workspace_label.take();
             }
-        }
-        if candidate_rank > *existing_rank {
-            *existing_rank = candidate_rank;
-            existing.model_id = std::mem::take(&mut candidate.model_id);
-            existing.provider_id = std::mem::take(&mut candidate.provider_id);
-        } else if existing_rank.kind == ModelKind::Named
-            && candidate_rank.evidence >= existing_rank.evidence
-            && existing.model_id.eq_ignore_ascii_case(&candidate.model_id)
-            && existing.provider_id == QODER_PROVIDER
-            && candidate.provider_id != QODER_PROVIDER
-        {
-            existing.provider_id = std::mem::take(&mut candidate.provider_id);
         }
         if existing.agent.is_none() {
             existing.agent = candidate.agent.take();
@@ -1849,19 +1828,19 @@ mod tests {
             "dfmodel",
             "gfmodel",
         ] {
-            assert_eq!(resolve(slot), (slot.to_string(), QODER_PROVIDER.to_string()));
+            assert_eq!(resolve(slot), (slot.to_string(), QODER_PROVIDER.to_string(), ProviderEvidence::Unattributed));
         }
         assert_eq!(
             resolve("deepseek/chat/deepseek-v3"),
-            ("deepseek-v3".to_string(), "deepseek".to_string())
+            ("deepseek-v3".to_string(), "deepseek".to_string(), ProviderEvidence::ModelPrefix)
         );
         assert_eq!(
             resolve("qoder/claude-sonnet-4-6"),
-            ("claude-sonnet-4-6".to_string(), "anthropic".to_string())
+            ("claude-sonnet-4-6".to_string(), "anthropic".to_string(), ProviderEvidence::Inferred)
         );
         assert_eq!(
             resolve("qoder-cn/qwen3-coder-plus"),
-            ("qwen3-coder-plus".to_string(), "qwen".to_string())
+            ("qwen3-coder-plus".to_string(), "qwen".to_string(), ProviderEvidence::Inferred)
         );
     }
 
@@ -2282,6 +2261,7 @@ mod tests {
                 message,
                 measured_timestamp: true,
                 model_rank: ModelRank::new(ModelKind::Slot, ModelEvidence::Reported),
+                provider_evidence: ProviderEvidence::Unattributed,
             }
         };
         let mut first = build("s1", 1_000, 100);

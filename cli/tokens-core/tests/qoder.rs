@@ -135,6 +135,13 @@ fn international_ide_db(home: &Path) -> PathBuf {
         .join("Qoder/SharedClientCache/cache/db/local.db")
 }
 
+fn has_qoder_cache_entry() -> bool {
+    let dir = tokens_core::paths::get_cache_dir().join("source-message-cache-v2/qoder");
+    dir.read_dir().is_ok_and(|mut entries| {
+        entries.any(|entry| entry.unwrap().path().extension().is_some_and(|ext| ext == "bin"))
+    })
+}
+
 fn total_tokens(messages: &[UnifiedMessage]) -> i64 {
     messages.iter().map(|message| message.tokens.total()).sum()
 }
@@ -884,9 +891,19 @@ async fn test_qoder_ide_wal_writes_invalidate_the_source_cache() {
         )
         .unwrap();
     writer
+        .execute_batch(
+            "CREATE TABLE chat_session (
+                 session_id TEXT PRIMARY KEY, project_uri TEXT, project_name TEXT,
+                 preferred_model_info TEXT
+             );
+             INSERT INTO chat_session VALUES
+                 ('sess-wal', NULL, NULL, '{\"model_key\":\"openrouter/claude-sonnet-4-6\"}');",
+        )
+        .unwrap();
+    writer
         .execute(
             "INSERT INTO chat_message VALUES
-                 ('m1','sess-wal','req-1','assistant', ?1, '{\"model_key\":\"auto\"}', 1762509600000)",
+                 ('m1','sess-wal','req-1','assistant', ?1, '{}', 1762509600000)",
             rusqlite::params![r#"{"prompt_tokens":100,"cached_tokens":0,"completion_tokens":10}"#],
         )
         .unwrap();
@@ -896,8 +913,18 @@ async fn test_qoder_ide_wal_writes_invalidate_the_source_cache() {
         .unwrap();
     assert_eq!(first.len(), 1);
     assert_eq!(first[0].tokens.input, 100);
+    assert_eq!(first[0].model_id, "claude-sonnet-4-6");
+    assert_eq!(first[0].provider_id, "openrouter");
+    assert!(has_qoder_cache_entry());
 
-    // The IDE is still running: the new row is only in the -wal sidecar.
+    // The IDE is still running: the model switch and new row only update WAL.
+    let main_mtime = db.metadata().unwrap().modified().unwrap();
+    writer
+        .execute(
+            "UPDATE chat_session SET preferred_model_info = '{\"model_key\":\"gpt-5\"}'",
+            [],
+        )
+        .unwrap();
     writer
         .execute(
             "INSERT INTO chat_message VALUES
@@ -906,6 +933,7 @@ async fn test_qoder_ide_wal_writes_invalidate_the_source_cache() {
         )
         .unwrap();
     assert!(PathBuf::from(format!("{}-wal", db.display())).exists());
+    assert_eq!(db.metadata().unwrap().modified().unwrap(), main_mtime);
 
     let second = parse_local_unified_messages_with_pricing(qoder_options(home.path()), None)
         .await
@@ -916,7 +944,70 @@ async fn test_qoder_ide_wal_writes_invalidate_the_source_cache() {
         "the -wal write must invalidate the cached read"
     );
     assert_eq!(buckets(&second), (100 + 200, 10 + 30, 100, 0));
+    assert_eq!(second[0].model_id, "gpt-5");
+    assert_eq!(second[0].provider_id, "openai");
+    assert_eq!(second, parse_uncached(home.path()).await);
+
+    writer
+        .execute("DELETE FROM chat_message WHERE id = 'm1'", [])
+        .unwrap();
+    let scan = || parse_local_unified_messages_with_pricing(qoder_options(home.path()), None);
+    assert_eq!(scan().await.unwrap().as_slice(), &second[1..]);
     drop(writer);
+    std::fs::remove_file(&db).unwrap();
+    assert!(scan().await.unwrap().is_empty());
+    write_ide_request(
+        &db,
+        "req-1",
+        r#"{"model_key":"gfmodel"}"#,
+        r#"{"prompt_tokens":9}"#,
+    );
+    let recreated = scan().await.unwrap();
+    assert_eq!(recreated.len(), 1);
+    assert_eq!(recreated[0].model_id, "gfmodel");
+    assert_eq!(total_tokens(&recreated), 9);
+}
+
+#[tokio::test]
+async fn test_qoder_ide_caches_only_a_complete_read() {
+    if rerun_with_isolated_cache("test_qoder_ide_caches_only_a_complete_read") {
+        return;
+    }
+    let home = common::temp_home();
+    let db = international_ide_db(home.path());
+    std::fs::create_dir_all(db.parent().unwrap()).unwrap();
+    let writer = rusqlite::Connection::open(&db).unwrap();
+    writer
+        .execute_batch(
+            "CREATE TABLE fixture (id TEXT, tokens TEXT);
+             INSERT INTO fixture VALUES ('good', '{\"prompt_tokens\":17}'), ('bad', '{}');
+             CREATE VIEW chat_message AS
+                 SELECT id, 's' AS session_id, id AS request_id, 'assistant' AS role,
+                     CASE WHEN id = 'bad' THEN abs(-9223372036854775808)
+                          ELSE tokens END AS token_info,
+                     '{\"model_key\":\"gfmodel\"}' AS model_info, 1794045602000 AS gmt_create
+                 FROM fixture;",
+        )
+        .unwrap();
+
+    let scan = || parse_local_unified_messages_with_pricing(qoder_options(home.path()), None);
+    assert_eq!(total_tokens(&scan().await.unwrap()), 17);
+    assert!(
+        !has_qoder_cache_entry(),
+        "do not cache the prefix before a SQLite step error"
+    );
+
+    writer.execute("DELETE FROM fixture", []).unwrap();
+    assert!(scan().await.unwrap().is_empty());
+    assert!(has_qoder_cache_entry(), "a complete empty scan is cacheable");
+
+    writer
+        .execute(
+            "INSERT INTO fixture VALUES ('new', '{\"prompt_tokens\":23}')",
+            [],
+        )
+        .unwrap();
+    assert_eq!(total_tokens(&scan().await.unwrap()), 23);
 }
 
 /// T22: rescanning the same home twice — warm cache and cold parse — agrees.
@@ -987,7 +1078,7 @@ async fn test_qoder_measured_request_time_beats_earlier_file_mtime() {
     let transcript = home.path().join(".qoder/projects/-repo/sess-cli.jsonl");
     write_jsonl(
         &transcript,
-        &[r#"{"type":"assistant","sessionId":"sess-cli","message":{"model":"gfmodel","usage":{"output_tokens":40,"request_id":"shared"}}}"#],
+        &[r#"{"type":"assistant","sessionId":"sess-cli","message":{"model":"claude-sonnet-4-6","provider":"openrouter","usage":{"output_tokens":40,"request_id":"shared"}}}"#],
     );
     std::fs::OpenOptions::new()
         .write(true)
@@ -1002,17 +1093,23 @@ async fn test_qoder_measured_request_time_beats_earlier_file_mtime() {
         .unwrap();
     assert_eq!(transcript_only.len(), 1);
     assert_eq!(transcript_only[0].date, "2026-11-06");
-    let shard_dir = tokens_core::paths::get_cache_dir().join("source-message-cache-v2/qoder");
-    assert!(shard_dir.read_dir().unwrap().any(|entry| entry
+    assert_eq!(transcript_only[0].provider_id, "openrouter");
+    assert!(has_qoder_cache_entry());
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(&transcript)
         .unwrap()
-        .path()
-        .extension()
-        .is_some_and(|ext| ext == "bin")));
+        .set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_793_962_800))
+        .unwrap();
+    let touched = parse_local_unified_messages_with_pricing(qoder_options(home.path()), None)
+        .await
+        .unwrap();
+    assert_eq!(touched[0].timestamp, 1_793_962_800_000);
 
     write_ide_request(
         &international_ide_db(home.path()),
         "shared",
-        r#"{"model_key":"gfmodel"}"#,
+        r#"{"model_key":"claude-sonnet-4-6"}"#,
         r#"{"prompt_tokens":100,"cached_tokens":60,"completion_tokens":15}"#,
     );
     let messages = assert_qoder_cache_parity(home.path(), None).await;
@@ -1020,6 +1117,8 @@ async fn test_qoder_measured_request_time_beats_earlier_file_mtime() {
     assert_eq!(messages[0].timestamp, 1_794_045_602_000);
     assert_eq!(messages[0].date, "2026-11-07");
     assert_eq!(messages[0].session_id, "sess-ide");
+    assert_eq!(messages[0].model_id, "claude-sonnet-4-6");
+    assert_eq!(messages[0].provider_id, "openrouter");
     assert_eq!(buckets(&messages), (40, 40, 60, 0));
 
     let mut options = qoder_options(home.path());
@@ -1030,6 +1129,50 @@ async fn test_qoder_measured_request_time_beats_earlier_file_mtime() {
     assert_eq!(parsed.messages.len(), 1);
     assert_eq!(parsed.messages[0].date, "2026-11-07");
     assert_eq!(parsed.messages[0].output, 40);
+}
+
+#[tokio::test]
+async fn test_qoder_provider_evidence_follows_only_the_winning_model() {
+    if rerun_with_isolated_cache("test_qoder_provider_evidence_follows_only_the_winning_model") {
+        return;
+    }
+    let home = common::temp_home();
+    let db = international_ide_db(home.path());
+    write_ide_request(
+        &db,
+        "same-model",
+        r#"{"model_key":"claude-sonnet-4-6"}"#,
+        r#"{"prompt_tokens":100}"#,
+    );
+    rusqlite::Connection::open(&db)
+        .unwrap()
+        .execute(
+            "INSERT INTO chat_message VALUES
+                ('m2', 'sess-ide', 'other-model', 'assistant', '{\"prompt_tokens\":200}',
+                 '{\"model_key\":\"gpt-5\"}', 1794045603000)",
+            [],
+        )
+        .unwrap();
+    write_jsonl(
+        &home.path().join(".qoder/projects/-repo/sess-cli.jsonl"),
+        &[
+            r#"{"type":"assistant","timestamp":"2026-11-07T09:59:00Z","businessModelKey":"claude-sonnet-4-6","message":{"model":"auto","provider":"openrouter","usage":{"output_tokens":10,"request_id":"same-model"}}}"#,
+            r#"{"type":"assistant","timestamp":"2026-11-07T09:59:01Z","businessModelKey":"claude-sonnet-4-6","message":{"model":"auto","provider":"openrouter","usage":{"output_tokens":20,"request_id":"other-model"}}}"#,
+        ],
+    );
+    write_jsonl(
+        &home
+            .path()
+            .join(".qoder/logs/sessions/-repo/sess-cli/segments/run.jsonl"),
+        &[r#"{"ts":"2026-11-07T10:00:01Z","type":"model.response.completed","request_id":"same-model","data":{"model":"gfmodel","input_tokens":60}}"#],
+    );
+
+    let messages = assert_qoder_cache_parity(home.path(), None).await;
+    assert_eq!(messages.len(), 2);
+    assert_eq!(messages[0].model_id, "claude-sonnet-4-6");
+    assert_eq!(messages[0].provider_id, "openrouter");
+    assert_eq!(messages[1].model_id, "gpt-5");
+    assert_eq!(messages[1].provider_id, "openai");
 }
 
 #[tokio::test]
@@ -1108,7 +1251,7 @@ async fn test_qoder_reported_slots_beat_named_ide_session_default() {
              preferred_model_info TEXT
          );
          INSERT INTO chat_session VALUES
-             ('sess-ide', NULL, NULL, '{\"model_key\":\"claude-sonnet-4-6\"}');
+             ('sess-ide', NULL, NULL, '{\"model_key\":\"openrouter/claude-sonnet-4-6\"}');
          INSERT INTO chat_message VALUES
              ('m2', 'sess-ide', 'fallback', 'assistant',
               '{\"prompt_tokens\":30,\"completion_tokens\":8}', '{}', 1794045603000);",
@@ -1117,7 +1260,7 @@ async fn test_qoder_reported_slots_beat_named_ide_session_default() {
     drop(conn);
     let pricing = PricingService::new(
         HashMap::from([(
-            "claude-sonnet-4-6".into(),
+            "openrouter/claude-sonnet-4-6".into(),
             ModelPricing {
                 input_cost_per_token: Some(0.001),
                 output_cost_per_token: Some(0.002),
@@ -1130,8 +1273,33 @@ async fn test_qoder_reported_slots_beat_named_ide_session_default() {
     assert_eq!(ide_only.len(), 2);
     assert!(ide_only.iter().all(|message| {
         message.model_id == "claude-sonnet-4-6"
+            && message.provider_id == "openrouter"
             && message.cost_source == tokens_core::CostSource::Estimated
     }));
+    assert!(has_qoder_cache_entry());
+
+    let writer = rusqlite::Connection::open(&db).unwrap();
+    writer.execute_batch("BEGIN EXCLUSIVE").unwrap();
+    let assert_locked = || {
+        let reader =
+            rusqlite::Connection::open_with_flags(&db, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+                .unwrap();
+        reader.busy_timeout(std::time::Duration::ZERO).unwrap();
+        let error = reader
+            .query_row("SELECT count(*) FROM chat_message", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            rusqlite::Error::SqliteFailure(failure, _)
+                if matches!(
+                    failure.code,
+                    rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked
+                )
+        ));
+    };
+    assert_locked();
 
     write_jsonl(
         &home.path().join(".qoder/projects/-repo/sess-reported.jsonl"),
@@ -1141,7 +1309,22 @@ async fn test_qoder_reported_slots_beat_named_ide_session_default() {
         &home.path().join(".qoder/projects/-repo/sess-fallback.jsonl"),
         &[r#"{"type":"assistant","timestamp":"2026-11-07T10:01:01Z","businessModelKey":"qmodel","message":{"model":"auto","usage":{"input_tokens":50,"output_tokens":5,"request_id":"fallback"}}}"#],
     );
-    let messages = assert_qoder_cache_parity(home.path(), Some(&pricing)).await;
+    let scan = || {
+        parse_local_unified_messages_with_pricing(qoder_options(home.path()), Some(&pricing))
+    };
+    let messages = scan().await.unwrap();
+    assert_eq!(scan().await.unwrap(), messages);
+    assert_locked();
+    writer.execute_batch("ROLLBACK").unwrap();
+    assert_eq!(
+        parse_local_unified_messages_with_pricing_uncached(
+            qoder_options(home.path()),
+            Some(&pricing),
+        )
+        .await
+        .unwrap(),
+        messages,
+    );
     assert_eq!(messages.len(), 2);
     assert_eq!(messages[0].model_id, "gfmodel");
     assert_eq!(messages[1].model_id, "qmodel");

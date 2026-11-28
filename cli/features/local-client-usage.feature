@@ -20,6 +20,16 @@ Feature: CLI 按客户端来源与消息日期统计本地用量
     Then kwwk 的用量归入 kwwk 而不是 pi
     And TRAE CLI 的用量归入 trae-cli 而不是 trae
 
+  Scenario: TRAE CLI 不会用空增量屏蔽已记录的请求
+    Given 子会话有 17 个实测 token，另有历史累计快照但没有本次增量
+    When CLI 汇总该会话
+    Then 保留这 17 个 token，不把历史累计归入本次用量
+
+  Scenario: Codex 的压缩和重放不依赖记录完整写出日期
+    Given 一次压缩请求已经记录用量，其后的快照只确认本轮没有新用量
+    When CLI 汇总当前会话及其归档副本
+    Then 压缩用量只计一次
+
   Scenario: kwwk 同毫秒的不同摘要不会因不完整副本而错位
     Given 同一会话有两次同毫秒摘要，分别消耗 20 和 3 个输入 token
     And 另一份副本将第一次摘要的用量记为零
