@@ -2462,14 +2462,31 @@ fn parse_all_messages_streaming<S: MessageSink>(
         }
     }
 
-    parse_cached_lane(
-        &scan_result,
-        &mut source_cache,
-        pricing,
-        &mut all_messages,
-        ClientId::Amp,
-        sessions::amp::parse_amp_file,
-    );
+    let amp_identity = message_cache::CacheIdentity::for_client(ClientId::Amp);
+    let amp_outcomes: Vec<_> = scan_result
+        .get(ClientId::Amp)
+        .par_iter()
+        .map(|path| {
+            load_or_parse_source(
+                amp_identity,
+                path,
+                &source_cache,
+                pricing,
+                sessions::amp::parse_amp_file,
+            )
+        })
+        .collect();
+    for (outcome, selected) in
+        sessions::amp::mark_preferred_sources(amp_outcomes, |outcome| outcome.messages.as_slice())
+    {
+        if selected {
+            all_messages.extend(outcome.messages);
+        }
+        // Cache both winners and losers to reuse their parsed identity next time.
+        if let Some(entry) = outcome.cache_entry {
+            source_cache.insert(entry);
+        }
+    }
 
     let codebuff_outcomes: Vec<CachedParseOutcome> = if include_codebuff {
         scan_result
@@ -5587,19 +5604,18 @@ pub fn parse_local_clients(options: LocalParseOptions) -> Result<ParsedMessages,
     counts.set(ClientId::Gemini, gemini_count);
     messages.extend(gemini_msgs);
 
-    let amp_msgs: Vec<ParsedMessage> = scan_result
+    let amp_sources: Vec<_> = scan_result
         .get(ClientId::Amp)
         .par_iter()
-        .flat_map(|path| {
-            sessions::amp::parse_amp_file(path)
-                .into_iter()
-                .map(|msg| unified_to_parsed(&msg))
-                .collect::<Vec<_>>()
-        })
+        .map(|path| sessions::amp::parse_amp_file(path))
         .collect();
-    let amp_count = amp_msgs.len() as i32;
-    counts.set(ClientId::Amp, amp_count);
-    messages.extend(amp_msgs);
+    let before_amp = messages.len();
+    for (source, selected) in sessions::amp::mark_preferred_sources(amp_sources, Vec::as_slice) {
+        if selected {
+            messages.extend(source.iter().map(unified_to_parsed));
+        }
+    }
+    counts.set(ClientId::Amp, (messages.len() - before_amp) as i32);
 
     let codebuff_msgs: Vec<ParsedMessage> = if include_codebuff {
         scan_result
@@ -18672,6 +18688,113 @@ mod tests {
         };
         assert!(dates.contains(&local_date(thread_created + 2000)));
         assert!(dates.contains(&local_date(ledger_timestamp)));
+    }
+
+    #[test]
+    #[serial]
+    fn test_amp_both_apis_select_whole_threads_by_parsed_identity() {
+        let cache_home = tempfile::TempDir::new().unwrap();
+        let source_home = tempfile::TempDir::new().unwrap();
+        let _cache_env = redirect_cache_home(cache_home.path());
+        let home = source_home.path().to_str().unwrap();
+        let local = client_scan_root(source_home.path(), ClientId::Amp);
+        let synced = scanner::amp_sync_cache_root(home, false);
+        std::fs::create_dir_all(&local).unwrap();
+        std::fs::create_dir_all(&synced).unwrap();
+
+        for (root, name, id, input) in [
+            (&local, "T-renamed", Some("T-shared"), 900),
+            (&local, "T-same-name", Some("legacy-thread"), 10),
+            (&local, "T-legacy", Some("T-legacy"), 70),
+            (&local, "T-no-id", None, 80),
+            (&local, "T-fallback", None, 901),
+            (&local, "T-broken", Some("T-broken"), 50),
+            (&local, "T-empty", Some("T-empty"), 75),
+            (&synced, "T-synced-copy", Some("T-shared"), 20),
+            (&synced, "T-same-name", Some("T-same-name"), 30),
+            (&synced, "T-cloud", Some("T-cloud"), 40),
+            (&synced, "T-fallback-alias", Some("T-fallback"), 60),
+        ] {
+            let mut thread = serde_json::json!({
+                "created": 1_795_279_800_001_i64,
+                "messages": [{
+                    "role": "assistant", "messageId": 1,
+                    "usage": {
+                        "model": "zai-org/GLM-5.3-Flash", "inputTokens": input,
+                        "outputTokens": 3, "cacheReadInputTokens": 7,
+                        "cacheCreationInputTokens": 11, "credits": 0.125
+                    }
+                }]
+            });
+            if let Some(id) = id {
+                thread["id"] = serde_json::json!(id);
+            }
+            if name == "T-synced-copy" {
+                thread["usageLedger"] = serde_json::json!({
+                    "events": [{
+                        "timestamp": "2026-11-19T05:20:21.230Z",
+                        "model": "zai-org/GLM-5.3-Flash", "credits": 0.125,
+                        "tokens": {
+                            "input": 21, "output": 3, "cacheReadInputTokens": 7,
+                            "cacheCreationInputTokens": 11
+                        }
+                    }]
+                });
+            }
+            std::fs::write(root.join(format!("{name}.json")), thread.to_string()).unwrap();
+        }
+        std::fs::write(synced.join("T-broken.json"), b"{").unwrap();
+        std::fs::write(synced.join("T-empty.json"), br#"{"id":"T-empty","messages":[]}"#).unwrap();
+
+        let expected = [
+            ("T-broken", 50_i64),
+            ("T-cloud", 40),
+            ("T-empty", 75),
+            ("T-fallback", 60),
+            ("T-legacy", 70),
+            ("T-no-id", 80),
+            ("T-same-name", 30),
+            ("T-shared", 20),
+            ("T-shared", 21),
+            ("legacy-thread", 10),
+        ];
+        let assert_usage = |messages: &[super::ParsedMessage]| {
+            let mut actual: Vec<_> = messages
+                .iter()
+                .map(|message| {
+                    assert_eq!(message.client, "amp");
+                    assert_eq!(message.model_id, "GLM-5.3-Flash");
+                    assert_eq!(
+                        (message.output, message.cache_read, message.cache_write, message.cost),
+                        (3, 7, 11, 0.125)
+                    );
+                    (message.session_id.as_str(), message.input)
+                })
+                .collect();
+            actual.sort_unstable();
+            assert_eq!(actual, expected);
+        };
+
+        let options = LocalParseOptions {
+            home_dir: Some(home.to_string()),
+            clients: Some(vec!["amp".to_string()]),
+            ..Default::default()
+        };
+        let parsed = parse_local_clients(options.clone()).unwrap();
+        assert_eq!(parsed.counts.get(ClientId::Amp), expected.len() as i32);
+        assert_usage(&parsed.messages);
+
+        // The reporting lane must make the same choices on cold and warm scans.
+        let runtime = tokio::runtime::Builder::new_current_thread().build().unwrap();
+        for _ in 0..2 {
+            let unified = runtime
+                .block_on(super::parse_local_unified_messages_with_pricing(
+                    options.clone(),
+                    None,
+                ))
+                .unwrap();
+            assert_usage(&unified.iter().map(unified_to_parsed).collect::<Vec<_>>());
+        }
     }
 
     #[test]

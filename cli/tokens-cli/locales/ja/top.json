@@ -12,6 +12,7 @@
   "top.amp.syncInProgress": "別の Amp 同期が進行中です。",
   "top.amp.lastSyncLabel": "最終同期：",
   "top.amp.missingStreams": "Amp CLI の出力を取得できませんでした",
+  "top.amp.outputTooLarge": "`{command}` の出力が上限の {mib} MiB を超えました。",
   "top.amp.runFailed": "`{command}` を実行できませんでした",
   "top.amp.statusTitle": "ampcode.com の Amp スレッド",
   "top.amp.syncFailed": "  Amp の同期に失敗しました：{error}",

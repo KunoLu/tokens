@@ -12,6 +12,7 @@
   "top.amp.syncInProgress": "另一个 Amp 同步正在运行。",
   "top.amp.lastSyncLabel": "上次同步：",
   "top.amp.missingStreams": "无法捕获 Amp CLI 的输出",
+  "top.amp.outputTooLarge": "`{command}` 的输出超过 {mib} MiB 上限。",
   "top.amp.runFailed": "无法运行 `{command}`",
   "top.amp.statusTitle": "ampcode.com 上的 Amp 线程",
   "top.amp.syncFailed": "  Amp 同步失败：{error}",

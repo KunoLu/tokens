@@ -157,6 +157,10 @@ the signed-in Amp CLI; no hook or `tokens cloud submit` is needed inside an orb.
 Sync writes a local usage-only cache. A normal `tokens submit` sends only
 aggregated usage to your Tokens site, not the Amp threads.
 See [Amp thread sync](../README.md#amp-thread-sync) for setup and coverage limits.
+Search covers the 100 most recently active threads, including during incremental
+refresh. `--force` re-exports discovered threads if an agent-only update was
+missed. Ordinary submits fall back to cached data; an incomplete Amp refresh
+blocks `--replace` to avoid deleting history.
 
 Amp 使用不同的流程。Amp 将线程保存在 ampcode.com，包括在云端 orb 中运行的线程。用本机已登录的 Amp CLI 运行 `tokens amp sync`，无需在 orb 内配置钩子或运行 `tokens cloud submit`。同步只在本地缓存用量元数据。正常运行 `tokens submit` 时，只向你的 Tokens 站点提交汇总用量，不上传 Amp 线程。设置方法和统计限制见 [Amp 线程同步](../README_zh.md#amp-线程同步)。
 

@@ -29,6 +29,7 @@ const AMP_SCRIPT: &str = r#"case "$1 $2 $3" in
     'threads export T-listed'|'threads export T-recent') route=$3 ;;
     *) route=unexpected ;;
 esac
+if [ "${TOKENS_API_TOKEN+x}" = x ]; then route=unexpected-token; fi
 printf 'called\n' >>"$AMP_FIXTURE/calls/$route" || exit 2
 IFS= read -r response <"$AMP_FIXTURE/$route.json" || exit 2
 printf '%s\n' "$response"
@@ -47,6 +48,7 @@ if "%~1 %~2"=="threads list" set "route=list"
 if "%~1 %~2 %~3"=="threads search author:me" set "route=search"
 if "%~1 %~2 %~3"=="threads export T-listed" set "route=T-listed"
 if "%~1 %~2 %~3"=="threads export T-recent" set "route=T-recent"
+if defined TOKENS_API_TOKEN set "route=unexpected-token"
 >>"%AMP_FIXTURE%\calls\%route%" echo called
 if errorlevel 1 exit /b 2
 type "%AMP_FIXTURE%\%route%.json"
@@ -121,6 +123,17 @@ impl AmpFixture {
     }
 
     fn run(&self, args: &[&str]) -> Output {
+        let output = self.invoke(args);
+        assert!(
+            output.status.success(),
+            "tokens {args:?} exited {}: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        output
+    }
+
+    fn invoke(&self, args: &[&str]) -> Output {
         let home = self.path("home");
         // Keep proxy-aware HTTP(S) local and trap any accidental backend request.
         let proxy = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -169,12 +182,6 @@ impl AmpFixture {
         if cache.exists() {
             assert_private_cache(&cache);
         }
-        assert!(
-            output.status.success(),
-            "tokens {args:?} exited {}: {}",
-            output.status,
-            String::from_utf8_lossy(&output.stderr)
-        );
         output
     }
 
@@ -182,7 +189,7 @@ impl AmpFixture {
         let mut args = vec!["amp", "sync", "--json"];
         args.extend_from_slice(options);
         let result = output_json(&self.run(&args));
-        assert_eq!(result["synced"], true);
+        assert_eq!(result["synced"], failed == 0 || exported > 0, "{result}");
         assert_eq!(result["threads"], 2);
         assert_eq!(result["exported"], exported);
         assert_eq!(result["failed"], failed);
@@ -303,6 +310,25 @@ fn amp_status_does_not_run_amp_or_create_state() {
 }
 
 #[test]
+fn amp_status_counts_only_thread_files_that_still_exist() {
+    let fixture = AmpFixture::new();
+    fixture.sync(&[], 2, 0);
+    fixture.assert_calls(BOTH_EXPORTS);
+
+    fs::remove_file(fixture.cached_thread(LISTED)).unwrap();
+    let threads = fixture.path("config/amp-cache/threads");
+    fs::write(threads.join("notes.json"), "{}").unwrap();
+    fs::write(threads.join("T-temp.tmp"), "{}").unwrap();
+    fs::create_dir(threads.join("T-directory.json")).unwrap();
+
+    let status = output_json(&fixture.run(&["amp", "status", "--json"]));
+    assert_eq!(status["hasCache"], true);
+    assert_eq!(status["cachedThreads"], 1);
+    assert!(status["lastSyncedAt"].is_string());
+    fixture.assert_calls(&[]);
+}
+
+#[test]
 fn amp_sync_combines_list_and_search_and_only_exports_changed_threads_unless_forced() {
     let fixture = AmpFixture::new();
     fixture.sync(&[], 2, 0);
@@ -337,6 +363,25 @@ fn amp_sync_combines_list_and_search_and_only_exports_changed_threads_unless_for
 }
 
 #[test]
+fn amp_sync_stops_on_a_repeated_full_list_page() {
+    let fixture = AmpFixture::new();
+    fixture.sync(&[], 2, 0);
+    fixture.assert_calls(BOTH_EXPORTS);
+    let state_path = fixture.path("config/amp-cache/state.json");
+    let state = fs::read(&state_path).unwrap();
+
+    let page = (0..500)
+        .map(|i| json!({"id": format!("T-page-{i}"), "updated": FIRST, "messageCount": 2}))
+        .collect();
+    fixture.response("list", Value::Array(page));
+    let result = output_json(&fixture.run(&["amp", "sync", "--json"]));
+    assert_eq!(result["synced"], false);
+    assert!(result["error"].as_str().unwrap().contains("amp threads list"));
+    fixture.assert_calls(&["list", "list"]);
+    assert_eq!(fs::read(state_path).unwrap(), state);
+}
+
+#[test]
 fn amp_partial_sync_retains_failed_thread_and_retries_only_that_thread() {
     let fixture = AmpFixture::new();
     fixture.sync(&[], 2, 0);
@@ -362,6 +407,39 @@ fn amp_partial_sync_retains_failed_thread_and_retries_only_that_thread() {
 }
 
 #[test]
+fn amp_sync_keeps_state_and_retries_when_all_exports_fail() {
+    let fixture = AmpFixture::new();
+    fixture.sync(&[], 2, 0);
+    fixture.assert_calls(BOTH_EXPORTS);
+    let state_path = fixture.path("config/amp-cache/state.json");
+    let state = fs::read(&state_path).unwrap();
+    let listed = fixture.cached_thread(LISTED);
+    let recent = fixture.cached_thread(RECENT);
+    let old_listed = fs::read(&listed).unwrap();
+    let old_recent = fs::read(&recent).unwrap();
+
+    fixture.discovery(UPDATED, UPDATED);
+    fixture.response(LISTED, thread(LISTED, 31));
+    fixture.response(RECENT, thread(RECENT, 43));
+    let failures = [fixture.fail_export(LISTED), fixture.fail_export(RECENT)];
+    fixture.sync(&[], 0, 2);
+    fixture.assert_calls(BOTH_EXPORTS);
+    assert_eq!(fs::read(&state_path).unwrap(), state);
+    assert_eq!(fs::read(&listed).unwrap(), old_listed);
+    assert_eq!(fs::read(&recent).unwrap(), old_recent);
+
+    for failure in failures {
+        fs::remove_file(failure).unwrap();
+    }
+    fixture.sync(&[], 2, 0);
+    fixture.assert_calls(BOTH_EXPORTS);
+    assert_ne!(fs::read(listed).unwrap(), old_listed);
+    assert_ne!(fs::read(recent).unwrap(), old_recent);
+    fixture.sync(&[], 0, 0);
+    fixture.assert_calls(&["list", "search"]);
+}
+
+#[test]
 fn amp_sync_does_not_echo_a_malformed_usage_value() {
     let fixture = AmpFixture::new();
     let mut malformed = thread(LISTED, 11);
@@ -373,7 +451,7 @@ fn amp_sync_does_not_echo_a_malformed_usage_value() {
 }
 
 #[test]
-fn amp_submit_preview_refreshes_only_after_explicit_sync_and_retains_cached_usage() {
+fn amp_submit_uses_cached_usage_after_failure_but_replace_refuses_partial_refresh() {
     let fixture = AmpFixture::new();
     fixture.prepare_offline_submit();
     let before = output_json(&fixture.run(SUBMIT));
@@ -381,14 +459,39 @@ fn amp_submit_preview_refreshes_only_after_explicit_sync_and_retains_cached_usag
     assert!(!fixture.path("config/amp-cache").exists());
     fixture.assert_calls(&[]);
 
+    // Give the search-only thread a second day that replacement could otherwise erase.
+    let mut recent = thread(RECENT, 23);
+    let next_day = json!("2025-01-03T03:04:05Z");
+    recent["messages"][1]["usage"]["timestamp"] = next_day.clone();
+    recent["usageLedger"]["events"][0]["timestamp"] = next_day;
+    fixture.response(RECENT, recent);
     fixture.sync(&[], 2, 0);
     fixture.assert_calls(BOTH_EXPORTS);
     fixture.discovery(UPDATED, FIRST);
     fixture.response(LISTED, thread(LISTED, 31));
-    fixture.fail_export(LISTED);
+    let listed_failure = fixture.fail_export(LISTED);
     let preview = fixture.run(SUBMIT);
     fixture.assert_calls(&["list", "search", LISTED]);
     // Local 109 + old listed 20 + recent 32. The failed 40-token update is not counted.
     assert_eq!(output_json(&preview)["summary"]["totalTokens"], 161);
     assert!(String::from_utf8_lossy(&preview.stderr).contains("amp threads export"));
+
+    fs::remove_file(listed_failure).unwrap();
+    fs::remove_file(fixture.cached_thread(RECENT)).unwrap();
+    fixture.fail_export(RECENT);
+    let replacement = fixture.invoke(&[
+        "submit",
+        "--replace",
+        "--client",
+        "amp",
+        "--since",
+        "2025-01-02",
+        "--until",
+        "2025-01-03",
+    ]);
+    fixture.assert_calls(BOTH_EXPORTS);
+    assert!(!replacement.status.success());
+    let error = String::from_utf8_lossy(&replacement.stderr);
+    assert!(error.contains("--replace") && error.contains("Amp"), "{error}");
+    assert!(!fixture.cached_thread(RECENT).exists());
 }

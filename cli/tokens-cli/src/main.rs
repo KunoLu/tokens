@@ -398,7 +398,7 @@ enum HindsightSubcommand {
 enum AmpSubcommand {
     #[command(about = "Sync Amp threads from ampcode.com into local cache")]
     Sync {
-        #[arg(long, help = "Re-export every thread, not only new or changed ones")]
+        #[arg(long, help = "Re-export every discovered thread, not only new or changed ones")]
         force: bool,
         #[arg(long, help = "Output as JSON")]
         json: bool,
@@ -3053,9 +3053,14 @@ fn run_submit_command(
         .is_none_or(|s| s.iter().any(|src| src == "amp"));
     // Only after an explicit `tokens amp sync`: submit never starts reading
     // the account's threads on ampcode.com on its own.
-    if include_amp && amp::has_amp_cache() {
+    if include_amp && amp::has_amp_sync_state() {
         say!("{}", t!("cli.submit.syncingAmp").bright_black());
         let sync_result = amp::sync_amp_cache(false);
+        if replacement.is_some() && (!sync_result.synced || sync_result.failed != 0) {
+            // Full coverage can delete missing days. A stale or partial cache
+            // is safe for an ordinary submit but not an authoritative one.
+            anyhow::bail!(t!("cli.submit.ampReplaceIncomplete"));
+        }
         if sync_result.synced {
             say!(
                 "{}",

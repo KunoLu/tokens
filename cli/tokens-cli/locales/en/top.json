@@ -12,6 +12,7 @@
   "top.amp.syncInProgress": "Another Amp sync is in progress.",
   "top.amp.lastSyncLabel": "Last sync:",
   "top.amp.missingStreams": "Could not capture the output of the Amp CLI",
+  "top.amp.outputTooLarge": "`{command}` exceeded the {mib} MiB output limit.",
   "top.amp.runFailed": "Failed to run `{command}`",
   "top.amp.statusTitle": "Amp threads on ampcode.com",
   "top.amp.syncFailed": "  Amp sync failed: {error}",

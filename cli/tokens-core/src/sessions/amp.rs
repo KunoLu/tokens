@@ -6,6 +6,7 @@ use super::utils::read_file_or_none;
 use super::UnifiedMessage;
 use crate::{provider_identity, TokenBreakdown};
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::path::Path;
 
 /// Synced thread IDs become file names. Leave room for the atomic write suffix.
@@ -316,11 +317,10 @@ pub fn parse_amp_file(path: &Path) -> Vec<UnifiedMessage> {
         Err(_) => return Vec::new(),
     };
 
-    let thread_id = thread.id.clone().unwrap_or_else(|| {
+    let thread_id = thread.id.as_deref().unwrap_or_else(|| {
         path.file_stem()
             .and_then(|s| s.to_str())
             .unwrap_or("unknown")
-            .to_string()
     });
 
     let thread_created_ms = thread.created.unwrap_or(0);
@@ -334,7 +334,7 @@ pub fn parse_amp_file(path: &Path) -> Vec<UnifiedMessage> {
         message_records.sort_by_key(|record| record.timestamp);
         return message_records
             .into_iter()
-            .map(|record| record.into_unified(&thread_id))
+            .map(|record| record.into_unified(thread_id))
             .collect();
     }
 
@@ -359,8 +359,29 @@ pub fn parse_amp_file(path: &Path) -> Vec<UnifiedMessage> {
     ledger_records.sort_by_key(|record| record.timestamp);
     ledger_records
         .into_iter()
-        .map(|record| record.into_unified(&thread_id))
+        .map(|record| record.into_unified(thread_id))
         .collect()
+}
+
+/// Select whole threads in scanner priority order. Empty sources cannot hide
+/// usable copies. The parser's ID (including the stem fallback) is already
+/// present on each message, even for a warm cache hit.
+pub(crate) fn mark_preferred_sources<T>(
+    sources: Vec<T>,
+    messages: impl Fn(&T) -> &[UnifiedMessage],
+) -> impl Iterator<Item = (T, bool)> {
+    let selected: Vec<_> = {
+        let mut seen = HashSet::new();
+        sources
+            .iter()
+            .map(|source| {
+                messages(source)
+                    .first()
+                    .is_some_and(|message| seen.insert(message.session_id.as_str()))
+            })
+            .collect()
+    };
+    sources.into_iter().zip(selected)
 }
 
 #[cfg(test)]

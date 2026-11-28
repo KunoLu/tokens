@@ -2074,6 +2074,7 @@ dependencies = [
  "fs2",
  "hostname",
  "iana-time-zone",
+ "libc",
  "predicates",
  "reqwest",
  "rpassword",
@@ -2087,6 +2088,7 @@ dependencies = [
  "tokio",
  "tracing-subscriber",
  "uuid",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

@@ -219,7 +219,9 @@ tool output, or thread titles. The config directory is normally
 Once an explicit sync writes `<tokens config dir>/amp-cache/state.json`,
 `tokens submit` and `tokens serve` refresh the cache incrementally when the
 submission includes Amp. They do not contact Amp before this opt-in.
-If a refresh fails, submission continues using the existing cache. The
+If a refresh fails, ordinary submissions continue using the existing cache.
+An Amp `--replace` submission refuses to proceed after an incomplete refresh,
+because a missing day could otherwise erase previously submitted usage. The
 scanner also reads legacy files from `~/.local/share/amp/threads/` (or
 `$XDG_DATA_HOME/amp/threads/`). If both sources have the same thread ID,
 only the synced copy counts.
@@ -229,6 +231,9 @@ requests and system-model requests such as title generation. In one upstream
 sample, synced token totals were about 15% below `amp usage`; the gap is not
 guaranteed. A first sync can also miss older threads absent from `threads list`:
 `threads search` returns only the 100 most recently active threads.
+Between syncs, an agent-only update can also fall outside that window while
+the listed update time stays unchanged. Use `--force` to refresh listed
+threads in this case; it cannot recover undiscovered threads.
 
 ## Repository layout
 

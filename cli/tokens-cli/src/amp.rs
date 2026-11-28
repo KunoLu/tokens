@@ -22,9 +22,9 @@
 //! only the most recently active threads, unlisted ones included, with an
 //! `updatedAt` that follows every message. A thread found by search is
 //! re-exported when that time changes; any other thread, when its listed time
-//! does. A thread with new activity is always among the most recent, so the
-//! cap on search results only limits which old, unlisted threads a first sync
-//! finds.
+//! does. Outside the search window an agent-only change can therefore be
+//! missed if the list watermark is unchanged. Force re-exports discovered
+//! threads but cannot discover an old thread absent from both results.
 //!
 //! An export holds the requests of the thread's main agent only. Amp bills a
 //! thread's subagent (Task) and system-model requests (titles and the like) to
@@ -37,18 +37,21 @@ use colored::Colorize;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs;
-use std::io::{ErrorKind, Read};
+use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::{mpsc, Mutex};
-use std::time::{Duration, Instant};
+use std::sync::Mutex;
+use std::time::Duration;
 use tokens_core::sessions::amp::{is_thread_id, AmpMessageUsage, AmpUsageLedger};
+
+mod process;
 
 const LIST_PAGE_SIZE: usize = 500;
 /// The most `amp threads search` returns.
 const SEARCH_LIMIT: usize = 100;
 const LIST_TIMEOUT: Duration = Duration::from_secs(120);
 const EXPORT_TIMEOUT: Duration = Duration::from_secs(300);
+const MAX_STDOUT_MIB: usize = 32;
 const EXPORT_WORKERS: usize = 4;
 const STATE_VERSION: u32 = 1;
 
@@ -65,10 +68,11 @@ fn state_path(cache_dir: &Path) -> PathBuf {
     cache_dir.join("state.json")
 }
 
-/// Whether `tokens amp sync` has completed here. Only then does
-/// `tokens submit` keep the cache current on its own.
-pub fn has_amp_cache() -> bool {
-    load_state(&get_amp_cache_dir()).is_ok_and(|state| state.is_some())
+/// An absent state is a normal local-only install. An inaccessible or invalid
+/// state must reach the validation path, never silently authorize replacement.
+pub fn has_amp_sync_state() -> bool {
+    !matches!(fs::symlink_metadata(state_path(&get_amp_cache_dir())),
+        Err(error) if error.kind() == ErrorKind::NotFound)
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -179,12 +183,30 @@ pub fn run_amp_sync(force: bool, json: bool) -> Result<()> {
 
 pub fn run_amp_status(json: bool) -> Result<()> {
     let cache_dir = get_amp_cache_dir();
-    let state = load_state(&cache_dir).ok().flatten();
+    let state = load_state(&cache_dir)?;
+    let dir = threads_dir(&cache_dir);
+    let mut cached_threads = 0;
+    match fs::read_dir(&dir) {
+        Ok(entries) => {
+            for entry in entries {
+                let entry = entry?;
+                if entry.file_type()?.is_file()
+                    && entry.file_name().to_str()
+                        .and_then(|name| name.strip_suffix(".json"))
+                        .is_some_and(is_thread_id)
+                {
+                    cached_threads += 1;
+                }
+            }
+        }
+        Err(error) if error.kind() == ErrorKind::NotFound => {}
+        Err(error) => return Err(error.into()),
+    }
     let status = AmpStatus {
         amp_cli: find_amp_binary().map(|path| path.display().to_string()),
-        cache_dir: threads_dir(&cache_dir).display().to_string(),
+        cache_dir: dir.display().to_string(),
         has_cache: state.is_some(),
-        cached_threads: state.as_ref().map_or(0, |state| state.threads.len()),
+        cached_threads,
         last_synced_at: state.map(|state| state.synced_at),
     };
     if json {
@@ -327,11 +349,7 @@ fn sync_amp_cache_with(
 /// Every thread to keep in the cache, with the update time that marks a
 /// change (see the module docs for why it comes from two commands).
 fn find_threads(amp: &Path) -> Result<BTreeMap<String, DateTime<Utc>>> {
-    let mut threads: BTreeMap<_, _> = list_threads(amp)?
-        .into_iter()
-        .filter(|thread| thread.message_count != Some(0))
-        .map(|thread| (thread.id, thread.updated))
-        .collect();
+    let mut threads = list_threads(amp)?;
     threads.extend(
         search_recent_threads(amp)?
             .into_iter()
@@ -352,29 +370,37 @@ fn search_recent_threads(amp: &Path) -> Result<Vec<SearchedThread>> {
     Ok(threads)
 }
 
-fn list_threads(amp: &Path) -> Result<Vec<ListedThread>> {
-    let mut threads = Vec::new();
+fn list_threads(amp: &Path) -> Result<BTreeMap<String, DateTime<Utc>>> {
+    let mut threads = BTreeMap::new();
+    let mut offset = 0usize;
+    let limit = LIST_PAGE_SIZE.to_string();
     loop {
-        let offset = threads.len().to_string();
-        let limit = LIST_PAGE_SIZE.to_string();
+        let offset_arg = offset.to_string();
         let args = [
             "--json",
             "--include-archived",
             "--limit",
             &limit,
             "--offset",
-            &offset,
+            &offset_arg,
         ];
         let output = run_amp(amp, "list", &args, LIST_TIMEOUT)?;
         let page: Vec<ListedThread> = parse_output("list", &output)?;
         anyhow::ensure!(
-            page.iter().all(|thread| is_thread_id(&thread.id)),
+            page.len() <= LIST_PAGE_SIZE && page.iter().all(|thread| is_thread_id(&thread.id)),
             unexpected_output("list")
         );
         let last_page = page.len() < LIST_PAGE_SIZE;
-        threads.extend(page);
+        offset += page.len();
+        let before = threads.len();
+        for thread in page {
+            threads.insert(thread.id, (thread.updated, thread.message_count));
+        }
+        anyhow::ensure!(last_page || threads.len() > before, unexpected_output("list"));
         if last_page {
-            return Ok(threads);
+            return Ok(threads.into_iter().filter_map(|(id, (updated, count))| {
+                (count != Some(0)).then_some((id, updated))
+            }).collect());
         }
     }
 }
@@ -496,76 +522,41 @@ fn find_amp_in_dirs(dirs: impl Iterator<Item = PathBuf>) -> Option<PathBuf> {
 
 /// Return complete stdout only after a successful exit; never capture stderr.
 fn run_amp(amp: &Path, operation: &str, args: &[&str], timeout: Duration) -> Result<Vec<u8>> {
-    let run_error = || {
-        anyhow::anyhow!(tr!(
-            "top.amp.runFailed",
-            command = format_args!("amp threads {operation}")
-        ))
-    };
-    let timed_out = || {
-        anyhow::anyhow!(tr!(
-            "top.amp.commandTimedOut",
-            command = format_args!("amp threads {operation}"),
-            seconds = timeout.as_secs()
-        ))
-    };
-    let mut child = Command::new(amp)
+    use process::CaptureError;
+
+    let mut command = Command::new(amp);
+    command
         .args(["threads", operation])
         .args(args)
+        .env_remove("TOKENS_API_TOKEN")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .map_err(|_| run_error())?;
+        .stderr(Stdio::null());
 
-    let deadline = Instant::now() + timeout;
-    let result = (|| {
-        let mut stdout = child.stdout.take().context(t!("top.amp.missingStreams"))?;
-        let (sender, reader) = mpsc::sync_channel(1);
-        let _stdout_reader = std::thread::Builder::new()
-            .spawn(move || {
-                let mut bytes = Vec::new();
-                let captured = stdout.read_to_end(&mut bytes).map(|_| bytes);
-                let _ = sender.send(captured);
-            })
-            .context(t!("top.amp.missingStreams"))?;
-
-        let status = loop {
-            let now = Instant::now();
-            if now >= deadline {
-                return Err(timed_out());
-            }
-            if let Some(status) = child.try_wait().map_err(|_| run_error())? {
-                break status;
-            }
-            std::thread::sleep(Duration::from_millis(25).min(deadline - now));
-        };
-        anyhow::ensure!(
-            status.success(),
-            tr!(
+    process::bounded_output(&mut command, timeout, MAX_STDOUT_MIB * 1024 * 1024).map_err(|error| {
+        anyhow::Error::msg(match error {
+            CaptureError::Run => tr!(
+                "top.amp.runFailed",
+                command = format_args!("amp threads {operation}")
+            ),
+            CaptureError::Stdout => tr!("top.amp.missingStreams"),
+            CaptureError::TimedOut => tr!(
+                "top.amp.commandTimedOut",
+                command = format_args!("amp threads {operation}"),
+                seconds = timeout.as_secs()
+            ),
+            CaptureError::OutputTooLarge => tr!(
+                "top.amp.outputTooLarge",
+                command = format_args!("amp threads {operation}"),
+                mib = MAX_STDOUT_MIB
+            ),
+            CaptureError::Exit(status) => tr!(
                 "top.amp.commandFailed",
                 command = format_args!("amp threads {operation}"),
                 status = status
-            )
-        );
-
-        // A descendant may keep the stdout pipe open after the child exits.
-        let remaining = deadline
-            .checked_duration_since(Instant::now())
-            .ok_or_else(&timed_out)?;
-        reader
-            .recv_timeout(remaining)
-            .map_err(|error| match error {
-                mpsc::RecvTimeoutError::Timeout => timed_out(),
-                mpsc::RecvTimeoutError::Disconnected => anyhow::anyhow!(t!("top.amp.missingStreams")),
-            })?
-            .context(t!("top.amp.missingStreams"))
-    })();
-    if result.is_err() {
-        let _ = child.kill();
-        let _ = child.wait();
-    }
-    result
+            ),
+        })
+    })
 }
 
 fn acquire_sync_lock(cache_dir: &Path) -> Result<fs::File> {
