@@ -1373,7 +1373,8 @@ fn parser_version(client: ClientId) -> u32 {
         // v18 scopes snapshot identity across sessions and rollout copies.
         // v19 preserves response and turn identity across late model attribution.
         // v20 uses cache-equivalent Windows path separators for anonymous rollouts.
-        ClientId::Codex => 20,
+        // v21 preserves child compactions settled against the inherited baseline.
+        ClientId::Codex => 21,
         // v4->v5: jcode's assistant-message timestamp is now back-calculated
         // to the turn start (timestamp - tool_duration_ms) instead of using
         // the recorded (end-anchored) timestamp directly. Follow-up to #890.
@@ -4041,7 +4042,7 @@ mod tests {
         // compaction usage, and v12->v13 decodes `.jsonl.zst` rollouts.
         // Each bump is what stops an existing cache from replaying the old
         // rows, so it has to be asserted rather than assumed.
-        assert_eq!(parser_version(ClientId::Codex), 20);
+        assert_eq!(parser_version(ClientId::Codex), 21);
         assert_eq!(parser_version(ClientId::Claude), 2);
     }
 

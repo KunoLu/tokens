@@ -954,18 +954,20 @@ fn parse_codex_reader<R: BufRead>(
                     {
                         continue;
                     }
-                    let compaction = state.pending_compaction.take().filter(|_| matches_compaction);
-
                     // Forked child logs can replay more than one parent
                     // token_count row after the first child turn_context,
                     // often with child-local timestamps. Keep the inherited
                     // baseline active until totals move beyond it.
-                    if forked_child_should_skip_inherited_snapshot(&state, total_snapshot, raw_totals)
-                    {
-                        continue;
+                    if !matches_compaction {
+                        if forked_child_should_skip_inherited_snapshot(&state, total_snapshot, raw_totals) {
+                            // A late parent replay neither settles nor cancels
+                            // the child's pending compaction.
+                            continue;
+                        }
+                        state.forked_child_inherited_baseline = None;
+                        state.forked_child_inherited_reported_total = None;
                     }
-                    state.forked_child_inherited_baseline = None;
-                    state.forked_child_inherited_reported_total = None;
+                    let compaction = state.pending_compaction.take().filter(|_| matches_compaction);
 
                     let (tokens, next_totals) = if let Some((usage, _, _)) = &compaction {
                         (usage.into_tokens(), total_usage.or(state.previous_totals))

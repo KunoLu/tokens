@@ -283,6 +283,33 @@ fn forked_trae_rollout_uses_only_the_childs_usage_dialect() {
 }
 
 #[test]
+fn fork_compaction_at_parent_baseline_survives_late_replays() {
+    let home = common::temp_home();
+    let path = home.path().join("fork-compaction.jsonl");
+    let parent = r#"{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100},"last_token_usage":{"input_tokens":100}}}}"#;
+    let settlement = r#"{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100},"last_token_usage":{"input_tokens":0,"output_tokens":0}}}}"#;
+    for intervening_replay in [false, true] {
+        let mut lines = vec![
+            r#"{"type":"session_meta","payload":{"id":"019fcf70-2222-7000-8000-000000000001","forked_from_id":"019fcf70-1111-7000-8000-000000000001","thread_source":"user"}}"#,
+            HISTORY_MUTATION_ROLLOUT[0],
+            parent,
+            r#"{"type":"turn_context","payload":{"turn_id":"019fcf70-2223-7000-8000-000000000001","model":"gpt-5.5"}}"#,
+            r#"{"type":"token_usage_record","payload":{"thread_id":"019fcf70-2222-7000-8000-000000000001","response_id":"child-summary","usage":{"input_tokens":500,"output_tokens":40}}}"#,
+            r#"{"type":"compacted","payload":{}}"#,
+        ];
+        if intervening_replay {
+            lines.push(parent);
+        }
+        lines.extend([settlement, parent]);
+        write_jsonl(&path, &lines);
+        let messages = parse_codex_file(&path);
+        assert_eq!(messages.len(), 1, "intervening replay: {intervening_replay}");
+        assert_eq!(messages[0].tokens.total(), 540);
+        assert_eq!(messages[0].dedup_key.as_deref(), Some("codex:response:019fcf70-2222-7000-8000-000000000001:child-summary"));
+    }
+}
+
+#[test]
 fn fork_without_inherited_totals_counts_its_own_last_usage() {
     let home = common::temp_home();
     let path = home.path().join("rollout-fork-empty-total.jsonl");
