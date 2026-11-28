@@ -537,6 +537,21 @@ fn amp_submit_uses_cached_usage_after_failure_but_replace_refuses_partial_refres
 }
 
 #[test]
+fn amp_sync_counts_a_ledger_only_export_without_retaining_private_content() {
+    let fixture = AmpFixture::new();
+    fixture.prepare_offline_submit();
+    let mut ledger_only = thread(LISTED, 11);
+    ledger_only.as_object_mut().unwrap().remove("messages");
+    fixture.response(LISTED, ledger_only);
+    fixture.sync(&[], 2, 0);
+    fixture.assert_calls(BOTH_EXPORTS);
+    let cached: Value = serde_json::from_slice(&fs::read(fixture.cached_thread(LISTED)).unwrap()).unwrap();
+    assert_eq!(cached["messages"], json!([]));
+    assert_eq!(cached["usageLedger"]["events"][0]["tokens"]["output"], 11);
+    assert_eq!(output_json(&fixture.run(SUBMIT))["summary"]["totalTokens"], 161);
+}
+
+#[test]
 fn amp_replace_refuses_an_id_only_cache_file() {
     let fixture = AmpFixture::new();
     fixture.prepare_offline_submit();
@@ -592,6 +607,8 @@ fn amp_submit_previews_remaining_usage_but_replace_refuses_a_missing_undiscovere
 fn amp_submit_replace_allows_legacy_only_but_refuses_sync_files_without_state() {
     let fixture = AmpFixture::new();
     fixture.prepare_offline_submit();
+    assert_eq!(output_json(&fixture.run(SUBMIT))["summary"]["totalTokens"], 109);
+    fixture.assert_calls(&[]);
     let preview = output_json(&fixture.run(&[SUBMIT, SUBMIT_BOUNDS, &["--replace"]].concat()));
     assert_eq!(preview["summary"]["totalTokens"], 109);
     let amp = &preview["clientManifest"]["clients"][0];

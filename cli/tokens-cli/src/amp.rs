@@ -304,19 +304,24 @@ fn sync_amp_cache_for_request(force: bool, allow_initial_sync: bool) -> SyncAmpR
     let cache_dir = get_amp_cache_dir();
     let sync = || -> Result<_> {
         let lock = policy_lock(&cache_dir)?;
-        if lock.metadata()?.len() == 0 {
-            // Sticky across cache moves/restores. An empty lock alone means legacy-only.
-            lock.set_len(1)?;
-            lock.sync_data()?;
-        }
-        for dir in [&cache_dir, &threads_dir(&cache_dir)] {
+        let threads = threads_dir(&cache_dir);
+        for dir in [&cache_dir, &threads] {
             match fs::symlink_metadata(dir) {
                 Ok(meta) => anyhow::ensure!(meta.is_dir(), t!("top.amp.invalidState")),
-                Err(err) if err.kind() == ErrorKind::NotFound => fs::create_dir(dir)?,
+                Err(err) if err.kind() == ErrorKind::NotFound => {}
                 Err(err) => return Err(err.into()),
             }
         }
-        sync_amp_cache_with(&cache_dir, force, allow_initial_sync, find_amp_binary)
+        sync_amp_cache_with(&cache_dir, force, allow_initial_sync, || {
+            // Only after state validation and the automatic-refresh opt-in check.
+            // A legacy-only submit must not mark this configuration as cloud-backed.
+            if lock.metadata()?.len() == 0 {
+                lock.set_len(1)?;
+                lock.sync_data()?;
+            }
+            fs::create_dir_all(&threads)?;
+            find_amp_binary().ok_or_else(|| anyhow::anyhow!(t!("top.amp.cliNotFound")))
+        })
     };
     sync().unwrap_or_else(|error| SyncAmpResult {
         error: Some(error.to_string()),
@@ -328,7 +333,7 @@ fn sync_amp_cache_with(
     cache_dir: &Path,
     force: bool,
     allow_initial_sync: bool,
-    amp_binary: impl FnOnce() -> Option<PathBuf>,
+    prepare_amp: impl FnOnce() -> Result<PathBuf>,
 ) -> Result<SyncAmpResult> {
     let (state, initialized) = load_sync_state(cache_dir)?;
     let mut state = state.unwrap_or_else(|| AmpSyncState {
@@ -357,8 +362,7 @@ fn sync_amp_cache_with(
         path: &working_path,
         result,
     };
-    let outcome = amp_binary()
-        .ok_or_else(|| anyhow::anyhow!(t!("top.amp.cliNotFound")))
+    let outcome = prepare_amp()
         .and_then(Amp::new)
         .and_then(|amp| sync_discovered_threads(&amp, cache_dir, force, initialized, &mut progress));
     if let Err(error) = outcome {
@@ -867,7 +871,7 @@ printf '%s\n' "$response"
         }
 
         fn sync(&self, force: bool, explicit: bool) -> SyncAmpResult {
-            sync_amp_cache_with(self.dir(), force, explicit, || Some(self.dir().join("amp")))
+            sync_amp_cache_with(self.dir(), force, explicit, || Ok(self.dir().join("amp")))
                 .unwrap()
         }
     }
@@ -993,7 +997,7 @@ printf '%s\n' "$response"
         let dir = tempfile::tempdir().unwrap();
         let path = state_path(dir.path());
         let must_not_run =
-            || -> Option<PathBuf> { panic!("state must be checked before Amp is resolved") };
+            || -> Result<PathBuf> { panic!("state must be checked before Amp is resolved") };
         let result = sync_amp_cache_with(dir.path(), false, false, must_not_run).unwrap();
         assert!(!result.synced);
         assert!(!path.exists());

@@ -234,7 +234,7 @@ mod platform {
         if unsafe {
             libc::prctl(
                 libc::PR_SET_CHILD_SUBREAPER,
-                libc::c_ulong::from(enabled),
+                enabled as libc::c_ulong,
                 unused,
                 unused,
                 unused,

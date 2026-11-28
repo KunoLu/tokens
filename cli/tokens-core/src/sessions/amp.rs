@@ -133,7 +133,13 @@ pub fn project_cached_thread(
     if id != thread_id {
         return Err(OtherThread);
     }
-    let messages = thread.messages.as_mut().ok_or(UnexpectedOutput)?;
+    // Some exports contain only the usage ledger. An ID by itself is not an export.
+    if thread.messages.is_none()
+        && thread.usage_ledger.as_ref().and_then(|ledger| ledger.events.as_ref()).is_none()
+    {
+        return Err(UnexpectedOutput);
+    }
+    let messages = thread.messages.get_or_insert_with(Vec::new);
     retain_projected_records(messages, |message| {
         if message.role.as_deref() != Some("assistant") {
             return Ok(false);
