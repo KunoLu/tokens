@@ -833,7 +833,9 @@ mod tests {
 
         let lock = File::create(dir.join("alive")).unwrap();
         fs2::FileExt::lock_exclusive(&lock).unwrap();
-        fs::write(ready, std::process::id().to_string()).unwrap();
+        let pending = dir.join("ready.tmp");
+        fs::write(&pending, std::process::id().to_string()).unwrap();
+        fs::rename(pending, ready).unwrap();
         if mode == "oversize" {
             let mut stdout = io::stdout().lock();
             let _ = stdout.write_all(&[b'x'; 8192]).and_then(|()| stdout.flush());
