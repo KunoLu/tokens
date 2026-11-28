@@ -135,9 +135,12 @@ fn international_ide_db(home: &Path) -> PathBuf {
         .join("Qoder/SharedClientCache/cache/db/local.db")
 }
 
+fn qoder_observation_dir() -> PathBuf {
+    tokens_core::paths::get_cache_dir().join("source-message-cache-v2/qoder")
+}
+
 fn has_qoder_cache_entry() -> bool {
-    let dir = tokens_core::paths::get_cache_dir().join("source-message-cache-v2/qoder");
-    dir.read_dir().is_ok_and(|mut entries| {
+    qoder_observation_dir().read_dir().is_ok_and(|mut entries| {
         entries.any(|entry| entry.unwrap().path().extension().is_some_and(|ext| ext == "bin"))
     })
 }
@@ -859,6 +862,89 @@ async fn test_qoder_accepts_only_explicit_extra_local_databases() {
     assert_eq!(buckets(&messages), (200, 10, 100, 0));
 }
 
+// Pause SQLite after a real WAL fsync and before it publishes the commit in
+// the index. Keep the writer alive so closing it cannot checkpoint the WAL.
+fn pause_wal_commit(
+    writer: rusqlite::Connection,
+    sql: &'static str,
+) -> (
+    std::sync::mpsc::Receiver<()>,
+    std::sync::mpsc::Sender<()>,
+    std::thread::JoinHandle<rusqlite::Connection>,
+) {
+    use rusqlite::ffi;
+    use std::cell::RefCell;
+    use std::sync::{mpsc, OnceLock};
+
+    struct Gate {
+        original_sync: unsafe extern "C" fn(*mut ffi::sqlite3_file, i32) -> i32,
+        signal: Option<(mpsc::Sender<()>, mpsc::Receiver<()>)>,
+    }
+    thread_local! {
+        static GATE: RefCell<Option<Gate>> = const { RefCell::new(None) };
+    }
+    static WAL_METHODS: OnceLock<ffi::sqlite3_io_methods> = OnceLock::new();
+
+    unsafe extern "C" fn sync_and_pause(file: *mut ffi::sqlite3_file, flags: i32) -> i32 {
+        GATE.with(|gate| {
+            let mut gate = gate.borrow_mut();
+            let Some(gate) = gate.as_mut() else {
+                return ffi::SQLITE_IOERR_FSYNC;
+            };
+            // SAFETY: SQLite passes the original VFS file and sync flags.
+            let result = unsafe { (gate.original_sync)(file, flags) };
+            if let Some((paused, resume)) = gate.signal.take() {
+                if result == ffi::SQLITE_OK && paused.send(()).is_ok() {
+                    let _ = resume.recv();
+                }
+            }
+            result
+        })
+    }
+
+    let (paused, wait_for_pause) = mpsc::channel();
+    let (resume, wait_for_resume) = mpsc::channel();
+    let join = std::thread::spawn(move || {
+        let mut wal = std::ptr::null_mut::<ffi::sqlite3_file>();
+        // SAFETY: This thread owns the writer. The file control writes its
+        // live WAL handle; the modified method table has static storage.
+        let methods = unsafe {
+            assert_eq!(
+                ffi::sqlite3_file_control(
+                    writer.handle(),
+                    c"main".as_ptr(),
+                    ffi::SQLITE_FCNTL_JOURNAL_POINTER,
+                    (&mut wal as *mut *mut ffi::sqlite3_file).cast(),
+                ),
+                ffi::SQLITE_OK
+            );
+            assert!(!wal.is_null());
+            (*wal).pMethods
+        };
+        // SAFETY: The WAL is open for an initialized writer, and this thread
+        // restores the VFS's pointer before returning the writer.
+        unsafe {
+            assert!(!methods.is_null());
+            GATE.with(|gate| {
+                *gate.borrow_mut() = Some(Gate {
+                    original_sync: (*methods).xSync.unwrap(),
+                    signal: Some((paused, wait_for_resume)),
+                });
+            });
+            (*wal).pMethods = WAL_METHODS.get_or_init(|| ffi::sqlite3_io_methods {
+                xSync: Some(sync_and_pause),
+                ..*methods
+            });
+        }
+        let commit = writer.execute(sql, []);
+        // SAFETY: The statement did not close or replace the WAL handle.
+        unsafe { (*wal).pMethods = methods };
+        commit.unwrap();
+        writer
+    });
+    (wait_for_pause, resume, join)
+}
+
 /// T13: rows the IDE writes while its own connection is open live in the
 /// `-wal` sidecar. A warm cache keyed on the database file alone would never
 /// see them.
@@ -878,6 +964,7 @@ async fn test_qoder_ide_wal_writes_invalidate_the_source_cache() {
     writer
         .execute_batch(
             "PRAGMA journal_mode = WAL;
+             PRAGMA synchronous = FULL;
              PRAGMA wal_autocheckpoint = 0;
              CREATE TABLE chat_message (
                  id TEXT PRIMARY KEY,
@@ -915,7 +1002,6 @@ async fn test_qoder_ide_wal_writes_invalidate_the_source_cache() {
     assert_eq!(first[0].tokens.input, 100);
     assert_eq!(first[0].model_id, "claude-sonnet-4-6");
     assert_eq!(first[0].provider_id, "openrouter");
-    assert!(has_qoder_cache_entry());
 
     // The IDE is still running: the model switch and new row only update WAL.
     let main_mtime = db.metadata().unwrap().modified().unwrap();
@@ -932,7 +1018,8 @@ async fn test_qoder_ide_wal_writes_invalidate_the_source_cache() {
             rusqlite::params![r#"{"prompt_tokens":300,"cached_tokens":100,"completion_tokens":30}"#],
         )
         .unwrap();
-    assert!(PathBuf::from(format!("{}-wal", db.display())).exists());
+    let wal = PathBuf::from(format!("{}-wal", db.display()));
+    assert!(wal.exists());
     assert_eq!(db.metadata().unwrap().modified().unwrap(), main_mtime);
 
     let second = parse_local_unified_messages_with_pricing(qoder_options(home.path()), None)
@@ -948,11 +1035,27 @@ async fn test_qoder_ide_wal_writes_invalidate_the_source_cache() {
     assert_eq!(second[0].provider_id, "openai");
     assert_eq!(second, parse_uncached(home.path()).await);
 
-    writer
-        .execute("DELETE FROM chat_message WHERE id = 'm1'", [])
+    let (paused, resume, commit) =
+        pause_wal_commit(writer, "DELETE FROM chat_message WHERE id = 'm1'");
+    paused
+        .recv_timeout(std::time::Duration::from_secs(5))
         .unwrap();
+    let unpublished_wal = std::fs::read(&wal).unwrap();
     let scan = || parse_local_unified_messages_with_pricing(qoder_options(home.path()), None);
+    assert_eq!(
+        scan().await.unwrap(),
+        second,
+        "the WAL index has not published the deletion"
+    );
+    resume.send(()).unwrap();
+    let writer = commit.join().unwrap();
+    assert_eq!(std::fs::read(&wal).unwrap(), unpublished_wal);
     assert_eq!(scan().await.unwrap().as_slice(), &second[1..]);
+    assert_eq!(scan().await.unwrap(), parse_uncached(home.path()).await);
+    assert!(
+        !has_qoder_cache_entry(),
+        "WAL bytes are not a committed snapshot ID"
+    );
     drop(writer);
     std::fs::remove_file(&db).unwrap();
     assert!(scan().await.unwrap().is_empty());
@@ -966,6 +1069,81 @@ async fn test_qoder_ide_wal_writes_invalidate_the_source_cache() {
     assert_eq!(recreated.len(), 1);
     assert_eq!(recreated[0].model_id, "gfmodel");
     assert_eq!(total_tokens(&recreated), 9);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn test_qoder_ide_uses_symlink_target_wal() {
+    if rerun_with_isolated_cache("test_qoder_ide_uses_symlink_target_wal") {
+        return;
+    }
+    let home = common::temp_home();
+    let target = home.path().join("actual/messages.sqlite");
+    let link = home.path().join("local.db");
+    write_ide_request(&target, "linked", "{}", r#"{"prompt_tokens":17}"#);
+    std::os::unix::fs::symlink(&target, &link).unwrap();
+    let writer = rusqlite::Connection::open(&target).unwrap();
+    writer
+        .execute_batch("PRAGMA journal_mode = WAL; PRAGMA wal_autocheckpoint = 0;")
+        .unwrap();
+
+    let mut options = qoder_options(home.path());
+    options
+        .scanner_settings
+        .extra_scan_paths
+        .insert("qoder".into(), vec![link]);
+    let scan = || parse_local_unified_messages_with_pricing(options.clone(), None);
+    assert_eq!(total_tokens(&scan().await.unwrap()), 17);
+    let main_mtime = target.metadata().unwrap().modified().unwrap();
+    writer
+        .execute(
+            "UPDATE chat_message SET token_info = '{\"prompt_tokens\":23}'",
+            [],
+        )
+        .unwrap();
+    assert_eq!(target.metadata().unwrap().modified().unwrap(), main_mtime);
+    assert_eq!(total_tokens(&scan().await.unwrap()), 23);
+}
+
+#[tokio::test]
+async fn test_qoder_cache_removes_only_owned_orphans() {
+    if rerun_with_isolated_cache("test_qoder_cache_removes_only_owned_orphans") {
+        return;
+    }
+    let home = common::temp_home();
+    let other_home = common::temp_home();
+    let db = international_ide_db(home.path());
+    for path in [&db, &international_ide_db(other_home.path())] {
+        write_ide_request(path, "orphan", "{}", r#"{"prompt_tokens":17}"#);
+    }
+
+    let entries = || {
+        qoder_observation_dir()
+            .read_dir()
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter(|path| path.extension().is_some_and(|ext| ext == "bin"))
+            .collect::<Vec<_>>()
+    };
+    let scan = |home: &Path| parse_local_unified_messages_with_pricing(qoder_options(home), None);
+    assert_eq!(total_tokens(&scan(home.path()).await.unwrap()), 17);
+    let orphan = entries().pop().unwrap();
+    assert_eq!(total_tokens(&scan(other_home.path()).await.unwrap()), 17);
+    let retained = entries().into_iter().find(|path| path != &orphan).unwrap();
+
+    let foreign = qoder_observation_dir().join("00.bin");
+    let legacy = qoder_observation_dir().join(format!("observations-{}.bin", "0".repeat(64)));
+    std::fs::write(&foreign, b"another cache").unwrap();
+    std::fs::write(&legacy, b"\x01\x05\x09legacy observation without a path").unwrap();
+    std::fs::remove_file(&db).unwrap();
+    assert!(scan(home.path()).await.unwrap().is_empty());
+    assert!(!orphan.exists());
+    assert!(retained.exists(), "a live source outside this scan must be kept");
+    assert_eq!(std::fs::read(foreign).unwrap(), b"another cache");
+    assert_eq!(
+        std::fs::read(legacy).unwrap(),
+        b"\x01\x05\x09legacy observation without a path"
+    );
 }
 
 #[tokio::test]

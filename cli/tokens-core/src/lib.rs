@@ -2828,14 +2828,40 @@ fn parse_all_messages_streaming<S: MessageSink>(
         sessions::kwwk::parse_kwwk_file,
     );
 
-    parse_cached_lane_deduped(
-        &scan_result,
-        &mut source_cache,
-        pricing,
-        &mut all_messages,
-        ClientId::TraeCli,
-        sessions::trae_cli::parse_trae_cli_file,
-    );
+    let trae_cli_identity = message_cache::CacheIdentity::for_client(ClientId::TraeCli);
+    let trae_cli_outcomes: Vec<_> =
+        sessions::trae_cli::rollout_copies(scan_result.get(ClientId::TraeCli))
+            .into_par_iter()
+            .map(|rollout| {
+                if rollout.copies.is_empty() {
+                    let outcome = load_or_parse_source(
+                        trae_cli_identity,
+                        rollout.first,
+                        &source_cache,
+                        pricing,
+                        sessions::trae_cli::parse_trae_cli_file,
+                    );
+                    (outcome.messages, outcome.cache_entry)
+                } else {
+                    // Copy coverage depends on the current scan, not on an
+                    // individual file's fingerprint.
+                    let mut messages = rollout.parse();
+                    apply_pricing_to_messages(&mut messages, pricing);
+                    (messages, None)
+                }
+            })
+            .collect();
+    let mut trae_cli_seen = HashSet::new();
+    for (messages, cache_entry) in trae_cli_outcomes {
+        all_messages.extend(
+            messages
+                .into_iter()
+                .filter(|message| should_keep_deduped_message(&mut trae_cli_seen, message)),
+        );
+        if let Some(entry) = cache_entry {
+            source_cache.insert(entry);
+        }
+    }
 
     let augment_outcomes: Vec<CachedParseOutcome> = scan_result
         .get(ClientId::Augment)
@@ -5865,12 +5891,12 @@ pub fn parse_local_clients(options: LocalParseOptions) -> Result<ParsedMessages,
     counts.set(ClientId::Kwwk, kwwk_count);
     messages.extend(kwwk_msgs);
 
-    let trae_cli_msgs_raw: Vec<UnifiedMessage> = scan_result
-        .get(ClientId::TraeCli)
-        .par_iter()
-        .flat_map(|path| sessions::trae_cli::parse_trae_cli_file(path))
-        .collect();
-    let mut trae_cli_seen: HashSet<String> = HashSet::new();
+    let trae_cli_msgs_raw: Vec<_> =
+        sessions::trae_cli::rollout_copies(scan_result.get(ClientId::TraeCli))
+            .into_par_iter()
+            .flat_map_iter(|rollout| rollout.parse())
+            .collect();
+    let mut trae_cli_seen = HashSet::new();
     let trae_cli_msgs: Vec<ParsedMessage> = trae_cli_msgs_raw
         .into_iter()
         .filter(|message| should_keep_deduped_message(&mut trae_cli_seen, message))

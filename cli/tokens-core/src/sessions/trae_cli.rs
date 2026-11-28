@@ -17,9 +17,11 @@
 //! Newer TRAE CLI rollouts carry the transcript in `history_mutation` records
 //! and per-response usage in `token_usage_record.payload.usage`. A
 //! thread-owned `token_count` takes precedence when it contributes usage or
-//! explicitly reports a zero increment. Like Codex, TRAE can report inclusive
-//! input; its `total_tokens` also identifies disjoint cache buckets when
-//! recorded separately.
+//! explicitly reports a zero increment. In live and archive copies of one
+//! rollout, this preference covers only response records present in a copy
+//! that selected `token_count`. Like Codex, TRAE can report inclusive input;
+//! its `total_tokens` also identifies disjoint cache buckets when recorded
+//! separately.
 //!
 //! Sources: the store layout and both rollout dialects follow the TraeX
 //! readers in kenn-io/agentsview (`internal/parser/traex.go`, `types.go`,
@@ -32,33 +34,134 @@ use super::codex::{
 };
 use super::utils::{file_modified_timestamp_ms, is_zst_path, session_id_from_path};
 use super::UnifiedMessage;
+use rayon::prelude::*;
 use serde::Deserialize;
 use serde_json::Value;
-use std::collections::HashSet;
+use sha2::{Digest, Sha256};
+use std::cell::OnceCell;
+use std::collections::{HashMap, HashSet};
 use std::io::{BufRead, BufReader, Read};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 pub const TRAE_CLI_CLIENT_ID: &str = "trae-cli";
 
 /// Added to the Codex parser version for the `trae-cli` cache identity. Bump
 /// it when this wrapper (relabel or `token_usage_record` fallback) changes how
 /// byte-identical rollouts parse.
-pub const TRAE_CLI_PARSER_OFFSET: u32 = 2;
+pub const TRAE_CLI_PARSER_OFFSET: u32 = 3;
 
 /// Agents-tab bucket for TRAE CLI threads, in place of the Codex names.
 const TRAE_CLI_AGENT: &str = "TRAE CLI";
 
 pub fn parse_trae_cli_file(path: &Path) -> Vec<UnifiedMessage> {
+    parse_token_counts(path).map_or_else(
+        || parse_token_usage_records(path, None, Some).unwrap_or_default(),
+        |(messages, _)| messages,
+    )
+}
+
+fn parse_token_counts(path: &Path) -> Option<(Vec<UnifiedMessage>, u64)> {
     let parsed = codex::parse_codex_file_incremental(path, 0, CodexParseState::default());
-    let mut messages = if parsed.messages.is_empty() && !parsed.has_explicit_zero_token_count {
-        parse_token_usage_records(path)
-    } else {
-        parsed.messages
-    };
+    if parsed.messages.is_empty() && !parsed.has_explicit_zero_token_count {
+        return None;
+    }
+    let mut messages = parsed.messages;
     for message in &mut messages {
         relabel_codex_message(message);
     }
-    messages
+    Some((messages, parsed.consumed_offset))
+}
+
+pub(crate) struct RolloutCopies<'a> {
+    pub(crate) first: &'a Path,
+    pub(crate) copies: Vec<&'a Path>,
+}
+
+impl RolloutCopies<'_> {
+    pub(crate) fn parse(&self) -> Vec<UnifiedMessage> {
+        if self.copies.is_empty() {
+            return parse_trae_cli_file(self.first);
+        }
+        let mut messages = Vec::new();
+        let mut authoritative = Vec::new();
+        let mut fallbacks = Vec::new();
+        for path in std::iter::once(self.first).chain(self.copies.iter().copied()) {
+            if let Some((rows, consumed_offset)) = parse_token_counts(path) {
+                messages.extend(rows);
+                authoritative.push((path, consumed_offset));
+            } else {
+                fallbacks.push(path);
+            }
+        }
+        if fallbacks.is_empty() {
+            return messages;
+        }
+
+        // Each snapshot file already chose token_count over the response
+        // records it contains. Its overlapping copies must make that same
+        // choice. A response only present in a divergent copy stays counted.
+        let mut covered = HashSet::new();
+        for (path, consumed_offset) in authoritative {
+            let mut keys = Vec::new();
+            let parsed = parse_token_usage_records(path, Some(consumed_offset), |key| {
+                keys.push(key);
+                None
+            });
+            if parsed.is_some() {
+                covered.extend(keys);
+            }
+        }
+        for path in fallbacks {
+            if let Some(rows) = parse_token_usage_records(path, None, |key| {
+                (!covered.contains(&key)).then_some(key)
+            }) {
+                messages.extend(rows);
+            }
+        }
+        messages
+    }
+}
+
+pub(crate) fn rollout_copies(paths: &[PathBuf]) -> Vec<RolloutCopies<'_>> {
+    let mut groups: Vec<RolloutCopies<'_>> = Vec::with_capacity(paths.len());
+    if let [path] = paths {
+        groups.push(RolloutCopies {
+            first: path,
+            copies: Vec::new(),
+        });
+        return groups;
+    }
+    let ids: Vec<_> = paths.par_iter().map(|path| rollout_id(path)).collect();
+    let mut group_index = HashMap::new();
+    for (path, id) in paths.iter().zip(ids) {
+        if let Some(id) = id {
+            let index = *group_index.entry(id).or_insert(groups.len());
+            if let Some(group) = groups.get_mut(index) {
+                group.copies.push(path);
+                continue;
+            }
+        }
+        groups.push(RolloutCopies {
+            first: path,
+            copies: Vec::new(),
+        });
+    }
+    groups
+}
+
+fn rollout_id(path: &Path) -> Option<String> {
+    fn session_meta_id(path: &Path) -> Option<String> {
+        let mut reader = open_rollout(path, is_zst_path(path))?;
+        let mut line = Vec::new();
+        reader.read_until(b'\n', &mut line).ok()?;
+        let entry: Value = serde_json::from_slice(&line).ok()?;
+        if entry.get("type")?.as_str()? != "session_meta" {
+            return None;
+        }
+        str_field(entry.get("payload")?, "id").map(str::to_owned)
+    }
+
+    session_meta_id(path).or_else(|| codex::thread_id_from_rollout_path(path))
 }
 
 /// Move a Codex-parser message onto the `trae-cli` client: client id, the
@@ -123,14 +226,23 @@ fn history_mutation_has_human_turn(payload: &Value) -> bool {
     })
 }
 
-/// Read per-response usage after the Codex pass found no authoritative usage.
-/// Replayed or usage-free events do not establish the child's usage dialect.
-fn parse_token_usage_records(path: &Path) -> Vec<UnifiedMessage> {
+/// Read owned per-response records. The caller chooses whether to report a
+/// record or use its key as evidence of overlap. A failed archive supplies
+/// neither usable rows nor coverage.
+fn parse_token_usage_records(
+    path: &Path,
+    snapshot_end: Option<u64>,
+    mut select_key: impl FnMut(String) -> Option<String>,
+) -> Option<Vec<UnifiedMessage>> {
     let is_archive = is_zst_path(path);
-    let Some(mut reader) = open_rollout(path, is_archive) else {
-        return Vec::new();
-    };
-    let session_id = session_id_from_path(&uncompressed_rollout_path(path));
+    // Live rollouts can append between passes. Do not let a response beyond
+    // the scanned snapshot suppress an accounting row in another copy.
+    let limit = snapshot_end.filter(|_| !is_archive).unwrap_or(u64::MAX);
+    let mut reader = open_rollout(path, is_archive)?.take(limit);
+    let uncompressed_path = uncompressed_rollout_path(path);
+    let session_id = session_id_from_path(&uncompressed_path);
+    let filename_thread = codex::thread_id_from_rollout_path(path);
+    let path_scope = OnceCell::new();
     let fallback_timestamp = file_modified_timestamp_ms(path);
 
     let mut messages = Vec::new();
@@ -152,11 +264,11 @@ fn parse_token_usage_records(path: &Path) -> Vec<UnifiedMessage> {
             Ok(bytes) if is_archive => {
                 decoded_bytes += bytes as u64;
                 if decoded_bytes > MAX_CODEX_ARCHIVE_BYTES {
-                    return Vec::new();
+                    return None;
                 }
             }
             Ok(_) => {}
-            Err(_) if is_archive => return Vec::new(),
+            Err(_) if is_archive => return None,
             Err(_) => break,
         }
         let Ok(entry) = serde_json::from_slice::<Value>(&line) else {
@@ -257,6 +369,23 @@ fn parse_token_usage_records(path: &Path) -> Vec<UnifiedMessage> {
                         continue;
                     }
                 }
+                let thread = owner
+                    .or(record_thread)
+                    .or(filename_thread.as_deref())
+                    .unwrap_or_else(|| {
+                        path_scope.get_or_init(|| codex::rollout_path_scope(&uncompressed_path))
+                    });
+                let key = match response_id {
+                    Some(id) => codex::rollout_response_key(TRAE_CLI_CLIENT_ID, thread, id),
+                    None => {
+                        let hash = Sha256::digest(line.trim_ascii());
+                        format!("{TRAE_CLI_CLIENT_ID}:usage:{thread}:{line_index}:{hash:x}")
+                    }
+                };
+                let is_turn_start = std::mem::take(&mut pending_turn_start);
+                let Some(key) = select_key(key) else {
+                    continue;
+                };
                 let timestamp = entry
                     .get("timestamp")
                     .and_then(Value::as_str)
@@ -273,20 +402,16 @@ fn parse_token_usage_records(path: &Path) -> Vec<UnifiedMessage> {
                     0.0,
                     Some(TRAE_CLI_AGENT.to_string()),
                 );
-                let thread = thread_id.as_deref().unwrap_or(&session_id);
-                message.dedup_key = Some(match response_id {
-                    Some(id) => format!("{TRAE_CLI_CLIENT_ID}:response:{thread}:{id}"),
-                    None => format!("{TRAE_CLI_CLIENT_ID}:usage:{thread}:{line_index}"),
-                });
+                message.dedup_key = Some(key);
                 message.workspace_key = workspace.0.clone();
                 message.workspace_label = workspace.1.clone();
-                message.is_turn_start = std::mem::take(&mut pending_turn_start);
+                message.is_turn_start = is_turn_start;
                 messages.push(message);
             }
             _ => {}
         }
     }
-    messages
+    Some(messages)
 }
 
 #[cfg(test)]

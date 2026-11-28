@@ -69,8 +69,8 @@
 //! Provider evidence for the winning model is evaluated separately from time.
 
 use super::utils::{
-    extract_i64, file_modified_timestamp_ms, for_each_json_line, open_readonly_sqlite,
-    parse_timestamp_value, sqlite_for_each_row_on,
+    extract_i64, file_modified_timestamp_ms, open_readonly_sqlite, parse_timestamp_value,
+    read_json_lines, sqlite_for_each_row_on,
 };
 use super::{
     normalize_agent_name, normalize_workspace_key, workspace_label_from_key, UnifiedMessage,
@@ -84,6 +84,8 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::cmp::Reverse;
 use std::collections::HashMap;
+use std::fs::File;
+use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 
 /// Bumped whenever a change makes byte-identical input parse differently.
@@ -93,7 +95,8 @@ use std::path::{Path, PathBuf};
 /// - Version 3: partial counters, request attribution and fragment timestamps.
 /// - Version 4: measured time and model evidence across all sources.
 /// - Version 5: independent provider evidence and complete Qoder observation snapshots.
-pub const QODER_PARSER_BASE_VERSION: u32 = 5;
+/// - Version 6: reject incomplete JSONL prefixes and unverified SQLite cache entries.
+pub const QODER_PARSER_BASE_VERSION: u32 = 6;
 
 /// Public client id. Both editions report under it.
 pub const CLIENT_ID: &str = "qoder";
@@ -757,10 +760,17 @@ fn is_tool_result_only(content: Option<&Value>) -> bool {
 
 /// Parse a Qoder or Qoder CN transcript into one observation per model request.
 pub fn parse_qoder_transcript_file(path: &Path, source: QoderSource) -> Vec<QoderObservation> {
-    if should_skip_qoder_file(path) || is_qoder_segment_path(path) {
+    if is_qoder_segment_path(path) {
         return Vec::new();
     }
+    scan_qoder_jsonl_file(path, source).0
+}
 
+fn parse_qoder_transcript(
+    path: &Path,
+    source: QoderSource,
+    reader: &mut impl BufRead,
+) -> (Vec<QoderObservation>, bool) {
     let fallback_timestamp = file_modified_timestamp_ms(path);
     let fallback_session_id = super::utils::session_id_from_path(path);
     let path_workspace_key = workspace_key_from_qoder_path(path);
@@ -785,7 +795,7 @@ pub fn parse_qoder_transcript_file(path: &Path, source: QoderSource) -> Vec<Qode
     let mut index_by_key: HashMap<String, usize> = HashMap::new();
     let mut anonymous_path_hash = None;
 
-    for_each_json_line(path, &mut |line_index, trimmed| {
+    let read_result = read_json_lines(reader, &mut |line_index, trimmed| {
         let Ok(value) = serde_json::from_str::<Value>(trimmed) else {
             return;
         };
@@ -1076,7 +1086,7 @@ pub fn parse_qoder_transcript_file(path: &Path, source: QoderSource) -> Vec<Qode
             "Qoder transcript rows with no recorded token counts were skipped"
         );
     }
-    messages
+    (messages, read_result.is_ok())
 }
 
 /// Convert measured turns to observations, reporting how many had no recorded usage.
@@ -1110,10 +1120,17 @@ fn anonymous_key(path: &Path, path_hash: &mut Option<String>, line_index: usize)
 /// `turn.finished` roll-up carries the same counters a second time and is
 /// deliberately ignored.
 pub fn parse_qoder_segment_file(path: &Path, source: QoderSource) -> Vec<QoderObservation> {
-    if should_skip_qoder_file(path) || !is_qoder_segment_path(path) {
+    if !is_qoder_segment_path(path) {
         return Vec::new();
     }
+    scan_qoder_jsonl_file(path, source).0
+}
 
+fn parse_qoder_segment(
+    path: &Path,
+    source: QoderSource,
+    reader: &mut impl BufRead,
+) -> (Vec<QoderObservation>, bool) {
     let fallback_timestamp = file_modified_timestamp_ms(path);
     let fallback_session = segment_session_id(path)
         .or_else(|| path.parent().map(super::utils::session_id_from_path))
@@ -1125,7 +1142,7 @@ pub fn parse_qoder_segment_file(path: &Path, source: QoderSource) -> Vec<QoderOb
     let mut index_by_key: HashMap<String, usize> = HashMap::new();
     let mut anonymous_path_hash = None;
 
-    for_each_json_line(path, &mut |line_index, trimmed| {
+    let read_result = read_json_lines(reader, &mut |line_index, trimmed| {
         let Ok(value) = serde_json::from_str::<Value>(trimmed) else {
             return;
         };
@@ -1241,7 +1258,7 @@ pub fn parse_qoder_segment_file(path: &Path, source: QoderSource) -> Vec<QoderOb
             "Qoder segment events with no recorded token counts were skipped"
         );
     }
-    messages
+    (messages, read_result.is_ok())
 }
 
 /// One IDE database read.
@@ -1317,23 +1334,53 @@ fn collect_ide_rows(rows: &mut Vec<IdeRow>, row: &rusqlite::Row<'_>) -> rusqlite
 /// Only token/model/timing columns are selected. Message bodies, tool output,
 /// titles and credentials are never read.
 pub fn scan_qoder_ide_db(db_path: &Path, source: QoderSource) -> QoderIdeScan {
-    let conn = match open_readonly_sqlite(db_path) {
-        Ok(conn) => conn,
-        Err(err) => {
+    let resolved = db_path.canonicalize().ok();
+    let db_path = resolved.as_deref().unwrap_or(db_path);
+    with_qoder_ide_connection(db_path, |mut conn| {
+        let tx = begin_qoder_ide_read(&mut conn)?;
+        Ok(scan_qoder_ide_snapshot(&tx, db_path, source))
+    })
+    .unwrap_or(QoderIdeScan {
+        messages: Vec::new(),
+        complete: false,
+    })
+}
+
+pub(crate) fn with_qoder_ide_connection<T>(
+    db_path: &Path,
+    read: impl FnOnce(rusqlite::Connection) -> rusqlite::Result<T>,
+) -> Option<T> {
+    let result = open_readonly_sqlite(db_path).and_then(|conn| {
+        conn.busy_timeout(std::time::Duration::from_millis(QODER_SQLITE_BUSY_TIMEOUT_MS))?;
+        read(conn)
+    });
+    match result {
+        Ok(value) => Some(value),
+        Err(error) => {
             tracing::debug!(
                 db_path = %db_path.display(),
-                error = %err,
-                "Failed to open Qoder IDE database"
+                %error,
+                "Failed to start Qoder IDE database read"
             );
-            return QoderIdeScan {
-                messages: Vec::new(),
-                complete: false,
-            };
+            None
         }
-    };
-    let _ = conn.busy_timeout(std::time::Duration::from_millis(
-        QODER_SQLITE_BUSY_TIMEOUT_MS,
-    ));
+    }
+}
+
+pub(crate) fn begin_qoder_ide_read(
+    conn: &mut rusqlite::Connection,
+) -> rusqlite::Result<rusqlite::Transaction<'_>> {
+    let tx = conn.transaction()?;
+    // A deferred BEGIN alone does not pin a snapshot of the main database.
+    tx.query_row("PRAGMA main.schema_version", [], |_| Ok(()))?;
+    Ok(tx)
+}
+
+pub(crate) fn scan_qoder_ide_snapshot(
+    conn: &rusqlite::Transaction<'_>,
+    db_path: &Path,
+    source: QoderSource,
+) -> QoderIdeScan {
 
     // The `chat_session` join supplies the project/workspace attribution. Older
     // Qoder CN builds have no `chat_session` table at all; usage is still valid
@@ -1343,7 +1390,7 @@ pub fn scan_qoder_ide_db(db_path: &Path, source: QoderSource) -> QoderIdeScan {
     const PLAIN_SQL: &str = "SELECT id, session_id, request_id, token_info, model_info, gmt_create,          NULL, NULL, NULL FROM chat_message WHERE role = 'assistant'";
 
     let mut rows: Vec<IdeRow> = Vec::new();
-    let mut scan = sqlite_for_each_row_on(&conn, db_path, JOINED_SQL, None, &mut |row| {
+    let mut scan = sqlite_for_each_row_on(conn, db_path, JOINED_SQL, None, &mut |row| {
         collect_ide_rows(&mut rows, row)
     });
     if !scan.prepared() {
@@ -1369,7 +1416,7 @@ pub fn scan_qoder_ide_db(db_path: &Path, source: QoderSource) -> QoderIdeScan {
                 };
             }
             Ok((true, false)) => {
-                scan = sqlite_for_each_row_on(&conn, db_path, PLAIN_SQL, None, &mut |row| {
+                scan = sqlite_for_each_row_on(conn, db_path, PLAIN_SQL, None, &mut |row| {
                     collect_ide_rows(&mut rows, row)
                 });
             }
@@ -1576,6 +1623,10 @@ pub(crate) fn parse_qoder_lane(
     scan: &ScanResult,
     cache: Option<&mut SourceMessageCache>,
 ) -> Vec<UnifiedMessage> {
+    let cache = cache.and_then(|cache| cache.qoder_cache());
+    if let Some(cache) = &cache {
+        cache.prune_orphans();
+    }
     let paths = scan.get(ClientId::Qoder);
     if paths.is_empty() && scan.qoder_ide_dbs.is_empty() {
         return Vec::new();
@@ -1588,13 +1639,17 @@ pub(crate) fn parse_qoder_lane(
                 .par_iter()
                 .map(|(path, source)| (path.as_path(), *source)),
         );
-    let cache = cache.and_then(|cache| cache.qoder_cache());
     let observations = sources
         .flat_map_iter(|(path, source)| {
-            let is_ide = is_qoder_ide_db(path);
-            let parse = || parse_source(path, source, is_ide);
+            if is_qoder_ide_db(path) {
+                return match &cache {
+                    Some(cache) => cache.load_or_scan_ide(path, source),
+                    None => scan_qoder_ide_db(path, source).messages,
+                };
+            }
+            let parse = || scan_qoder_jsonl_file(path, source);
             match &cache {
-                Some(cache) => cache.load_or_parse(path, source, is_ide, parse),
+                Some(cache) => cache.load_or_parse(path, source, parse),
                 None => parse().0,
             }
         })
@@ -1602,18 +1657,26 @@ pub(crate) fn parse_qoder_lane(
     collapse_qoder_messages(observations)
 }
 
-fn parse_source(
+fn scan_qoder_jsonl_file(path: &Path, source: QoderSource) -> (Vec<QoderObservation>, bool) {
+    if should_skip_qoder_file(path) {
+        return (Vec::new(), true);
+    }
+    let Ok(file) = File::open(path) else {
+        return (Vec::new(), false);
+    };
+    scan_qoder_jsonl(path, source, &mut BufReader::new(file))
+}
+
+// Keep observations from the readable prefix, but only EOF makes it cacheable.
+fn scan_qoder_jsonl(
     path: &Path,
     source: QoderSource,
-    is_ide: bool,
+    reader: &mut impl BufRead,
 ) -> (Vec<QoderObservation>, bool) {
-    if is_ide {
-        let scan = scan_qoder_ide_db(path, source);
-        (scan.messages, scan.complete)
-    } else if is_qoder_segment_path(path) {
-        (parse_qoder_segment_file(path, source), true)
+    if is_qoder_segment_path(path) {
+        parse_qoder_segment(path, source, reader)
     } else {
-        (parse_qoder_transcript_file(path, source), true)
+        parse_qoder_transcript(path, source, reader)
     }
 }
 
@@ -2108,6 +2171,48 @@ mod tests {
             Some("qoder:qoder:req:req_3")
         );
         assert_eq!(messages[1].as_message().tokens.input, 200);
+    }
+
+    #[test]
+    fn jsonl_scan_marks_read_failures_incomplete() {
+        use std::io::{self, Read};
+
+        struct ReadError;
+        impl Read for ReadError {
+            fn read(&mut self, _: &mut [u8]) -> io::Result<usize> {
+                Err(io::Error::other("synthetic JSONL read failure"))
+            }
+        }
+
+        let dir = TempDir::new().unwrap();
+        let source = QoderSource::International;
+        for (filename, record) in [
+            (
+                "transcript.jsonl",
+                r#"{"type":"assistant","message":{"model":"qmodel","usage":{"input_tokens":17}}}"#,
+            ),
+            (
+                "segments/events.jsonl",
+                r#"{"type":"model.response.completed","data":{"model":"qmodel","input_tokens":17}}"#,
+            ),
+        ] {
+            let path = write_transcript(dir.path(), filename, &[record, "{bad json", record]);
+            let (messages, complete) = scan_qoder_jsonl_file(&path, source);
+            assert!(complete);
+            assert_eq!(messages.len(), 2);
+
+            let prefix = format!("{record}\n{record}");
+            let mut reader = prefix.as_bytes().chain(BufReader::new(ReadError));
+            let (messages, complete) = scan_qoder_jsonl(&path, source, &mut reader);
+            assert!(!complete);
+            assert_eq!(messages.len(), 1);
+            assert_eq!(messages[0].as_message().tokens.input, 17);
+
+            let missing = path.with_file_name("missing.jsonl");
+            let (messages, complete) = scan_qoder_jsonl_file(&missing, source);
+            assert!(!complete);
+            assert!(messages.is_empty());
+        }
     }
 
     #[test]

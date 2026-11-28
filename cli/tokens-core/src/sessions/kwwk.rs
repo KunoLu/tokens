@@ -174,17 +174,19 @@ mod tests {
         let header = SESSION.lines().next().unwrap();
         let first = r#"{"type":"compaction","timestamp":1,"usage":{"input":20}}"#;
         let second = r#"{"type":"compaction","timestamp":1,"usage":{"input":3}}"#;
-        let empty = first.replace("20", "0");
-        let partial = session_file(&format!("{header}\n{empty}\n{second}\n"));
-        let complete = session_file(&format!("{header}\n{first}\n{second}\n"));
-        let mut seen = HashSet::new();
-        let total: i64 = [partial, complete]
-            .iter()
-            .flat_map(|file| parse_kwwk_file(file.path()))
-            .filter(|message| crate::should_keep_deduped_message(&mut seen, message))
-            .map(|message| message.tokens.input)
-            .sum();
-        assert_eq!(total, 23);
+        for prefix in [first.replace("20", "0"), first.replace("20", "\"bad\"")] {
+            let partial = session_file(&format!("{header}\n{prefix}\n{second}\n"));
+            let complete = session_file(&format!("{header}\n{first}\n{second}\n"));
+            for files in [[&partial, &complete], [&complete, &partial]] {
+                let mut seen = HashSet::new();
+                let total: i64 = files.into_iter()
+                    .flat_map(|file| parse_kwwk_file(file.path()))
+                    .filter(|message| crate::should_keep_deduped_message(&mut seen, message))
+                    .map(|message| message.tokens.input)
+                    .sum();
+                assert_eq!(total, 23, "{prefix}");
+            }
+        }
     }
 
     #[test]

@@ -4,10 +4,9 @@
 //! `~/.codex/archived_sessions/` (where Codex CLI moves older sessions). Both
 //! directories share an identical JSONL schema, so a single parser handles
 //! both; the scan-root wiring that discovers `archived_sessions` lives in
-//! `crate::scanner`. Session identity for dedup is derived from in-file
-//! `session_meta` content (not the file path), so a session that happens to
-//! be present in both directories at once is still counted only once — see
-//! `codex_token_count_dedup_key`.
+//! `crate::scanner`. In-file `session_meta` or a standard rollout filename
+//! identifies copies of the same thread. A matching basename alone does not
+//! identify an otherwise anonymous rollout.
 //! Note: This parser has stateful logic to track model and delta calculations.
 
 use super::utils::{
@@ -20,7 +19,9 @@ use crate::speed::InferenceSpeed;
 use crate::TokenBreakdown;
 use serde::Deserialize;
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use std::borrow::Cow;
+use std::cell::OnceCell;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::Path;
 
@@ -509,6 +510,10 @@ pub(crate) const OPENCLAW_CLIENT_ID: &str = "openclaw";
 pub(crate) fn thread_id_from_rollout_path(path: &Path) -> Option<String> {
     let path = uncompressed_rollout_path(path);
     let stem = path.file_stem()?.to_str()?;
+    rollout_thread_from_stem(stem).map(str::to_owned)
+}
+
+fn rollout_thread_from_stem(stem: &str) -> Option<&str> {
     let stem = stem.strip_prefix("rollout-")?;
     // `2026-08-30T10-00-00-` is 20 chars; everything after is the thread id.
     let candidate = stem.get(20..)?;
@@ -520,7 +525,18 @@ pub(crate) fn thread_id_from_rollout_path(path: &Path) -> Option<String> {
                 8 | 13 | 18 | 23 => byte == b'-',
                 _ => byte.is_ascii_hexdigit(),
             });
-    is_uuid.then(|| candidate.to_string())
+    is_uuid.then_some(candidate)
+}
+
+pub(crate) fn rollout_response_key(client: &str, owner: &str, response_id: &str) -> String {
+    format!("{client}:response:{owner}:{response_id}")
+}
+
+/// Anonymous rollouts in different directories are not proven copies. A
+/// plain file and its `.zst` variant use the same uncompressed path here.
+pub(crate) fn rollout_path_scope(uncompressed_path: &Path) -> String {
+    let hash = Sha256::digest(uncompressed_path.as_os_str().as_encoded_bytes());
+    format!("file-{hash:x}")
 }
 
 /// True when a `session_meta.originator` identifies OpenClaw as the client
@@ -581,11 +597,16 @@ fn looks_like_explicit_workspace_path(path: &str) -> bool {
 
 fn parse_codex_reader<R: BufRead>(
     mut reader: R,
-    session_id: &str,
+    path: &Path,
     fallback_timestamp: i64,
     start_offset: u64,
     mut state: CodexParseState,
 ) -> ParsedCodexFile {
+    let uncompressed_path = uncompressed_rollout_path(path);
+    let session_id = session_id_from_path(&uncompressed_path);
+    let session_id = session_id.as_str();
+    let filename_thread = rollout_thread_from_stem(session_id);
+    let path_scope = OnceCell::new();
     let mut messages = Vec::with_capacity(64);
     let mut fallback_timestamp_indices = Vec::new();
     let mut buffer = Vec::with_capacity(4096);
@@ -708,19 +729,28 @@ fn parse_codex_reader<R: BufRead>(
                         .forked_child_session_id
                         .as_deref()
                         .or(state.session_id_from_meta.as_deref())
-                        .unwrap_or(session_id);
-                    state.pending_compaction = if payload
-                        .thread_id
-                        .as_deref()
-                        .is_none_or(|id| id == owner)
+                        .or(filename_thread);
+                    let recorded_owner = payload.thread_id.as_deref();
+                    state.pending_compaction = if owner
+                        .zip(recorded_owner)
+                        .is_some_and(|(owner, recorded)| owner != recorded)
                     {
+                        None
+                    } else {
                         payload
                             .usage
                             .as_ref()
-                            .zip(payload.response_id.as_ref())
-                            .map(|(usage, id)| (CodexTotals::from_usage(usage), id.clone(), false))
-                    } else {
-                        None
+                            .zip(payload.response_id.as_deref())
+                            .map(|(usage, response_id)| {
+                                let owner = owner.or(recorded_owner).unwrap_or_else(|| {
+                                    path_scope.get_or_init(|| rollout_path_scope(&uncompressed_path))
+                                });
+                                (
+                                    CodexTotals::from_usage(usage),
+                                    rollout_response_key("codex", owner, response_id),
+                                    false,
+                                )
+                            })
                     };
                 } else if entry.entry_type == "compacted" {
                     if let Some((_, _, compacted)) = &mut state.pending_compaction {
@@ -978,6 +1008,7 @@ fn parse_codex_reader<R: BufRead>(
                             // Only the snapshot used for this increment can
                             // suppress per-response fallback without tokens.
                             has_explicit_zero_token_count = last_snapshot
+                                .filter(|usage| usage.has_counters())
                                 .or(total_snapshot)
                                 .is_some_and(CodexTokenUsage::is_explicit_zero);
                         }
@@ -1047,37 +1078,42 @@ fn parse_codex_reader<R: BufRead>(
                         message.is_turn_start = true;
                         state.pending_turn_start = false;
                     }
-                    if let Some((_, response_id, _)) = compaction {
-                        message.dedup_key = Some(format!("codex:response:{response_id}"));
-                    } else if parsed_timestamp.is_some() || total_usage.is_some() {
-                        // Fork/subagent children replay the same upstream
-                        // token_count history into many sibling files. Those
-                        // replays carry identical cumulative totals but a
-                        // distinct per-file session id, so a session-scoped key
-                        // never collapses them and the totals get counted once
-                        // per sibling. Scope the key to the fork parent instead
-                        // so sibling replays share one key. Unrelated sessions
-                        // keep their own id and never merge.
-                        let dedup_scope_id = state
-                            .session_forked_from_id
-                            .as_deref()
-                            .or(state.session_id_from_meta.as_deref())
-                            .unwrap_or(session_id);
-                        set_codex_dedup_key(
-                            &mut message,
-                            model.as_deref().unwrap_or("unknown"),
-                            dedup_scope_id,
-                            total_usage,
-                        );
+                    message.dedup_key = Some(if let Some((_, response_key, _)) = compaction {
+                        response_key
                     } else {
-                        // Untimed increments have no cumulative identity. The
-                        // decoded row position survives copies and appends,
-                        // without merging identical calls in the same rollout.
-                        let owner = state.session_id_from_meta.as_deref().unwrap_or(session_id);
-                        let row_start = consumed_offset - bytes_read as u64;
-                        message.dedup_key =
-                            Some(format!("codex:token_count-offset:{owner}:{row_start}"));
-                    }
+                        let meta_owner = state.session_id_from_meta.as_deref();
+                        let owner = meta_owner.or(filename_thread).unwrap_or_else(|| {
+                            path_scope.get_or_init(|| rollout_path_scope(&uncompressed_path))
+                        });
+                        if parsed_timestamp.is_some() || total_usage.is_some() {
+                            // Cumulative history can be replayed under sibling
+                            // forks. Timestamp alone is not replay evidence:
+                            // scope last-only increments to the actual thread.
+                            let scope = if total_usage.is_some() {
+                                state.session_forked_from_id.as_deref().unwrap_or(owner)
+                            } else {
+                                owner
+                            };
+                            codex_token_count_dedup_key(
+                                &message,
+                                model.as_deref().unwrap_or("unknown"),
+                                scope,
+                                total_usage,
+                                parsed_timestamp.unwrap_or(timestamp),
+                            )
+                        } else {
+                            // Position distinguishes repeated increments.
+                            // Without metadata, matching positions in files
+                            // with the same name need not hold the same row.
+                            let row_start = consumed_offset - bytes_read as u64;
+                            if meta_owner.is_some() {
+                                format!("codex:token_count-offset:{owner}:{row_start}")
+                            } else {
+                                let hash = Sha256::digest(trimmed.as_bytes());
+                                format!("codex:token_count-offset:{owner}:{row_start}:{hash:x}")
+                            }
+                        }
+                    });
                     message.set_workspace(
                         state.session_workspace_key.clone(),
                         state.session_workspace_label.clone(),
@@ -1451,6 +1487,7 @@ fn codex_token_count_dedup_key(
     model: &str,
     upstream_session_id: &str,
     total_usage: Option<CodexTotals>,
+    event_timestamp: i64,
 ) -> String {
     if let Some(total) = total_usage {
         // Codex fork/subagent logs can replay the same upstream token_count
@@ -1471,8 +1508,7 @@ fn codex_token_count_dedup_key(
     }
 
     format!(
-        "codex:token_count:{}:{}:{}:{}:{}:{}:{}:{}",
-        message.timestamp,
+        "codex:token_count:{upstream_session_id}:{event_timestamp}:{}:{}:{}:{}:{}:{}:{}",
         message.provider_id,
         model,
         message.tokens.input,
@@ -1483,22 +1519,6 @@ fn codex_token_count_dedup_key(
     )
 }
 
-fn set_codex_dedup_key(
-    message: &mut UnifiedMessage,
-    model: &str,
-    upstream_session_id: &str,
-    total_usage: Option<CodexTotals>,
-) {
-    if message.dedup_key.is_none() {
-        message.dedup_key = Some(codex_token_count_dedup_key(
-            message,
-            model,
-            upstream_session_id,
-            total_usage,
-        ));
-    }
-}
-
 fn flush_pending_model_messages(
     pending_model_messages: &mut Vec<(UnifiedMessage, bool)>,
     messages: &mut Vec<UnifiedMessage>,
@@ -1507,8 +1527,9 @@ fn flush_pending_model_messages(
 ) {
     for (mut message, used_fallback_timestamp) in pending_model_messages.drain(..) {
         if !used_fallback_timestamp {
-            let upstream_session_id = message.session_id.clone();
-            set_codex_dedup_key(&mut message, model, &upstream_session_id, None);
+            message.dedup_key = Some(codex_token_count_dedup_key(
+                &message, model, &message.session_id, None, message.timestamp,
+            ));
         }
         message.model_id = model.to_string();
         messages.push(message);
@@ -1589,7 +1610,6 @@ impl<R: Read> Read for FailureTrackingReader<R> {
 /// rather than whatever prefix decoded before the failure.
 fn parse_codex_archive(
     path: &Path,
-    session_id: &str,
     fallback_timestamp: i64,
     start_offset: u64,
     state: CodexParseState,
@@ -1619,7 +1639,7 @@ fn parse_codex_archive(
         inner: decoder.take(MAX_CODEX_ARCHIVE_BYTES + 1),
         failed: false,
     });
-    let parsed = parse_codex_reader(&mut reader, session_id, fallback_timestamp, 0, state);
+    let parsed = parse_codex_reader(&mut reader, path, fallback_timestamp, 0, state);
     if reader.get_ref().failed {
         tracing::warn!(path = %path.display(), "Skipping corrupt or truncated Codex archive");
         return unusable(initial_state);
@@ -1675,10 +1695,9 @@ pub(crate) fn parse_codex_file_incremental(
     start_offset: u64,
     state: CodexParseState,
 ) -> ParsedCodexFile {
-    let session_id = session_id_from_path(&uncompressed_rollout_path(path));
     let fallback_timestamp = file_modified_timestamp_ms(path);
     if is_zst_path(path) {
-        return parse_codex_archive(path, &session_id, fallback_timestamp, start_offset, state);
+        return parse_codex_archive(path, fallback_timestamp, start_offset, state);
     }
 
     let mut file = match std::fs::File::open(path) {
@@ -1709,7 +1728,7 @@ pub(crate) fn parse_codex_file_incremental(
     }
 
     let reader = BufReader::new(file);
-    parse_codex_reader(reader, &session_id, fallback_timestamp, start_offset, state)
+    parse_codex_reader(reader, path, fallback_timestamp, start_offset, state)
 }
 
 fn extract_model(payload: &CodexPayload) -> Option<String> {
@@ -2018,13 +2037,14 @@ mod tests {
             r#""last_token_usage":{"input_tokens":0,"cached_input_tokens":0,"output_tokens":0}"#,
             r#""last_token_usage":{}"#,
         );
+        let path = Path::new("session.jsonl");
         for fixture in [CODEX_COMPACTION_FIXTURE, empty_last.as_str()] {
             let full =
-                parse_codex_reader(Cursor::new(fixture), "session", 0, 0, CodexParseState::default());
+                parse_codex_reader(Cursor::new(fixture), path, 0, 0, CodexParseState::default());
             let mut state = CodexParseState::default();
             let mut messages = Vec::new();
             for line in fixture.split_inclusive('\n') {
-                let parsed = parse_codex_reader(Cursor::new(line), "session", 0, 0, state);
+                let parsed = parse_codex_reader(Cursor::new(line), path, 0, 0, state);
                 messages.extend(parsed.messages);
                 state = bincode::deserialize(&bincode::serialize(&parsed.state).unwrap()).unwrap();
             }
@@ -2385,7 +2405,13 @@ mod tests {
             "\n"
         ));
 
-        let parsed = parse_codex_reader(reader, "session", 0, 0, CodexParseState::default());
+        let parsed = parse_codex_reader(
+            reader,
+            Path::new("session.jsonl"),
+            0,
+            0,
+            CodexParseState::default(),
+        );
 
         assert!(!parsed.parse_succeeded);
         assert!(parsed.messages.is_empty());

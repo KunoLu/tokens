@@ -850,14 +850,6 @@ fn parse_pi_format_file_inner(
         } else {
             None
         };
-        // Two copies can disagree on usage for a marker. Its occurrence
-        // identifies the event, not whether this copy reported billable usage.
-        let marker_identity = is_compaction.then(|| {
-            let at = entry_timestamp(&entry);
-            let occurrence = compaction_occurrences.entry(at).or_insert(0usize);
-            *occurrence += 1;
-            (at, *occurrence)
-        });
         let Some(PiEmittedRecord {
             provider,
             response_id,
@@ -893,7 +885,7 @@ fn parse_pi_format_file_inner(
                 .to_string(),
         };
 
-        let recorded_timestamp = marker_identity.map_or_else(|| entry_timestamp(&entry), |(at, _)| at);
+        let recorded_timestamp = entry_timestamp(&entry);
         let timestamp = recorded_timestamp.unwrap_or(fallback_timestamp);
 
         let mut unified = UnifiedMessage::new_with_agent(
@@ -911,16 +903,21 @@ fn parse_pi_format_file_inner(
             usage.apply_kwwk_usage_details(&mut unified);
         }
         if let Some(namespace) = dedup_namespace {
-            if let Some((_, occurrence)) = marker_identity {
-                // kwwk has no marker id. Use the session's recording time
-                // and occurrence at that time, not the physical line position:
-                // kwwk can rewrite the projection or remove a corrupt line.
+            if is_compaction {
+                // No provider request id exists. Merge copies as multisets of
+                // recorded usage: an unreadable or zero sibling cannot shift
+                // this key, and repeated identical summaries retain multiplicity.
+                let t = &unified.tokens;
+                let buckets = [t.input, t.output, t.cache_read, t.cache_write];
+                let occurrence = compaction_occurrences
+                    .entry((recorded_timestamp, buckets))
+                    .or_insert(0usize);
+                *occurrence += 1;
                 let id = &unified.session_id;
-                let key = match recorded_timestamp {
-                    Some(at) => format!("{namespace}:compaction:{id}:{at}:{occurrence}"),
-                    None => format!("{namespace}:compaction:{id}:missing:{occurrence}"),
-                };
-                unified.dedup_key = Some(key);
+                unified.dedup_key = Some(format!(
+                    "{namespace}:compaction:{id}:{recorded_timestamp:?}:{}:{}:{}:{}:{occurrence}",
+                    t.input, t.output, t.cache_read, t.cache_write
+                ));
             } else if options.cross_session_dedup {
                 let clean_response_key = response_id
                     .filter(|id| {
