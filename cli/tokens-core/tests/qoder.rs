@@ -77,6 +77,22 @@ async fn parse_uncached(home: &Path) -> Vec<UnifiedMessage> {
         .expect("uncached local parse")
 }
 
+async fn assert_qoder_cache_parity(
+    home: &Path,
+    pricing: Option<&PricingService>,
+) -> Vec<UnifiedMessage> {
+    let scan = || parse_local_unified_messages_with_pricing(qoder_options(home), pricing);
+    let first = scan().await.unwrap();
+    assert_eq!(scan().await.unwrap(), first);
+    assert_eq!(
+        parse_local_unified_messages_with_pricing_uncached(qoder_options(home), pricing)
+            .await
+            .unwrap(),
+        first
+    );
+    first
+}
+
 fn qoder_options(home: &Path) -> LocalParseOptions {
     LocalParseOptions {
         home_dir: Some(home.to_string_lossy().into_owned()),
@@ -112,6 +128,11 @@ fn write_ide_request(path: &Path, request: &str, model_info: &str, token_info: &
         rusqlite::params![request, token_info, model_info],
     )
     .unwrap();
+}
+
+fn international_ide_db(home: &Path) -> PathBuf {
+    PathBuf::from(PathRoot::AppData.resolve_with_env_strategy(home.to_str().unwrap(), false))
+        .join("Qoder/SharedClientCache/cache/db/local.db")
 }
 
 fn total_tokens(messages: &[UnifiedMessage]) -> i64 {
@@ -955,6 +976,182 @@ async fn test_qoder_repeated_scans_are_stable() {
     assert_eq!(grown.len(), 4);
     assert_eq!(total_tokens(&grown), total_tokens(&cold) + 55 + 128);
     assert_eq!(grown, parse_uncached(home.path()).await);
+}
+
+#[tokio::test]
+async fn test_qoder_measured_request_time_beats_earlier_file_mtime() {
+    if rerun_with_isolated_cache("test_qoder_measured_request_time_beats_earlier_file_mtime") {
+        return;
+    }
+    let home = common::temp_home();
+    let transcript = home.path().join(".qoder/projects/-repo/sess-cli.jsonl");
+    write_jsonl(
+        &transcript,
+        &[r#"{"type":"assistant","sessionId":"sess-cli","message":{"model":"gfmodel","usage":{"output_tokens":40,"request_id":"shared"}}}"#],
+    );
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(&transcript)
+        .unwrap()
+        .set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_793_959_200))
+        .unwrap();
+
+    // Warm the transcript before the measured IDE observation is discovered.
+    let transcript_only = parse_local_unified_messages_with_pricing(qoder_options(home.path()), None)
+        .await
+        .unwrap();
+    assert_eq!(transcript_only.len(), 1);
+    assert_eq!(transcript_only[0].date, "2026-11-06");
+    let shard_dir = tokens_core::paths::get_cache_dir().join("source-message-cache-v2/qoder");
+    assert!(shard_dir.read_dir().unwrap().any(|entry| entry
+        .unwrap()
+        .path()
+        .extension()
+        .is_some_and(|ext| ext == "bin")));
+
+    write_ide_request(
+        &international_ide_db(home.path()),
+        "shared",
+        r#"{"model_key":"gfmodel"}"#,
+        r#"{"prompt_tokens":100,"cached_tokens":60,"completion_tokens":15}"#,
+    );
+    let messages = assert_qoder_cache_parity(home.path(), None).await;
+    assert_eq!(messages.len(), 1);
+    assert_eq!(messages[0].timestamp, 1_794_045_602_000);
+    assert_eq!(messages[0].date, "2026-11-07");
+    assert_eq!(messages[0].session_id, "sess-ide");
+    assert_eq!(buckets(&messages), (40, 40, 60, 0));
+
+    let mut options = qoder_options(home.path());
+    options.since = Some("2026-11-07".into());
+    options.until = Some("2026-11-07".into());
+    let parsed = parse_local_clients(options).unwrap();
+    assert_eq!(parsed.counts.get(ClientId::Qoder), 1);
+    assert_eq!(parsed.messages.len(), 1);
+    assert_eq!(parsed.messages[0].date, "2026-11-07");
+    assert_eq!(parsed.messages[0].output, 40);
+}
+
+#[tokio::test]
+async fn test_qoder_client_model_prefix_preserves_runtime_provider() {
+    if rerun_with_isolated_cache("test_qoder_client_model_prefix_preserves_runtime_provider") {
+        return;
+    }
+    let home = common::temp_home();
+    write_jsonl(
+        &home.path().join(".qoder/projects/-repo/sess-runtime.jsonl"),
+        &[
+            r#"{"type":"runtime-config","model":"claude-sonnet-4-6","provider":"openrouter"}"#,
+            r#"{"type":"assistant","timestamp":"2026-11-07T10:00:00Z","message":{"id":"m1","model":"qoder/claude-sonnet-4-6","usage":{"input_tokens":100}}}"#,
+            r#"{"type":"runtime-config","model":"QODER-CN/claude-sonnet-4-6"}"#,
+            r#"{"type":"assistant","timestamp":"2026-11-07T10:01:00Z","message":{"id":"m2","model":"claude-sonnet-4-6","usage":{"input_tokens":200}}}"#,
+        ],
+    );
+    let messages = assert_qoder_cache_parity(home.path(), None).await;
+    assert_eq!(messages.len(), 2);
+    for message in messages {
+        assert_eq!(message.model_id, "claude-sonnet-4-6");
+        assert_eq!(message.provider_id, "openrouter");
+    }
+}
+
+#[tokio::test]
+async fn test_qoder_late_report_replaces_business_fallback_slot() {
+    if rerun_with_isolated_cache("test_qoder_late_report_replaces_business_fallback_slot") {
+        return;
+    }
+    let home = common::temp_home();
+    write_jsonl(
+        &home.path().join(".qoder/projects/-repo/sess-fragments.jsonl"),
+        &[
+            r#"{"type":"assistant","timestamp":"2026-11-07T10:00:00Z","businessModelKey":"qmodel","message":{"id":"m1","model":"auto","usage":{"input_tokens":100}}}"#,
+            r#"{"type":"assistant","timestamp":"2026-11-07T10:00:01Z","message":{"id":"m1","model":"dfmodel","usage":{"output_tokens":10,"request_id":"real"}}}"#,
+            r#"{"type":"assistant","timestamp":"2026-11-07T10:00:02Z","businessModelKey":"gfmodel","message":{"id":"m1","model":"auto","usage":{"output_tokens":12}}}"#,
+        ],
+    );
+    write_jsonl(
+        &home.path().join(".qoder/projects/-repo/sess-inherited.jsonl"),
+        &[
+            r#"{"type":"user","timestamp":"2026-11-07T10:00:59Z","businessModelKey":"qmodel","message":{"content":"next"}}"#,
+            r#"{"type":"assistant","timestamp":"2026-11-07T10:01:00Z","message":{"id":"m2","model":"auto","usage":{"input_tokens":20}}}"#,
+            r#"{"type":"assistant","timestamp":"2026-11-07T10:01:02Z","businessModelKey":"gfmodel","message":{"id":"m2","model":"auto","usage":{"output_tokens":2,"request_id":"business"}}}"#,
+        ],
+    );
+    let messages = assert_qoder_cache_parity(home.path(), None).await;
+    assert_eq!(messages.len(), 2);
+    assert_eq!(messages[0].model_id, "dfmodel");
+    assert_eq!(messages[0].provider_id, "qoder");
+    assert_eq!(messages[0].duration_ms, Some(2000));
+    assert_eq!(messages[0].dedup_key.as_deref(), Some("qoder:qoder:req:real"));
+    assert_eq!(messages[1].model_id, "gfmodel");
+    assert_eq!(messages[1].dedup_key.as_deref(), Some("qoder:qoder:req:business"));
+    assert_eq!(buckets(&messages), (120, 14, 0, 0));
+}
+
+#[tokio::test]
+async fn test_qoder_reported_slots_beat_named_ide_session_default() {
+    if rerun_with_isolated_cache("test_qoder_reported_slots_beat_named_ide_session_default") {
+        return;
+    }
+    let home = common::temp_home();
+    let db = international_ide_db(home.path());
+    write_ide_request(
+        &db,
+        "reported",
+        "{}",
+        r#"{"prompt_tokens":120,"cached_tokens":20,"completion_tokens":15}"#,
+    );
+    let conn = rusqlite::Connection::open(&db).unwrap();
+    conn.execute_batch(
+        "CREATE TABLE chat_session (
+             session_id TEXT PRIMARY KEY, project_uri TEXT, project_name TEXT,
+             preferred_model_info TEXT
+         );
+         INSERT INTO chat_session VALUES
+             ('sess-ide', NULL, NULL, '{\"model_key\":\"claude-sonnet-4-6\"}');
+         INSERT INTO chat_message VALUES
+             ('m2', 'sess-ide', 'fallback', 'assistant',
+              '{\"prompt_tokens\":30,\"completion_tokens\":8}', '{}', 1794045603000);",
+    )
+    .unwrap();
+    drop(conn);
+    let pricing = PricingService::new(
+        HashMap::from([(
+            "claude-sonnet-4-6".into(),
+            ModelPricing {
+                input_cost_per_token: Some(0.001),
+                output_cost_per_token: Some(0.002),
+                ..Default::default()
+            },
+        )]),
+        HashMap::new(),
+    );
+    let ide_only = assert_qoder_cache_parity(home.path(), Some(&pricing)).await;
+    assert_eq!(ide_only.len(), 2);
+    assert!(ide_only.iter().all(|message| {
+        message.model_id == "claude-sonnet-4-6"
+            && message.cost_source == tokens_core::CostSource::Estimated
+    }));
+
+    write_jsonl(
+        &home.path().join(".qoder/projects/-repo/sess-reported.jsonl"),
+        &[r#"{"type":"assistant","timestamp":"2026-11-07T10:01:00Z","message":{"model":"gfmodel","usage":{"input_tokens":100,"output_tokens":50,"request_id":"reported"}}}"#],
+    );
+    write_jsonl(
+        &home.path().join(".qoder/projects/-repo/sess-fallback.jsonl"),
+        &[r#"{"type":"assistant","timestamp":"2026-11-07T10:01:01Z","businessModelKey":"qmodel","message":{"model":"auto","usage":{"input_tokens":50,"output_tokens":5,"request_id":"fallback"}}}"#],
+    );
+    let messages = assert_qoder_cache_parity(home.path(), Some(&pricing)).await;
+    assert_eq!(messages.len(), 2);
+    assert_eq!(messages[0].model_id, "gfmodel");
+    assert_eq!(messages[1].model_id, "qmodel");
+    assert!(messages.iter().all(|message| {
+        message.session_id == "sess-ide"
+            && message.provider_id == "qoder"
+            && message.cost_source == tokens_core::CostSource::Unknown
+            && message.cost == 0.0
+    }));
+    assert_eq!(buckets(&messages), (150, 58, 20, 0));
 }
 
 /// T20 / T21: damaged lines, absurd counters and nonsense timestamps neither

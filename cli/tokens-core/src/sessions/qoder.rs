@@ -64,6 +64,8 @@
 //! BYOK models keep their vendor (`deepseek/chat/deepseek-v3` →
 //! `deepseek-v3` + `deepseek`), including when Qoder qualifies them with its own
 //! name (`qoder/claude-sonnet-4-6` → `claude-sonnet-4-6` + `anthropic`).
+//! Across sources, a model reported for the request beats business fallbacks
+//! and session defaults.
 
 use super::utils::{
     extract_i64, file_modified_timestamp_ms, for_each_json_line, open_readonly_sqlite,
@@ -72,7 +74,12 @@ use super::utils::{
 use super::{
     normalize_agent_name, normalize_workspace_key, workspace_label_from_key, UnifiedMessage,
 };
-use crate::TokenBreakdown;
+use crate::message_cache::{
+    CacheIdentity, CachedSourceEntry, FingerprintStatus, SourceFingerprint, SourceMessageCache,
+};
+use crate::scanner::ScanResult;
+use crate::{ClientId, TokenBreakdown};
+use rayon::prelude::*;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -83,7 +90,8 @@ use std::path::{Path, PathBuf};
 /// - Version 1: initial implementation.
 /// - Version 2: edition-scoped source keys and gross-prompt merging.
 /// - Version 3: partial counters, request attribution and fragment timestamps.
-pub const QODER_PARSER_BASE_VERSION: u32 = 3;
+/// - Version 4: measured time and model evidence across all sources.
+pub const QODER_PARSER_BASE_VERSION: u32 = 4;
 
 /// Public client id. Both editions report under it.
 pub const CLIENT_ID: &str = "qoder";
@@ -203,7 +211,7 @@ fn is_synthetic_placeholder_model(model: &str) -> bool {
     trimmed.is_empty() || trimmed.eq_ignore_ascii_case("<synthetic>")
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum ModelKind {
     Unknown,
     Auto,
@@ -227,6 +235,21 @@ fn is_selected_model(raw_model: &str) -> bool {
     model_kind(split_model_qualifier(raw_model).0) >= ModelKind::Slot
 }
 
+fn is_qoder_namespace(namespace: &str) -> bool {
+    namespace.eq_ignore_ascii_case("qoder") || namespace.eq_ignore_ascii_case("qoder-cn")
+}
+
+fn strip_qoder_namespace(model: &str) -> &str {
+    match model.split_once('/') {
+        Some((head, tail)) if is_qoder_namespace(head) => tail.trim(),
+        _ => model,
+    }
+}
+
+fn same_runtime_model(left: &str, right: &str) -> bool {
+    strip_qoder_namespace(left).eq_ignore_ascii_case(strip_qoder_namespace(right))
+}
+
 /// Split a client-qualified or vendor-qualified model into its bare id.
 ///
 /// `qoder/claude-sonnet-4-6` and `qoder-cn/deepseek-v3` are Qoder's own
@@ -237,15 +260,13 @@ fn split_model_qualifier(model: &str) -> (&str, Option<&str>) {
     let Some((head, _)) = trimmed.split_once('/') else {
         return (trimmed, None);
     };
-    let client_namespace =
-        head.eq_ignore_ascii_case("qoder") || head.eq_ignore_ascii_case("qoder-cn");
     let bare = trimmed
         .rsplit('/')
         .next()
         .map(str::trim)
         .filter(|bare| !bare.is_empty())
         .unwrap_or(trimmed);
-    (bare, (!client_namespace).then_some(head))
+    (bare, (!is_qoder_namespace(head)).then_some(head))
 }
 
 fn canonical_qoder_provider(provider: &str) -> Option<String> {
@@ -259,6 +280,34 @@ fn canonical_qoder_provider(provider: &str) -> Option<String> {
     crate::provider_identity::canonical_provider(provider)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum ModelEvidence {
+    Placeholder,
+    SessionDefault,
+    InheritedBusinessFallback,
+    BusinessFallback,
+    Reported,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct ModelRank {
+    evidence: ModelEvidence,
+    kind: ModelKind,
+}
+
+impl ModelRank {
+    fn new(kind: ModelKind, evidence: ModelEvidence) -> Self {
+        Self {
+            evidence: if kind >= ModelKind::Slot {
+                evidence
+            } else {
+                ModelEvidence::Placeholder
+            },
+            kind,
+        }
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum ProviderEvidence {
     Runtime,
@@ -268,15 +317,14 @@ enum ProviderEvidence {
 
 struct RequestModel {
     id: String,
-    kind: ModelKind,
-    reported: bool,
+    rank: ModelRank,
     provider: Option<(ProviderEvidence, String)>,
 }
 
 impl RequestModel {
     fn new(
         raw_model: &str,
-        reported: bool,
+        evidence: ModelEvidence,
         explicit_provider: Option<&str>,
         runtime_provider: Option<&str>,
     ) -> Self {
@@ -288,8 +336,7 @@ impl RequestModel {
             } else {
                 id.to_string()
             },
-            kind,
-            reported: reported && kind >= ModelKind::Slot,
+            rank: ModelRank::new(kind, evidence),
             provider: None,
         };
         model.observe_provider(explicit_provider, ProviderEvidence::Record);
@@ -310,29 +357,34 @@ impl RequestModel {
         }
     }
 
-    fn merge_fragment(&mut self, raw_model: Option<&str>, explicit_provider: Option<&str>) {
+    fn merge_fragment(
+        &mut self,
+        selection: Option<(&str, ModelEvidence)>,
+        explicit_provider: Option<&str>,
+    ) {
         let mut prefix = None;
         let mut prior_request_provider = None;
-        if let Some((id, qualifier)) = raw_model.map(split_model_qualifier) {
+        if let Some((raw_model, evidence)) = selection {
+            let (id, qualifier) = split_model_qualifier(raw_model);
             let same_model = self.id.eq_ignore_ascii_case(id);
             let kind = if same_model {
-                self.kind
+                self.rank.kind
             } else {
                 model_kind(id)
             };
-            if same_model || kind > self.kind || (!self.reported && kind >= ModelKind::Slot) {
+            let rank = ModelRank::new(kind, evidence);
+            if same_model || rank > self.rank {
                 if !same_model {
                     // Keep provider-only evidence only as a fallback. A provider
                     // tied to the old model must not follow a different model.
                     let old_provider = self.provider.take();
-                    if !self.reported {
+                    if self.rank.evidence < ModelEvidence::BusinessFallback {
                         prior_request_provider = old_provider
                             .filter(|(evidence, _)| *evidence == ProviderEvidence::Record);
                     }
                     self.id = id.to_string();
-                    self.kind = kind;
                 }
-                self.reported = kind >= ModelKind::Slot;
+                self.rank = self.rank.max(rank);
                 prefix = qualifier;
             } else if kind >= ModelKind::Slot {
                 return;
@@ -347,7 +399,7 @@ impl RequestModel {
 
     fn into_ids(self) -> (String, String) {
         // Never price a router or an unknown model as if it were a vendor model.
-        let provider = if self.kind == ModelKind::Named {
+        let provider = if self.rank.kind == ModelKind::Named {
             self.provider.map(|(_, id)| id).or_else(|| {
                 crate::provider_identity::inferred_provider_from_model_delimited(&self.id)
                     .map(str::to_string)
@@ -497,6 +549,24 @@ fn usage_request_id(usage: &Value) -> Option<&str> {
         .filter(|id| !id.is_empty())
 }
 
+/// One source's account of a request, with evidence used only by the Qoder merge.
+#[derive(Debug, Clone)]
+pub struct QoderObservation {
+    message: UnifiedMessage,
+    measured_timestamp: bool,
+    model_rank: ModelRank,
+}
+
+impl QoderObservation {
+    pub fn as_message(&self) -> &UnifiedMessage {
+        &self.message
+    }
+
+    pub fn into_message(self) -> UnifiedMessage {
+        self.message
+    }
+}
+
 /// One assembled assistant turn.
 struct Turn {
     /// Identity recorded in the dedup key: the request id when the reply
@@ -519,15 +589,18 @@ impl Turn {
         self.timestamp = Some(self.timestamp.map_or(timestamp, |start| start.min(timestamp)));
     }
 
-    fn into_message(self, source: QoderSource, fallback_timestamp: i64) -> Option<UnifiedMessage> {
+    fn into_observation(
+        self,
+        source: QoderSource,
+        fallback_timestamp: i64,
+    ) -> Option<QoderObservation> {
         let usage = self.usage?;
         if usage.total() <= 0 {
             return None;
         }
-        let timestamp = self
-            .prompt_timestamp
-            .or(self.timestamp)
-            .unwrap_or(fallback_timestamp);
+        let measured_timestamp = self.prompt_timestamp.or(self.timestamp);
+        let timestamp = measured_timestamp.unwrap_or(fallback_timestamp);
+        let model_rank = self.model.rank;
         let (model_id, provider_id) = self.model.into_ids();
         let mut message = UnifiedMessage::new_with_agent(
             CLIENT_ID,
@@ -547,7 +620,11 @@ impl Turn {
         message.is_turn_start = self.is_turn_start;
         message.cache_write_1h = usage.cache_write_1h;
         message.set_workspace(self.workspace_key, self.workspace_label);
-        Some(message)
+        Some(QoderObservation {
+            message,
+            measured_timestamp: measured_timestamp.is_some(),
+            model_rank,
+        })
     }
 }
 
@@ -662,8 +739,8 @@ fn is_tool_result_only(content: Option<&Value>) -> bool {
     has_tool_result
 }
 
-/// Parse a Qoder or Qoder CN transcript into one message per model request.
-pub fn parse_qoder_transcript_file(path: &Path, source: QoderSource) -> Vec<UnifiedMessage> {
+/// Parse a Qoder or Qoder CN transcript into one observation per model request.
+pub fn parse_qoder_transcript_file(path: &Path, source: QoderSource) -> Vec<QoderObservation> {
     if should_skip_qoder_file(path) || is_qoder_segment_path(path) {
         return Vec::new();
     }
@@ -733,7 +810,10 @@ pub fn parse_qoder_transcript_file(path: &Path, source: QoderSource) -> Vec<Unif
                     .map(str::trim)
                     .filter(|model| is_selected_model(model))
                 {
-                    if runtime_model.as_deref() != Some(model) {
+                    if !runtime_model
+                        .as_deref()
+                        .is_some_and(|current| same_runtime_model(current, model))
+                    {
                         runtime_model = Some(model.to_string());
                         runtime_provider = None;
                     }
@@ -809,7 +889,11 @@ pub fn parse_qoder_transcript_file(path: &Path, source: QoderSource) -> Vec<Unif
                     active_model = Some(model.to_string());
                 }
 
-                let fragment_selection = reported_model.or(fragment_business);
+                let fragment_selection = reported_model
+                    .map(|model| (model, ModelEvidence::Reported))
+                    .or_else(|| {
+                        fragment_business.map(|model| (model, ModelEvidence::BusinessFallback))
+                    });
 
                 let explicit_provider = message
                     .and_then(|message| {
@@ -869,8 +953,12 @@ pub fn parse_qoder_transcript_file(path: &Path, source: QoderSource) -> Vec<Unif
                     {
                         turn.key = format!("req:{request_id}");
                     }
-                    turn.model
-                        .merge_fragment(fragment_selection.or(fragment_model), explicit_provider);
+                    turn.model.merge_fragment(
+                        fragment_selection.or_else(|| {
+                            fragment_model.map(|model| (model, ModelEvidence::Placeholder))
+                        }),
+                        explicit_provider,
+                    );
                     if let Some(usage) = usage {
                         match &mut turn.usage {
                             Some(existing) => existing.merge_max(usage),
@@ -917,22 +1005,27 @@ pub fn parse_qoder_transcript_file(path: &Path, source: QoderSource) -> Vec<Unif
                     (None, false) => (None, resolved_session.to_string()),
                 };
 
-                let raw_model = fragment_selection
-                    .or(last_business_model.as_deref())
-                    .or(runtime_model.as_deref())
-                    .or(active_model.as_deref())
-                    .or(fragment_model)
-                    .unwrap_or(DEFAULT_MODEL);
+                let (raw_model, evidence) = fragment_selection
+                    .or_else(|| {
+                        last_business_model
+                            .as_deref()
+                            .map(|model| (model, ModelEvidence::InheritedBusinessFallback))
+                    })
+                    .or_else(|| {
+                        runtime_model
+                            .as_deref()
+                            .or(active_model.as_deref())
+                            .map(|model| (model, ModelEvidence::SessionDefault))
+                    })
+                    .unwrap_or((
+                        fragment_model.unwrap_or(DEFAULT_MODEL),
+                        ModelEvidence::Placeholder,
+                    ));
                 let scoped_provider = runtime_model
                     .as_deref()
-                    .filter(|model| model.eq_ignore_ascii_case(raw_model))
+                    .filter(|model| same_runtime_model(model, raw_model))
                     .and(runtime_provider.as_deref());
-                let model = RequestModel::new(
-                    raw_model,
-                    fragment_selection.is_some(),
-                    explicit_provider,
-                    scoped_provider,
-                );
+                let model = RequestModel::new(raw_model, evidence, explicit_provider, scoped_provider);
                 let turn_key = request_id.map_or_else(|| group_key.clone(), |id| format!("req:{id}"));
                 index_by_key.insert(group_key, turns.len());
                 turns.push(Turn {
@@ -970,16 +1063,16 @@ pub fn parse_qoder_transcript_file(path: &Path, source: QoderSource) -> Vec<Unif
     messages
 }
 
-/// Convert turns to messages, reporting how many had no recorded usage.
+/// Convert measured turns to observations, reporting how many had no recorded usage.
 fn collect_measured_turns(
     turns: Vec<Turn>,
     source: QoderSource,
     fallback_timestamp: i64,
-) -> (Vec<UnifiedMessage>, usize) {
+) -> (Vec<QoderObservation>, usize) {
     let mut messages = Vec::with_capacity(turns.len());
     let mut without_usage = 0usize;
     for turn in turns {
-        match turn.into_message(source, fallback_timestamp) {
+        match turn.into_observation(source, fallback_timestamp) {
             Some(message) => messages.push(message),
             None => without_usage += 1,
         }
@@ -995,12 +1088,12 @@ fn anonymous_key(path: &Path, path_hash: &mut Option<String>, line_index: usize)
     format!("anon:{path_hash}:{line_index}")
 }
 
-/// Parse a structured segment log into one message per completed model request.
+/// Parse a structured segment log into one observation per completed model request.
 ///
 /// Only `model.response.completed` events are per-request records. The
 /// `turn.finished` roll-up carries the same counters a second time and is
 /// deliberately ignored.
-pub fn parse_qoder_segment_file(path: &Path, source: QoderSource) -> Vec<UnifiedMessage> {
+pub fn parse_qoder_segment_file(path: &Path, source: QoderSource) -> Vec<QoderObservation> {
     if should_skip_qoder_file(path) || !is_qoder_segment_path(path) {
         return Vec::new();
     }
@@ -1091,7 +1184,10 @@ pub fn parse_qoder_segment_file(path: &Path, source: QoderSource) -> Vec<Unified
             } else {
                 turn.usage = Some(usage);
             }
-            turn.model.merge_fragment(raw_model, explicit_provider);
+            turn.model.merge_fragment(
+                raw_model.map(|model| (model, ModelEvidence::Reported)),
+                explicit_provider,
+            );
             if let Some(timestamp) = timestamp {
                 turn.observe_time(timestamp);
             }
@@ -1109,7 +1205,7 @@ pub fn parse_qoder_segment_file(path: &Path, source: QoderSource) -> Vec<Unified
             workspace_label: workspace.as_ref().and_then(|(_, label)| label.clone()),
             model: RequestModel::new(
                 raw_model.unwrap_or(DEFAULT_MODEL),
-                true,
+                ModelEvidence::Reported,
                 explicit_provider,
                 None,
             ),
@@ -1134,7 +1230,7 @@ pub fn parse_qoder_segment_file(path: &Path, source: QoderSource) -> Vec<Unified
 
 /// One IDE database read.
 pub struct QoderIdeScan {
-    pub messages: Vec<UnifiedMessage>,
+    pub messages: Vec<QoderObservation>,
     /// False when the database could not be opened or the scan stopped partway.
     ///
     /// A partial read is reported for this scan but must not be cached: cached,
@@ -1286,7 +1382,7 @@ pub fn scan_qoder_ide_db(db_path: &Path, source: QoderSource) -> QoderIdeScan {
     }
 }
 
-fn ide_row_message(row: &IdeRow, source: QoderSource) -> Option<UnifiedMessage> {
+fn ide_row_message(row: &IdeRow, source: QoderSource) -> Option<QoderObservation> {
     let tokens = parse_ide_token_info(&row.token_info)?;
 
     let timestamp = row
@@ -1304,14 +1400,22 @@ fn ide_row_message(row: &IdeRow, source: QoderSource) -> Option<UnifiedMessage> 
         .model_info
         .as_deref()
         .and_then(parse_ide_model_info)
+        .map(|model| (model, ModelEvidence::Reported))
         .or_else(|| {
             row.preferred_model_info
                 .as_deref()
                 .and_then(parse_ide_model_info)
+                .map(|model| (model, ModelEvidence::SessionDefault))
         })
-        .filter(|model| !is_synthetic_placeholder_model(model))
-        .unwrap_or_else(|| DEFAULT_MODEL.to_string());
-    let (model_id, provider_id) = RequestModel::new(&model_key, true, None, None).into_ids();
+        .filter(|(model, _)| !is_synthetic_placeholder_model(model));
+    let (raw_model, evidence) = model_key
+        .as_ref()
+        .map_or((DEFAULT_MODEL, ModelEvidence::Placeholder), |(model, evidence)| {
+            (model.as_str(), *evidence)
+        });
+    let model = RequestModel::new(raw_model, evidence, None, None);
+    let model_rank = model.rank;
+    let (model_id, provider_id) = model.into_ids();
 
     let session_id = if row.session_id.trim().is_empty() {
         "unknown".to_string()
@@ -1344,7 +1448,11 @@ fn ide_row_message(row: &IdeRow, source: QoderSource) -> Option<UnifiedMessage> 
     );
     message.cache_write_1h = tokens.cache_write_1h;
     message.set_workspace(ide_workspace_key(row), None);
-    Some(message)
+    Some(QoderObservation {
+        message,
+        measured_timestamp: true,
+        model_rank,
+    })
 }
 
 fn ide_workspace_key(row: &IdeRow) -> Option<String> {
@@ -1433,6 +1541,130 @@ pub fn qoder_ide_db_candidates(
     candidates
 }
 
+/// Parse and deduplicate all Qoder sources before emitting report messages.
+pub(crate) fn parse_qoder_lane(
+    scan: &ScanResult,
+    cache: Option<&mut SourceMessageCache>,
+) -> Vec<UnifiedMessage> {
+    let sources = scan
+        .get(ClientId::Qoder)
+        .par_iter()
+        .map(|path| (path.as_path(), scan.qoder_source(path)))
+        .chain(
+            scan.qoder_ide_dbs
+                .par_iter()
+                .map(|(path, source)| (path.as_path(), *source)),
+        );
+    let observations = if let Some(cache) = cache {
+        let reader = &*cache;
+        let outcomes: Vec<_> = sources
+            .map(|(path, source)| load_or_parse_source(path, source, reader))
+            .collect();
+        outcomes
+            .into_iter()
+            .flat_map(|(observations, entry)| {
+                if let Some(entry) = entry {
+                    cache.insert(entry);
+                }
+                observations
+            })
+            .collect()
+    } else {
+        sources
+            .flat_map_iter(|(path, source)| parse_source(path, source, is_qoder_ide_db(path)).0)
+            .collect()
+    };
+    collapse_qoder_messages(observations)
+}
+
+fn parse_source(
+    path: &Path,
+    source: QoderSource,
+    is_ide: bool,
+) -> (Vec<QoderObservation>, bool) {
+    if is_ide {
+        let scan = scan_qoder_ide_db(path, source);
+        (scan.messages, scan.complete)
+    } else if is_qoder_segment_path(path) {
+        (parse_qoder_segment_file(path, source), true)
+    } else {
+        (parse_qoder_transcript_file(path, source), true)
+    }
+}
+
+fn load_or_parse_source(
+    path: &Path,
+    source: QoderSource,
+    cache: &SourceMessageCache,
+) -> (Vec<QoderObservation>, Option<CachedSourceEntry>) {
+    let is_ide = is_qoder_ide_db(path);
+    let identity = CacheIdentity::for_qoder_source(source);
+    let cached = cache.take(identity, path);
+    let previous = cached.as_ref().map(|entry| &entry.fingerprint);
+    let status = if is_ide {
+        SourceFingerprint::check_sqlite_path(path, previous)
+    } else {
+        SourceFingerprint::check_qoder_path(path, previous)
+    };
+    let fingerprint = match status {
+        Some(FingerprintStatus::Unchanged) => {
+            let entry = cached.expect("an uncached source always builds a fingerprint");
+            if !entry.messages.is_empty() {
+                let mut fallback = entry.fallback_timestamp_indices.into_iter().peekable();
+                let observations = entry
+                    .messages
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, message)| QoderObservation {
+                        model_rank: ModelRank::new(
+                            model_kind(&message.model_id),
+                            ModelEvidence::Reported,
+                        ),
+                        message,
+                        measured_timestamp: fallback.next_if_eq(&index).is_none(),
+                    })
+                    .collect();
+                return (observations, None);
+            }
+            entry.fingerprint
+        }
+        Some(FingerprintStatus::Changed(fingerprint)) => fingerprint,
+        None => return (parse_source(path, source, is_ide).0, None),
+    };
+
+    let (observations, complete) = parse_source(path, source, is_ide);
+    // The shared cache can record mtime indices, but cannot store model
+    // provenance. Never serve contextual models or a partial IDE read as a hit.
+    let cacheable = complete
+        && !observations.is_empty()
+        && observations.iter().all(|observation| {
+            observation.model_rank
+                == ModelRank::new(observation.model_rank.kind, ModelEvidence::Reported)
+        });
+    let entry = cacheable.then(|| {
+        let mut fallback_timestamp_indices = Vec::new();
+        let messages = observations
+            .iter()
+            .enumerate()
+            .map(|(index, observation)| {
+                if !observation.measured_timestamp {
+                    fallback_timestamp_indices.push(index);
+                }
+                observation.message.clone()
+            })
+            .collect();
+        CachedSourceEntry::new(
+            identity,
+            path,
+            fingerprint,
+            messages,
+            fallback_timestamp_indices,
+            None,
+        )
+    });
+    (observations, entry)
+}
+
 /// Merge duplicates and order the lane deterministically.
 ///
 /// Qoder writes the same request more than once — a forked session replays the
@@ -1440,14 +1672,18 @@ pub fn qoder_ide_db_candidates(
 /// appear across all three sources. The edition-scoped request key counts each
 /// request once regardless of the order files were scanned in.
 ///
-/// Keep the earliest timestamp and its session. Fill missing metadata, and
-/// upgrade placeholders with a model/provider pair from the same observation.
+/// Keep the earliest measured timestamp and its session, or use mtime if
+/// nothing was measured. Prefer stronger model evidence and keep its provider.
 /// Merge gross prompt and cache reads separately before deriving net input.
 /// Callers price the resulting messages, never the individual observations.
-pub fn collapse_qoder_messages(mut messages: Vec<UnifiedMessage>) -> Vec<UnifiedMessage> {
-    messages.sort_unstable_by(|left, right| {
+pub fn collapse_qoder_messages(mut observations: Vec<QoderObservation>) -> Vec<UnifiedMessage> {
+    observations.sort_unstable_by(|left, right| {
+        let time_order = right.measured_timestamp.cmp(&left.measured_timestamp);
+        let left = &left.message;
+        let right = &right.message;
         left.dedup_key
             .cmp(&right.dedup_key)
+            .then(time_order)
             .then_with(|| left.timestamp.cmp(&right.timestamp))
             .then_with(|| left.session_id.cmp(&right.session_id))
             .then_with(|| left.model_id.cmp(&right.model_id))
@@ -1457,7 +1693,9 @@ pub fn collapse_qoder_messages(mut messages: Vec<UnifiedMessage>) -> Vec<Unified
             .then_with(|| left.agent.cmp(&right.agent))
             .then_with(|| left.duration_ms.cmp(&right.duration_ms))
     });
-    messages.dedup_by(|candidate, existing| {
+    observations.dedup_by(|candidate, existing| {
+        let (candidate_rank, candidate) = (candidate.model_rank, &mut candidate.message);
+        let (existing_rank, existing) = (&mut existing.model_rank, &mut existing.message);
         if existing.dedup_key.is_none() || existing.dedup_key != candidate.dedup_key {
             return false;
         }
@@ -1490,11 +1728,12 @@ pub fn collapse_qoder_messages(mut messages: Vec<UnifiedMessage>) -> Vec<Unified
                 existing.workspace_label = candidate.workspace_label.take();
             }
         }
-        let existing_kind = model_kind(&existing.model_id);
-        if model_kind(&candidate.model_id) > existing_kind {
+        if candidate_rank > *existing_rank {
+            *existing_rank = candidate_rank;
             existing.model_id = std::mem::take(&mut candidate.model_id);
             existing.provider_id = std::mem::take(&mut candidate.provider_id);
-        } else if existing_kind == ModelKind::Named
+        } else if existing_rank.kind == ModelKind::Named
+            && candidate_rank.evidence >= existing_rank.evidence
             && existing.model_id.eq_ignore_ascii_case(&candidate.model_id)
             && existing.provider_id == QODER_PROVIDER
             && candidate.provider_id != QODER_PROVIDER
@@ -1506,6 +1745,10 @@ pub fn collapse_qoder_messages(mut messages: Vec<UnifiedMessage>) -> Vec<Unified
         }
         true
     });
+    let mut messages: Vec<_> = observations
+        .into_iter()
+        .map(QoderObservation::into_message)
+        .collect();
     messages.sort_unstable_by(|left, right| {
         left.timestamp
             .cmp(&right.timestamp)
@@ -1597,7 +1840,7 @@ mod tests {
 
     #[test]
     fn routing_slots_never_borrow_a_vendor() {
-        let resolve = |model| RequestModel::new(model, true, None, None).into_ids();
+        let resolve = |model| RequestModel::new(model, ModelEvidence::Reported, None, None).into_ids();
         for slot in [
             "auto",
             "qmodel",
@@ -1640,7 +1883,7 @@ mod tests {
 
         let messages = parse_qoder_transcript_file(&path, QoderSource::International);
         assert_eq!(messages.len(), 1);
-        let message = &messages[0];
+        let message = messages[0].as_message();
         assert_eq!(message.client, "qoder");
         assert_eq!(message.model_id, "qmodel");
         assert_eq!(message.provider_id, "qoder");
@@ -1681,7 +1924,7 @@ mod tests {
 
         let messages = parse_qoder_transcript_file(&path, QoderSource::International);
         assert_eq!(messages.len(), 1);
-        let message = &messages[0];
+        let message = messages[0].as_message();
         assert_eq!(message.model_id, "claude-sonnet-4-6");
         assert_eq!(message.provider_id, "openrouter");
         assert_eq!(message.timestamp, 1_794_045_601_000);
@@ -1732,16 +1975,18 @@ mod tests {
 
         let messages = parse_qoder_transcript_file(&path, QoderSource::China);
         assert_eq!(messages.len(), 2);
-        assert_eq!(messages[0].model_id, "gfmodel");
-        assert_eq!(messages[0].provider_id, "qoder");
-        assert_eq!(messages[0].tokens.input, 19000);
-        assert_eq!(messages[0].tokens.cache_read, 9000);
-        assert_eq!(messages[0].tokens.output, 270);
-        assert!(messages[0].is_turn_start);
-        assert!(!messages[1].is_turn_start);
-        assert_eq!(messages[1].model_id, "dfmodel");
-        assert_eq!(messages[1].tokens.input, 20000);
-        assert_eq!(messages[1].tokens.cache_read, 12000);
+        let first = messages[0].as_message();
+        let second = messages[1].as_message();
+        assert_eq!(first.model_id, "gfmodel");
+        assert_eq!(first.provider_id, "qoder");
+        assert_eq!(first.tokens.input, 19000);
+        assert_eq!(first.tokens.cache_read, 9000);
+        assert_eq!(first.tokens.output, 270);
+        assert!(first.is_turn_start);
+        assert!(!second.is_turn_start);
+        assert_eq!(second.model_id, "dfmodel");
+        assert_eq!(second.tokens.input, 20000);
+        assert_eq!(second.tokens.cache_read, 12000);
     }
 
     #[test]
@@ -1765,6 +2010,7 @@ mod tests {
         let messages = parse_qoder_transcript_file(&path, QoderSource::International);
         let models: Vec<_> = messages
             .iter()
+            .map(QoderObservation::as_message)
             .map(|message| (message.model_id.as_str(), message.provider_id.as_str()))
             .collect();
         assert_eq!(
@@ -1795,8 +2041,8 @@ mod tests {
         );
         let mut messages = parse_qoder_transcript_file(&child, QoderSource::International);
         assert_eq!(messages.len(), 2);
-        assert_eq!(messages[0].session_id, "parent");
-        assert_eq!(messages[1].session_id, "child");
+        assert_eq!(messages[0].as_message().session_id, "parent");
+        assert_eq!(messages[1].as_message().session_id, "child");
         messages.extend(parse_qoder_transcript_file(&parent, QoderSource::International));
         let collapsed = collapse_qoder_messages(messages);
         assert_eq!(collapsed.len(), 2);
@@ -1827,7 +2073,7 @@ mod tests {
 
         let messages = parse_qoder_transcript_file(&path, QoderSource::China);
         assert_eq!(messages.len(), 1);
-        let message = &messages[0];
+        let message = messages[0].as_message();
         assert_eq!(message.agent.as_deref(), Some("Code Reviewer"));
         assert_eq!(message.session_id, "sess-main:agent:abc");
         assert_eq!(message.model_id, "deepseek-v3");
@@ -1875,14 +2121,14 @@ mod tests {
         let messages = parse_qoder_transcript_file(&path, QoderSource::International);
         assert_eq!(messages.len(), 2);
         assert_eq!(
-            messages[0].dedup_key.as_deref(),
+            messages[0].as_message().dedup_key.as_deref(),
             Some("qoder:qoder:req:req_1")
         );
         assert_eq!(
-            messages[1].dedup_key.as_deref(),
+            messages[1].as_message().dedup_key.as_deref(),
             Some("qoder:qoder:req:req_3")
         );
-        assert_eq!(messages[1].tokens.input, 200);
+        assert_eq!(messages[1].as_message().tokens.input, 200);
     }
 
     #[test]
@@ -1902,10 +2148,11 @@ mod tests {
         let messages = parse_qoder_transcript_file(&path, QoderSource::International);
         // The all-negative row is not measured usage.
         assert_eq!(messages.len(), 2);
-        assert_eq!(messages[0].tokens.input, 0);
-        assert_eq!(messages[0].tokens.cache_read, i64::MAX);
-        assert!(messages[0].tokens.total() > 0);
-        assert_eq!(messages[1].tokens.input, 10);
+        let first = messages[0].as_message();
+        assert_eq!(first.tokens.input, 0);
+        assert_eq!(first.tokens.cache_read, i64::MAX);
+        assert!(first.tokens.total() > 0);
+        assert_eq!(messages[1].as_message().tokens.input, 10);
     }
 
     #[test]
@@ -1933,16 +2180,18 @@ mod tests {
 
         let messages = parse_qoder_segment_file(&path, QoderSource::International);
         assert_eq!(messages.len(), 2);
-        assert_eq!(messages[0].session_id, "sess-seg");
-        assert_eq!(messages[0].workspace_key.as_deref(), Some("/work/app"));
-        assert_eq!(messages[0].model_id, "pro");
-        assert_eq!(messages[0].provider_id, "qoder");
-        assert_eq!(messages[0].tokens.input, 600);
-        assert_eq!(messages[0].tokens.cache_read, 400);
-        assert_eq!(messages[0].tokens.output, 45);
-        assert_eq!(messages[0].dedup_key.as_deref(), Some("qoder:qoder:req:r1"));
-        assert_eq!(messages[1].tokens.input, 1000);
-        assert_eq!(messages[1].tokens.output, 30);
+        let first = messages[0].as_message();
+        let second = messages[1].as_message();
+        assert_eq!(first.session_id, "sess-seg");
+        assert_eq!(first.workspace_key.as_deref(), Some("/work/app"));
+        assert_eq!(first.model_id, "pro");
+        assert_eq!(first.provider_id, "qoder");
+        assert_eq!(first.tokens.input, 600);
+        assert_eq!(first.tokens.cache_read, 400);
+        assert_eq!(first.tokens.output, 45);
+        assert_eq!(first.dedup_key.as_deref(), Some("qoder:qoder:req:r1"));
+        assert_eq!(second.tokens.input, 1000);
+        assert_eq!(second.tokens.output, 30);
     }
 
     #[test]
@@ -1966,7 +2215,13 @@ mod tests {
 
         let messages = parse_qoder_segment_file(&path, QoderSource::International);
         assert_eq!(messages.len(), 2);
-        assert_eq!(messages[0].tokens.input + messages[1].tokens.input, 300);
+        assert_eq!(
+            messages
+                .iter()
+                .map(|row| row.as_message().tokens.input)
+                .sum::<i64>(),
+            300
+        );
     }
 
     #[test]
@@ -2023,12 +2278,18 @@ mod tests {
                 Some("qoder:qoder:req:shared".to_string()),
             );
             message.is_turn_start = true;
-            message
+            QoderObservation {
+                message,
+                measured_timestamp: true,
+                model_rank: ModelRank::new(ModelKind::Slot, ModelEvidence::Reported),
+            }
         };
         let mut first = build("s1", 1_000, 100);
-        first.set_workspace(Some("/work/app".into()), Some("app".into()));
+        first
+            .message
+            .set_workspace(Some("/work/app".into()), Some("app".into()));
         let mut second = build("s2", 900, 120);
-        second.set_workspace(Some("/work/app".into()), None);
+        second.message.set_workspace(Some("/work/app".into()), None);
 
         let forward = collapse_qoder_messages(vec![first.clone(), second.clone()]);
         let reverse = collapse_qoder_messages(vec![second, first]);
@@ -2217,7 +2478,7 @@ mod tests {
         let scan = scan_qoder_ide_db(&db, QoderSource::International);
         assert!(scan.complete);
         assert_eq!(scan.messages.len(), 1);
-        let message = &scan.messages[0];
+        let message = scan.messages[0].as_message();
         assert_eq!(message.client, "qoder");
         assert_eq!(message.tokens.input, 1520);
         assert_eq!(message.tokens.cache_read, 37485);
@@ -2253,11 +2514,12 @@ mod tests {
         let scan = scan_qoder_ide_db(&db, QoderSource::China);
         assert!(scan.complete);
         assert_eq!(scan.messages.len(), 1);
-        assert_eq!(scan.messages[0].tokens.input, 100);
-        assert_eq!(scan.messages[0].tokens.output, 5);
-        assert_eq!(scan.messages[0].workspace_key, None);
+        let message = scan.messages[0].as_message();
+        assert_eq!(message.tokens.input, 100);
+        assert_eq!(message.tokens.output, 5);
+        assert_eq!(message.workspace_key, None);
         assert_eq!(
-            scan.messages[0].dedup_key.as_deref(),
+            message.dedup_key.as_deref(),
             Some("qoder:qoder-cn:ide:row-1762509600000")
         );
     }
@@ -2280,8 +2542,8 @@ mod tests {
         let scan = scan_qoder_ide_db(&db, QoderSource::International);
         assert!(scan.complete);
         assert_eq!(scan.messages.len(), 1);
-        assert_eq!(scan.messages[0].model_id, "qmodel");
-        assert_eq!(scan.messages[0].provider_id, "qoder");
+        assert_eq!(scan.messages[0].as_message().model_id, "qmodel");
+        assert_eq!(scan.messages[0].as_message().provider_id, "qoder");
     }
 
     #[test]
@@ -2379,8 +2641,9 @@ mod tests {
 
         let scan = scan_qoder_ide_db(&db, QoderSource::International);
         assert_eq!(scan.messages.len(), 2);
-        assert_eq!(scan.messages[1].tokens.input, 150);
-        assert_eq!(scan.messages[1].tokens.cache_read, 50);
+        let message = scan.messages[1].as_message();
+        assert_eq!(message.tokens.input, 150);
+        assert_eq!(message.tokens.cache_read, 50);
         drop(writer);
     }
 

@@ -141,7 +141,7 @@ pub struct CodexTokenUsage {
 }
 
 impl CodexTokenUsage {
-    fn has_counters(&self) -> bool {
+    fn has_breakdown_counters(&self) -> bool {
         matches!(self.input_tokens, Some(0..))
             || matches!(self.output_tokens, Some(0..))
             || matches!(self.cached_input_tokens, Some(0..))
@@ -149,7 +149,19 @@ impl CodexTokenUsage {
             || matches!(self.cache_write_input_tokens, Some(0..))
             || matches!(self.cache_creation_input_tokens, Some(0..))
             || matches!(self.reasoning_output_tokens, Some(0..))
-            || matches!(self.total_tokens, Some(0..))
+    }
+
+    fn has_counters(&self) -> bool {
+        self.has_breakdown_counters() || reported_total_tokens(self).is_some()
+    }
+
+    fn can_account_for_usage(&self, totals: CodexTotals) -> bool {
+        // Normalized input and output contain all cache and reasoning buckets.
+        // Explicit bucket zeros take precedence over a contradictory aggregate.
+        totals.input > 0
+            || totals.output > 0
+            || (totals == CodexTotals::default()
+                && (self.total_tokens == Some(0) || self.has_breakdown_counters()))
     }
 }
 
@@ -513,7 +525,7 @@ fn codex_originator_is_openclaw(originator: Option<&str>) -> bool {
 #[derive(Debug, Clone)]
 pub(crate) struct ParsedCodexFile {
     pub messages: Vec<UnifiedMessage>,
-    /// A usable token_count outside inherited fork history, including explicit zeros.
+    /// A token_count outside inherited fork history with bucketable usage or explicit zeros.
     pub has_owned_token_count: bool,
     pub fallback_timestamp_indices: Vec<usize>,
     pub consumed_offset: u64,
@@ -867,18 +879,20 @@ fn parse_codex_reader<R: BufRead>(
                     // Upstream totals are mutable snapshots (compaction, context-window
                     // capping can rewrite them), so we only use total_token_usage for
                     // dedup and monotonicity checks — never as a direct delta source.
-                    let total_snapshot = info
-                        .total_token_usage
-                        .as_ref()
-                        .filter(|usage| usage.has_counters());
-                    let last_snapshot = info
-                        .last_token_usage
-                        .as_ref()
-                        .filter(|usage| usage.has_counters());
-                    if total_snapshot.is_none() && last_snapshot.is_none() {
+                    let total_snapshot = info.total_token_usage.as_ref();
+                    let last_snapshot = info.last_token_usage.as_ref();
+                    let raw_totals = total_snapshot.map(CodexTotals::from_usage);
+                    // Empty cumulative objects can match a replay, but cannot
+                    // establish or replace a cumulative baseline.
+                    let total_usage = raw_totals
+                        .filter(|_| total_snapshot.is_some_and(CodexTokenUsage::has_counters));
+                    if total_usage.is_none()
+                        && !last_snapshot.is_some_and(CodexTokenUsage::has_counters)
+                    {
                         continue;
                     }
-                    let total_usage = total_snapshot.map(CodexTotals::from_usage);
+                    // An empty last snapshot is still present for delta dispatch
+                    // and for matching the zero increment after compaction.
                     let last_usage = last_snapshot.map(CodexTotals::from_usage);
                     let compaction = state.pending_compaction.take().filter(|(_, _, compacted)| {
                         *compacted
@@ -891,11 +905,18 @@ fn parse_codex_reader<R: BufRead>(
                     // token_count row after the first child turn_context,
                     // often with child-local timestamps. Keep the inherited
                     // baseline active until totals move beyond it.
-                    if forked_child_should_skip_inherited_snapshot(&state, total_snapshot, total_usage)
+                    if forked_child_should_skip_inherited_snapshot(&state, total_snapshot, raw_totals)
                     {
                         continue;
                     }
-                    has_owned_token_count = true;
+                    if !has_owned_token_count {
+                        has_owned_token_count = last_snapshot
+                            .zip(last_usage)
+                            .is_some_and(|(usage, totals)| usage.can_account_for_usage(totals))
+                            || total_snapshot
+                                .zip(total_usage)
+                                .is_some_and(|(usage, totals)| usage.can_account_for_usage(totals));
+                    }
                     state.forked_child_inherited_baseline = None;
                     state.forked_child_inherited_reported_total = None;
 
@@ -1978,22 +1999,23 @@ mod tests {
 
     #[test]
     fn compaction_incremental_parse_matches_full_parse_at_every_line() {
-        let full = parse_codex_reader(
-            Cursor::new(CODEX_COMPACTION_FIXTURE),
-            "session",
-            0,
-            0,
-            CodexParseState::default(),
+        let empty_last = CODEX_COMPACTION_FIXTURE.replace(
+            r#""last_token_usage":{"input_tokens":0,"cached_input_tokens":0,"output_tokens":0}"#,
+            r#""last_token_usage":{}"#,
         );
-        let mut state = CodexParseState::default();
-        let mut messages = Vec::new();
-        for line in CODEX_COMPACTION_FIXTURE.split_inclusive('\n') {
-            let parsed = parse_codex_reader(Cursor::new(line), "session", 0, 0, state);
-            messages.extend(parsed.messages);
-            state = bincode::deserialize(&bincode::serialize(&parsed.state).unwrap()).unwrap();
+        for fixture in [CODEX_COMPACTION_FIXTURE, empty_last.as_str()] {
+            let full =
+                parse_codex_reader(Cursor::new(fixture), "session", 0, 0, CodexParseState::default());
+            let mut state = CodexParseState::default();
+            let mut messages = Vec::new();
+            for line in fixture.split_inclusive('\n') {
+                let parsed = parse_codex_reader(Cursor::new(line), "session", 0, 0, state);
+                messages.extend(parsed.messages);
+                state = bincode::deserialize(&bincode::serialize(&parsed.state).unwrap()).unwrap();
+            }
+            assert_eq!(messages, full.messages);
+            assert_eq!(messages.iter().map(|m| m.tokens.total()).sum::<i64>(), 705);
         }
-        assert_eq!(messages, full.messages);
-        assert_eq!(messages.iter().map(|m| m.tokens.total()).sum::<i64>(), 705);
     }
 
     #[test]
@@ -2770,20 +2792,23 @@ mod tests {
         let line2 = r#"{"timestamp":"2026-01-01T00:00:01Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"cached_input_tokens":20,"output_tokens":30,"reasoning_output_tokens":5},"last_token_usage":{"input_tokens":100,"cached_input_tokens":20,"output_tokens":30,"reasoning_output_tokens":5}}}}"#;
         let line3 = r#"{"timestamp":"2026-01-01T00:00:02Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":10,"cached_input_tokens":2,"output_tokens":3,"reasoning_output_tokens":1}}}}"#;
         let line4 = r#"{"timestamp":"2026-01-01T00:00:03Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":110,"cached_input_tokens":22,"output_tokens":33,"reasoning_output_tokens":6},"last_token_usage":{"input_tokens":10,"cached_input_tokens":2,"output_tokens":3,"reasoning_output_tokens":1}}}}"#;
-        let content = format!("{}\n{}\n{}\n{}", line1, line2, line3, line4);
-        let file = create_test_file(&content);
+        let empty_total = r#"{"timestamp":"2026-01-01T00:00:02Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{},"last_token_usage":{"input_tokens":10,"cached_input_tokens":2,"output_tokens":3,"reasoning_output_tokens":1}}}}"#;
+        for line3 in [line3, empty_total] {
+            let content = format!("{}\n{}\n{}\n{}", line1, line2, line3, line4);
+            let file = create_test_file(&content);
 
-        let messages = parse_codex_file(file.path());
+            let messages = parse_codex_file(file.path());
 
-        assert_eq!(messages.len(), 2);
-        assert_eq!(messages[0].tokens.input, 80);
-        assert_eq!(messages[0].tokens.output, 25);
-        assert_eq!(messages[0].tokens.cache_read, 20);
-        assert_eq!(messages[0].tokens.reasoning, 5);
-        assert_eq!(messages[1].tokens.input, 8);
-        assert_eq!(messages[1].tokens.output, 2);
-        assert_eq!(messages[1].tokens.cache_read, 2);
-        assert_eq!(messages[1].tokens.reasoning, 1);
+            assert_eq!(messages.len(), 2);
+            assert_eq!(messages[0].tokens.input, 80);
+            assert_eq!(messages[0].tokens.output, 25);
+            assert_eq!(messages[0].tokens.cache_read, 20);
+            assert_eq!(messages[0].tokens.reasoning, 5);
+            assert_eq!(messages[1].tokens.input, 8);
+            assert_eq!(messages[1].tokens.output, 2);
+            assert_eq!(messages[1].tokens.cache_read, 2);
+            assert_eq!(messages[1].tokens.reasoning, 1);
+        }
     }
 
     #[test]
@@ -3013,6 +3038,24 @@ mod tests {
         assert_eq!(messages[1].tokens.output, 4);
         assert_eq!(messages[1].tokens.cache_read, 2);
         assert_eq!(messages[1].tokens.reasoning, 1);
+    }
+
+    #[test]
+    fn test_empty_last_does_not_charge_resumed_totals() {
+        let file = create_test_file(concat!(
+            r#"{"type":"turn_context","payload":{"model":"gpt-5.2"}}"#,
+            "\n",
+            r#"{"timestamp":"2026-01-01T00:00:01Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":5000,"output_tokens":800},"last_token_usage":{}}}}"#,
+            "\n",
+            r#"{"timestamp":"2026-01-01T00:00:02Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":5012,"output_tokens":805},"last_token_usage":{"input_tokens":12,"output_tokens":5}}}}"#,
+            "\n",
+        ));
+
+        let messages = parse_codex_file(file.path());
+
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].tokens.input, 12);
+        assert_eq!(messages[0].tokens.output, 5);
     }
 
     #[test]

@@ -825,6 +825,26 @@ fn parse_pi_format_file_inner(
         }
 
         let is_compaction = is_kwwk && entry.entry_type == "compaction";
+        let entry_timestamp = |entry: &PiSessionEntry| match &entry.timestamp {
+            // Swift writes signed Int64 epoch milliseconds, not seconds.
+            PiEntryTimestamp::Number(number) if is_kwwk => number
+                .as_i64()
+                .filter(|&millis| DateTime::from_timestamp_millis(millis).is_some()),
+            PiEntryTimestamp::Number(number) if !options.lossy_line_reader => {
+                legacy_numeric_timestamp(number)
+                    .filter(|at| (0..=9999).contains(&at.year()))
+                    .map(|at| at.timestamp_millis())
+            }
+            _ => entry.timestamp.text_millis(),
+        };
+        // Two copies can disagree on usage for a marker. Its occurrence
+        // identifies the event, not whether this copy reported billable usage.
+        let marker_identity = is_compaction.then(|| {
+            let at = entry_timestamp(&entry);
+            let occurrence = compaction_occurrences.entry(at).or_insert(0usize);
+            *occurrence += 1;
+            (at, *occurrence)
+        });
         let summary_usage = if is_compaction {
             entry
                 .extra_fields
@@ -868,20 +888,7 @@ fn parse_pi_format_file_inner(
                 .to_string(),
         };
 
-        let recorded_timestamp = match &entry.timestamp {
-            // Swift writes signed Int64 epoch milliseconds. Small and negative
-            // integers are valid; a seconds-like magnitude is not a unit tag.
-            PiEntryTimestamp::Number(number) if is_kwwk => number
-                .as_i64()
-                .filter(|&millis| DateTime::from_timestamp_millis(millis).is_some()),
-            PiEntryTimestamp::Number(number) if !options.lossy_line_reader => {
-                legacy_numeric_timestamp(number)
-                    // Preserve the previous RFC 3339 roundtrip's year range.
-                    .filter(|at| (0..=9999).contains(&at.year()))
-                    .map(|at| at.timestamp_millis())
-            }
-            _ => entry.timestamp.text_millis(),
-        };
+        let recorded_timestamp = marker_identity.map_or_else(|| entry_timestamp(&entry), |(at, _)| at);
         let timestamp = recorded_timestamp.unwrap_or(fallback_timestamp);
 
         let mut unified = UnifiedMessage::new_with_agent(
@@ -899,12 +906,10 @@ fn parse_pi_format_file_inner(
             usage.apply_kwwk_usage_details(&mut unified);
         }
         if let Some(namespace) = dedup_namespace {
-            if is_compaction {
+            if let Some((_, occurrence)) = marker_identity {
                 // kwwk has no marker id. Use the session's recording time
                 // and occurrence at that time, not the physical line position:
                 // kwwk can rewrite the projection or remove a corrupt line.
-                let occurrence = compaction_occurrences.entry(recorded_timestamp).or_insert(0usize);
-                *occurrence += 1;
                 let id = &unified.session_id;
                 let key = match recorded_timestamp {
                     Some(at) => format!("{namespace}:compaction:{id}:{at}:{occurrence}"),

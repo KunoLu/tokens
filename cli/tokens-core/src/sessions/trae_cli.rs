@@ -16,8 +16,8 @@
 //!
 //! Newer TRAE CLI rollouts carry the transcript in `history_mutation` records
 //! and per-response usage in `token_usage_record.payload.usage`. A
-//! usable `token_count` snapshot owned by the thread takes precedence, even
-//! when it explicitly reports zero usage. Like Codex, TRAE can report inclusive
+//! thread-owned `token_count` snapshot takes precedence if it has bucketable
+//! usage or explicitly reports zero. Like Codex, TRAE can report inclusive
 //! input; its `total_tokens` also identifies disjoint cache buckets when
 //! recorded separately.
 //!

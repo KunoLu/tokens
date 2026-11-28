@@ -8,11 +8,23 @@ Feature: CLI 按客户端来源与消息日期统计本地用量
     And 同一请求出现在多个来源时不重复计数
     And 不同版本即使请求标识相同也分别计数
 
+  Scenario: Qoder 多个来源对同一请求提供不同完整度的记录
+    Given 一份记录只有用量和文件修改时间，另一份含请求实际发生时间
+    When CLI 合并同一请求并按日计价
+    Then 用量归到实际发生的日期，不随文件修改时间漂移
+    And 明确报告的请求模型优先于会话的默认模型
+
   Scenario: 区分独立客户端及其记录格式
     Given 本地存在 kwwk 的 pi 格式用量和 TRAE CLI 会话
     When CLI 扫描本地用量
     Then kwwk 的用量归入 kwwk 而不是 pi
     And TRAE CLI 的用量归入 trae-cli 而不是 trae
+
+  Scenario: kwwk 同毫秒的不同摘要不会因不完整副本而错位
+    Given 同一会话有两次同毫秒摘要，分别消耗 20 和 3 个输入 token
+    And 另一份副本将第一次摘要的用量记为零
+    When CLI 同时读取两个副本
+    Then 两次摘要的输入合计为 23 个 token
 
   Scenario Outline: 跨日会话按消息日期归账
     Given <客户端> 的一个会话含两个不同日期的带用量助手消息

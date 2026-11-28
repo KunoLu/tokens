@@ -180,6 +180,8 @@ fn forked_trae_rollout_uses_only_the_childs_usage_dialect() {
     let home = common::temp_home();
     let parent_snapshot = r#"{"timestamp":"2026-09-01T10:00:03.100Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"cached_input_tokens":40,"output_tokens":12,"total_tokens":112},"last_token_usage":{"input_tokens":100,"cached_input_tokens":40,"output_tokens":12,"total_tokens":112}}}}"#;
     let trailing_snapshot = parent_snapshot.replace("10:00:03.100Z", "10:00:07.000Z");
+    let parent_empty_total = r#"{"timestamp":"2026-09-01T10:00:03.200Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{},"last_token_usage":{"input_tokens":80,"output_tokens":6,"total_tokens":86}}}}"#;
+    let trailing_empty_total = parent_empty_total.replace("10:00:03.200Z", "10:00:06.900Z");
     let prefix = [
         r#"{"timestamp":"2026-09-01T10:00:04.000Z","type":"session_meta","payload":{"id":"019fcf70-2222-7000-8000-000000000001","forked_from_id":"019fcf70-1111-7000-8000-000000000001","thread_source":"user","model_provider":"trae"}}"#,
         HISTORY_MUTATION_ROLLOUT[0],
@@ -187,11 +189,12 @@ fn forked_trae_rollout_uses_only_the_childs_usage_dialect() {
         HISTORY_MUTATION_ROLLOUT[2],
         HISTORY_MUTATION_ROLLOUT[3],
         parent_snapshot,
-        r#"{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{}}}}"#,
+        parent_empty_total,
         r#"{"timestamp":"2026-09-01T10:00:04.100Z","type":"turn_context","payload":{"turn_id":"019fcf70-2223-7000-8000-000000000001","model":"gpt-5-codex"}}"#,
         r#"{"timestamp":"2026-09-01T10:00:05.000Z","type":"event_msg","payload":{"type":"user_message","message":"Continue in the fork."}}"#,
         r#"{"timestamp":"2026-09-01T10:00:06.000Z","type":"token_usage_record","payload":{"response_id":"resp_child","usage":{"input_tokens":20,"output_tokens":2,"total_tokens":22}}}"#,
         r#"{"type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{}}}}"#,
+        trailing_empty_total.as_str(),
         trailing_snapshot.as_str(),
         HISTORY_MUTATION_ROLLOUT[3],
     ];
@@ -239,6 +242,27 @@ fn forked_trae_rollout_uses_only_the_childs_usage_dialect() {
 }
 
 #[test]
+fn fork_without_inherited_totals_counts_its_own_last_usage() {
+    let home = common::temp_home();
+    let path = home.path().join("rollout-fork-empty-total.jsonl");
+    write_jsonl(
+        &path,
+        &[
+            r#"{"type":"session_meta","payload":{"id":"019fcf70-2222-7000-8000-000000000001","forked_from_id":"019fcf70-1111-7000-8000-000000000001","thread_source":"user","model_provider":"trae"}}"#,
+            HISTORY_MUTATION_ROLLOUT[0],
+            r#"{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{},"last_token_usage":{"input_tokens":100,"output_tokens":12}}}}"#,
+            r#"{"type":"turn_context","payload":{"turn_id":"019fcf70-2223-7000-8000-000000000001","model":"gpt-5-codex"}}"#,
+            r#"{"timestamp":"2026-09-01T10:00:05Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{},"last_token_usage":{"input_tokens":20,"output_tokens":2}}}}"#,
+        ],
+    );
+
+    let messages = parse_trae_cli_file(&path);
+    assert_eq!(messages.len(), 1);
+    assert_eq!(messages[0].tokens.input, 20);
+    assert_eq!(messages[0].tokens.output, 2);
+}
+
+#[test]
 fn trae_usage_records_yield_only_to_a_usable_token_count() {
     let home = common::temp_home();
     for (name, info, expected) in [
@@ -253,6 +277,26 @@ fn trae_usage_records_yield_only_to_a_usable_token_count() {
             "invalid-counters",
             r#"{"last_token_usage":{"input_tokens":-1,"cache_write_input_tokens":"invalid"}}"#,
             112,
+        ),
+        (
+            "positive-total-only",
+            r#"{"total_token_usage":{"total_tokens":900}}"#,
+            112,
+        ),
+        (
+            "positive-last-aggregate-only",
+            r#"{"last_token_usage":{"total_tokens":90}}"#,
+            112,
+        ),
+        (
+            "unbucketable-positive-subsets",
+            r#"{"last_token_usage":{"cached_input_tokens":40,"reasoning_output_tokens":2}}"#,
+            112,
+        ),
+        (
+            "explicit-zero-aggregate-only",
+            r#"{"total_token_usage":{"total_tokens":0}}"#,
+            0,
         ),
         (
             "explicit-zero",
