@@ -25,3 +25,7 @@
 - **生产站实测：** 匿名 Chrome 打开 `https://tokens.camp/docs` 返回 200，Qoder、kwwk、TRAE CLI 可见；页头标记的计算填色为 `rgb(124, 58, 237)`（`#7C3AED`）。Shell 与 Windows 安装页签均引用 `v1.0.7`。从英文文档选择中文、日本语，主 frame 分别请求 `/zh-CN/docs`、`/ja/docs`，均返回 200，`html lang` 正确，域名不变。
 - **同一发布 SHA 的行为回归：** 以合成数据执行 `ProfilePageClient.test.tsx`、`timezone.test.ts`、`validation/submission.test.ts`，35 项通过。覆盖账号时区优先、留空按浏览器时区判定“今天”、三个新客户端，以及 Hermes/Amp 修订 2 的校验与旧修订重放。这里不是登录生产账号的实测，也不是一次生产 `/api/submit` 成功写入；没有读取真实用户资料、写入生产用量或回填历史。
 - 此回填不修改运行时、工作流、生产配置、发布 tag 或安装来源。`/install.sh` 仍从上游 `missuo/tokens` 获取二进制。
+
+## 回填 PR 的 CI
+
+[#35](https://github.com/KunoLu/tokens/pull/35) 的初始提交 `44e14962` 只改 `ai/tasks/`，未命中原 CI 路径过滤，没有该 SHA 的 CI 结果。独立 [#36](https://github.com/KunoLu/tokens/pull/36) 在 `pull_request.paths` 增加 `ai/tasks/**`，没有改动检查、权限或 `push main` 规则。配置提交 `8e2535a1` 经双审 CLEAN 和[四项 CI](https://github.com/KunoLu/tokens/actions/runs/46160157675)通过后合入 `main`（`323422d3`）。#35 同步该提交后按自己的 HEAD 验收；发布 tag 和 Production 指向不变。
