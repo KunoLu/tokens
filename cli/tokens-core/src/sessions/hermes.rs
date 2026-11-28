@@ -6,7 +6,7 @@
 //!
 //! Hermes stores usage only as lifetime totals per session (and per model in
 //! `session_model_usage`), never per API call. Each total is spread across the
-//! assistant messages that fall in its time window, so a session that runs
+//! unambiguous assistant messages in its time window, so a session that runs
 //! for days books its usage on the days it was used rather than the day it
 //! started (missuo/tokens#129).
 
@@ -186,17 +186,64 @@ fn query_assistant_timestamps(db_path: &Path, conn: &Connection) -> HashMap<Stri
     }
 }
 
-/// The assistant messages a row's usage is spread over: those inside the
-/// window in which Hermes recorded that usage. Bounding by the window keeps a
-/// model's tokens off messages answered by another model of the same session,
-/// and keeps a session rotated out of a compaction from spreading onto the
-/// parent messages it carries over with their original timestamps.
+fn usage_bounds(row: &HermesUsageRow) -> (f64, f64) {
+    (
+        row.first_seen.unwrap_or(row.started_at),
+        row.last_seen.unwrap_or(f64::INFINITY),
+    )
+}
+
+/// Bound usage to the recorded interval so rotated sessions do not spread
+/// onto parent messages carried over with their original timestamps.
 fn usage_window<'a>(row: &HermesUsageRow, timestamps: &'a [f64]) -> &'a [f64] {
-    let lo = row.first_seen.unwrap_or(row.started_at);
-    let hi = row.last_seen.unwrap_or(f64::INFINITY);
+    let (lo, hi) = usage_bounds(row);
     let start = timestamps.partition_point(|&t| t < lo);
     let end = timestamps.partition_point(|&t| t <= hi).max(start);
     &timestamps[start..end]
+}
+
+/// The message table does not identify a model. When models switch back and
+/// forth, the same timestamp can fall inside more than one model's interval.
+/// Exclude it from all rows instead of attributing it to each model.
+fn exclude_ambiguous_times(
+    rows: &[HermesUsageRow],
+    timestamps: &mut Vec<f64>,
+    overlaps: &mut Vec<(f64, f64)>,
+) {
+    overlaps.clear();
+    for (i, row) in rows.iter().enumerate().skip(1) {
+        let (start, end) = usage_bounds(row);
+        for other in &rows[..i] {
+            if row.model_id == other.model_id {
+                continue;
+            }
+            let (other_start, other_end) = usage_bounds(other);
+            let start = start.max(other_start);
+            let end = end.min(other_end);
+            if start <= end {
+                overlaps.push((start, end));
+            }
+        }
+    }
+    if overlaps.is_empty() {
+        return;
+    }
+
+    overlaps.sort_unstable_by(|left, right| left.0.total_cmp(&right.0));
+    let mut overlaps = overlaps.iter();
+    let mut current = overlaps.next();
+    timestamps.retain(|&time| {
+        while let Some(&(start, end)) = current {
+            if time < start {
+                return true;
+            }
+            if time <= end {
+                return false;
+            }
+            current = overlaps.next();
+        }
+        true
+    });
 }
 
 /// Piece `index` of `total` split into `pieces` near-equal integer shares.
@@ -206,13 +253,12 @@ fn integer_share(total: i64, index: usize, pieces: usize) -> i64 {
     cumulative(index + 1) - cumulative(index)
 }
 
-/// Splits one usage row into a message per assistant message in its window,
-/// each carrying an equal share of every token bucket and of the cost. A row
-/// with no message in its window stays whole at the time its usage was first
-/// recorded, or at `started_at` when that is unknown.
+/// Splits one usage row evenly across the remaining assistant times inside its
+/// window. Without a reliable time, keep it whole at `first_seen`, or at
+/// `started_at` when the first observation is unknown.
 fn push_spread_messages(
     row: HermesUsageRow,
-    row_key: &str,
+    row_key: Option<&str>,
     timestamps: &[f64],
     messages: &mut Vec<UnifiedMessage>,
 ) {
@@ -224,6 +270,7 @@ fn push_spread_messages(
         window
     };
     let pieces = times.len();
+    let row_key = row_key.unwrap_or(row.session_id.as_str());
 
     let provider = resolved_provider(row.billing_provider, &row.model_id, "hermes");
     let tokens = TokenBreakdown {
@@ -300,34 +347,81 @@ pub fn parse_hermes_sqlite(db_path: &Path) -> Vec<UnifiedMessage> {
     parse_hermes_databases(&[db_path])
 }
 
-/// Parses every Hermes database (the default home plus any profile or extra
-/// path), crediting each usage row to the first database that holds it. The
-/// dedup runs on rows, before they are spread: two copies of one session can
-/// hold different numbers of messages, and deduping the spread pieces would
-/// let the larger copy's extra pieces through on top of the first copy.
+enum SessionSource {
+    PerModel,
+    Totals(usize), // index in pending_totals
+}
+
+/// Parses every Hermes database, preferring per-model usage over session
+/// totals for the same session regardless of database order. The first
+/// database wins for duplicate rows within a representation, before spreading
+/// makes copies with different message histories produce different pieces.
 pub fn parse_hermes_databases<P: AsRef<Path>>(db_paths: &[P]) -> Vec<UnifiedMessage> {
-    let mut seen_rows: HashSet<String> = HashSet::new();
+    let mut session_sources = HashMap::new();
+    let mut seen_model_rows = HashSet::new();
+    let mut pending_totals = Vec::new();
+    let mut overlaps = Vec::new();
     let mut messages = Vec::new();
     for db_path in db_paths {
         let db_path = db_path.as_ref();
         let Some(conn) = open_hermes_database(db_path) else {
             continue;
         };
-        let rows = query_hermes_usage(db_path, &conn);
-        if rows.is_empty() {
+        let model_rows = query_per_model_usage(db_path, &conn);
+        let totals = query_usage_rows(db_path, &conn, SESSION_TOTALS_QUERY).unwrap_or_default();
+        if model_rows.is_empty() && totals.is_empty() {
             continue;
         }
-        let timestamps = query_assistant_timestamps(db_path, &conn);
-        for (row, row_key) in rows {
-            if !seen_rows.insert(row_key.clone()) {
+        let mut timestamps = query_assistant_timestamps(db_path, &conn);
+        for rows in model_rows
+            .chunk_by(|a, b| a.session_id == b.session_id)
+            .filter(|rows| rows.len() > 1)
+        {
+            if let Some(times) = timestamps.get_mut(&rows[0].session_id) {
+                exclude_ambiguous_times(rows, times, &mut overlaps);
+            }
+        }
+
+        for mut row in model_rows {
+            let provider = row.billing_provider.as_deref().unwrap_or(NULL_PROVIDER_KEY);
+            let row_key = format!("hermes:{}:{}:{}", row.session_id, row.model_id, provider);
+            if seen_model_rows.contains(&row_key) {
                 continue;
             }
-            let session_timestamps = timestamps
-                .get(&row.session_id)
-                .map(Vec::as_slice)
-                .unwrap_or_default();
-            push_spread_messages(row, &row_key, session_timestamps, &mut messages);
+            // SQL orders the primary model first. Only the first per-model
+            // row of the session carries the session's message count.
+            if let Some(source) = session_sources.get_mut(&row.session_id) {
+                match *source {
+                    SessionSource::PerModel => row.message_count = 0,
+                    SessionSource::Totals(index) => {
+                        pending_totals[index] = None;
+                        *source = SessionSource::PerModel;
+                    }
+                }
+            } else {
+                session_sources.insert(row.session_id.clone(), SessionSource::PerModel);
+            }
+            let times = timestamps.get(&row.session_id).map_or(&[][..], Vec::as_slice);
+            push_spread_messages(row, Some(&row_key), times, &mut messages);
+            seen_model_rows.insert(row_key);
         }
+
+        // Keep only the first totals row, and defer spreading: this session
+        // may still have per-model usage in a later database.
+        for row in totals {
+            if session_sources.contains_key(&row.session_id) {
+                continue;
+            }
+            session_sources.insert(
+                row.session_id.clone(),
+                SessionSource::Totals(pending_totals.len()),
+            );
+            let times = timestamps.remove(&row.session_id).unwrap_or_default();
+            pending_totals.push(Some((row, times)));
+        }
+    }
+    for (row, times) in pending_totals.into_iter().flatten() {
+        push_spread_messages(row, None, &times, &mut messages);
     }
     messages
 }
@@ -346,8 +440,7 @@ fn open_hermes_database(db_path: &Path) -> Option<Connection> {
     }
 }
 
-/// Every usage row of one database with the key it dedups under.
-fn query_hermes_usage(db_path: &Path, conn: &Connection) -> Vec<(HermesUsageRow, String)> {
+fn query_per_model_usage(db_path: &Path, conn: &Connection) -> Vec<HermesUsageRow> {
     // Hermes builds that predate `session_model_usage` cannot run the per-model
     // query at all; probing first keeps that expected case quiet instead of
     // logging a prepare failure for every such install. When the table does
@@ -355,65 +448,9 @@ fn query_hermes_usage(db_path: &Path, conn: &Connection) -> Vec<(HermesUsageRow,
     // `session_model_usage` without `reasoning_tokens` — `query_usage_rows`
     // returns None and the session totals below carry the whole database, so
     // drift degrades to coarser data instead of losing all of it.
-    let per_model_rows = if has_session_model_usage(db_path, conn) {
-        query_usage_rows(db_path, conn, PER_MODEL_QUERY)
+    if has_session_model_usage(db_path, conn) {
+        query_usage_rows(db_path, conn, PER_MODEL_QUERY).unwrap_or_default()
     } else {
-        None
-    };
-
-    let mut rows: Vec<(HermesUsageRow, String)> = Vec::new();
-    // Sessions the per-model pass emitted at least one row for.
-    let mut covered_sessions: HashSet<String> = HashSet::new();
-    // Sessions whose `message_count` has already been handed to a row.
-    let mut counted_sessions: HashSet<String> = HashSet::new();
-
-    for mut row in per_model_rows.unwrap_or_default() {
-        covered_sessions.insert(row.session_id.clone());
-        // `sessions.message_count` is a per-session total, so exactly one row
-        // per session may carry it. ORDER BY sorts the row matching
-        // `sessions.model` first, so "the first row of the session" is that
-        // primary model when it survives grouping, and a deterministic
-        // stand-in when it does not — a NULL `sessions.model`, a rename
-        // between the two tables, or a primary model whose rows were all zero
-        // and got filtered out. Zeroing every later row keeps the per-session
-        // sum equal to `sessions.message_count` instead of dropping it.
-        if !counted_sessions.insert(row.session_id.clone()) {
-            row.message_count = 0;
-        }
-        // SQLite groups NULL and '' separately, so one (session, model) can
-        // reach this loop as two rows that differ only in a NULL vs empty
-        // billing_provider. Rendering NULL as a sentinel keeps their keys
-        // apart; folding NULL to "" would collide and the row dedup in
-        // `parse_hermes_databases` would then drop the second row's tokens
-        // outright.
-        let provider_key = row.billing_provider.as_deref().unwrap_or(NULL_PROVIDER_KEY);
-        let dedup_key = format!(
-            "hermes:{}:{}:{}",
-            row.session_id, row.model_id, provider_key
-        );
-        rows.push((row, dedup_key));
+        Vec::new()
     }
-
-    // Reconcile per session, not per table: a Hermes upgrade can create
-    // `session_model_usage` without backfilling older sessions, and those
-    // sessions still carry their totals on `sessions`. Emit totals only for
-    // sessions the per-model pass did not cover, which makes the two result
-    // sets disjoint by construction — they cannot double count.
-    //
-    // Deliberately no "top up" of a session whose smu rows only partially cover
-    // its session totals: if a session has ANY smu row we trust smu, because
-    // adding the difference would double count the models smu did record. Do
-    // not "fix" this into a per-column reconciliation.
-    for row in query_usage_rows(db_path, conn, SESSION_TOTALS_QUERY).unwrap_or_default() {
-        if covered_sessions.contains(&row.session_id) {
-            continue;
-        }
-        // This path yields at most one row per session, so it keeps the bare
-        // session id as its dedup key; the per-model keys are namespaced and
-        // cannot collide with it.
-        let dedup_key = row.session_id.clone();
-        rows.push((row, dedup_key));
-    }
-
-    rows
 }

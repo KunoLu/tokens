@@ -401,6 +401,15 @@ impl SourceFingerprint {
         )
     }
 
+    pub(crate) fn check_qoder_path(
+        path: &Path,
+        cached: Option<&Self>,
+    ) -> Option<FingerprintStatus> {
+        let related = crate::sessions::qoder::subagent_meta_path(path)
+            .map(|meta| ("subagent-meta".to_owned(), meta));
+        Self::check_path_with_related_mode(path, related, cached, ContentHashMode::SamplesOnly)
+    }
+
     pub(crate) fn check_sqlite_path(
         path: &Path,
         cached: Option<&Self>,
@@ -1026,6 +1035,13 @@ impl CacheIdentity {
         }
     }
 
+    pub(crate) fn for_qoder_source(source: crate::sessions::qoder::QoderSource) -> Self {
+        Self {
+            namespace: source.as_str(),
+            parser_version: parser_version(ClientId::Qoder),
+        }
+    }
+
     pub(crate) const fn synthetic() -> Self {
         Self {
             namespace: "synthetic",
@@ -1037,6 +1053,9 @@ impl CacheIdentity {
         if namespace == "synthetic" {
             return Some(Self::synthetic());
         }
+        if namespace == "qoder-cn" {
+            return Some(Self::for_qoder_source(crate::sessions::qoder::QoderSource::China));
+        }
         ClientId::from_str(namespace).map(Self::for_client)
     }
 
@@ -1044,6 +1063,9 @@ impl CacheIdentity {
     fn all() -> impl Iterator<Item = Self> {
         ClientId::iter()
             .map(Self::for_client)
+            .chain(std::iter::once(Self::for_qoder_source(
+                crate::sessions::qoder::QoderSource::China,
+            )))
             .chain(std::iter::once(Self::synthetic()))
     }
 }
@@ -1145,10 +1167,9 @@ const SHARED_PARSER_FAMILIES: &[SharedParserFamily] = &[
             // Fork (missuo/tokens#48): Craft Agent rides the standard lane.
             // +1 (#122): entry-identity-first keys, as for Pi above.
             (ClientId::CraftAgent, 2),
-            // kwwk (Swift port of pi): epoch-ms timestamps are accepted by
-            // the shared parser; new member, nothing cached before it.
-            (ClientId::Kwwk, 0),
-            // +3 for Prime Agent's independent history. v1->v2 strips a
+            // Compaction requests, billed cost and 1h writes are kwwk-specific.
+            (ClientId::Kwwk, 1),
+            // Prime Agent's independent history: v1->v2 strips a
             // leading BOM and recovers records containing undecodable
             // bytes; its accounting scan also continues past those records
             // instead of truncating and misaligning message indices. The
@@ -1161,8 +1182,9 @@ const SHARED_PARSER_FAMILIES: &[SharedParserFamily] = &[
             // damaged lineage and usage structural keys before
             // reconciliation bookkeeping. v3->v4 rejects damaged lineage
             // values and matching-critical child timestamps while
-            // preserving unrelated damaged usage extensions.
-            (ClientId::PrimeAgent, 3),
+            // preserving unrelated damaged usage extensions. A further bump
+            // rejects wrong-typed timestamps in RLM child messages.
+            (ClientId::PrimeAgent, 4),
         ],
     },
     SharedParserFamily {
@@ -1326,7 +1348,8 @@ fn parser_version(client: ClientId) -> u32 {
         // decoded, and their name-derived session ids drop the `.zst` so a
         // session present in both forms dedups (missuo/tokens#109, upstream
         // junhoyeo/tokscale#1423).
-        ClientId::Codex => 13,
+        // v13->v14 preserves the native cache-write bucket in rollout usage.
+        ClientId::Codex => 14,
         // v4->v5: jcode's assistant-message timestamp is now back-calculated
         // to the turn start (timestamp - tool_duration_ms) instead of using
         // the recorded (end-anchored) timestamp directly. Follow-up to #890.
@@ -1446,7 +1469,9 @@ fn parser_version(client: ClientId) -> u32 {
         // v2->v3 spreads each lifetime usage row across the assistant
         // messages in its window instead of booking it on the session's start
         // day (missuo/tokens#129).
-        ClientId::Hermes => 3,
+        // v4 reconciles legacy/SMU duplicates across databases and excludes
+        // ambiguous assistant timestamps from overlapping model windows.
+        ClientId::Hermes => 4,
         // v1->v2: Unsloth Studio now reads the responding model and provider
         // route from scalar responseDetails fields. Reparse cached rows so
         // local usage stays authoritatively free, metered providers receive
@@ -3991,7 +4016,7 @@ mod tests {
         // compaction usage, and v12->v13 decodes `.jsonl.zst` rollouts.
         // Each bump is what stops an existing cache from replaying the old
         // rows, so it has to be asserted rather than assumed.
-        assert_eq!(parser_version(ClientId::Codex), 13);
+        assert_eq!(parser_version(ClientId::Codex), 14);
         assert_eq!(parser_version(ClientId::Claude), 2);
     }
 
@@ -4130,8 +4155,7 @@ mod tests {
 
     #[test]
     fn test_lossy_jsonl_parser_versions_invalidate_v3_entries() {
-        // Prime Agent's 5 plus the pi-format v3 speed bump below.
-        assert_eq!(parser_version(ClientId::PrimeAgent), 6);
+        assert_eq!(parser_version(ClientId::PrimeAgent), 7);
         assert_eq!(parser_version(ClientId::Reasonix), 4);
     }
 
@@ -4145,7 +4169,7 @@ mod tests {
         // (the standard-lane members took a further +1 for #122, below),
         // plus the base 2 -> 3 speed bump.
         assert_eq!(parser_version(ClientId::Kimchi), 4);
-        assert_eq!(parser_version(ClientId::PrimeAgent), 6);
+        assert_eq!(parser_version(ClientId::PrimeAgent), 7);
     }
 
     /// #122: the standard cross-session lane (Pi, OMP, Senpi, Craft Agent)
@@ -4167,7 +4191,7 @@ mod tests {
     #[test]
     fn test_pi_format_speed_parser_version_invalidates_v2_entries() {
         assert_eq!(crate::sessions::pi::PI_FORMAT_PARSER_BASE_VERSION, 3);
-        assert_eq!(parser_version(ClientId::Kwwk), 3);
+        assert_eq!(parser_version(ClientId::Kwwk), 4);
     }
 
     #[test]
@@ -4263,9 +4287,8 @@ mod tests {
     }
 
     #[test]
-    fn test_hermes_parser_version_invalidates_v2_entries() {
-        // v2->v3 re-dates usage from the session start onto its messages.
-        assert_eq!(parser_version(ClientId::Hermes), 3);
+    fn test_hermes_parser_version_invalidates_overlapping_window_counts() {
+        assert_eq!(parser_version(ClientId::Hermes), 4);
     }
 
     #[test]
@@ -5154,8 +5177,8 @@ mod tests {
                     (ClientId::Omp, 2),
                     (ClientId::Senpi, 2),
                     (ClientId::CraftAgent, 2),
-        (ClientId::Kwwk, 0),
-                    (ClientId::PrimeAgent, 3),
+                    (ClientId::Kwwk, 1),
+                    (ClientId::PrimeAgent, 4),
                 ],
             ),
             (

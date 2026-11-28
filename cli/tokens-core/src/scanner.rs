@@ -133,10 +133,10 @@ pub struct ScanResult {
     pub copilot_session_state_events: Vec<PathBuf>,
     /// Qoder and Qoder CN desktop IDE databases
     /// (`<app data>/Qoder[CN]/SharedClientCache/cache/db/local.db`), which keep
-    /// per-message `token_info` for the IDE's chat panel. Only the two known
-    /// edition directories are probed; the newer `com.qoder*.app.stable` app
-    /// data layouts are not included because their token meaning is unverified.
-    pub qoder_ide_dbs: Vec<PathBuf>,
+    /// per-message `token_info` for the IDE's chat panel. Nonstandard layouts
+    /// are only read when the user explicitly selects a `local.db` file.
+    pub qoder_ide_dbs: Vec<(PathBuf, crate::sessions::qoder::QoderSource)>,
+    qoder_config_roots: Vec<(PathBuf, crate::sessions::qoder::QoderSource)>,
 }
 
 impl Default for ScanResult {
@@ -160,11 +160,22 @@ impl Default for ScanResult {
             copilot_vscode_sessions: Vec::new(),
             copilot_session_state_events: Vec::new(),
             qoder_ide_dbs: Vec::new(),
+            qoder_config_roots: Vec::new(),
         }
     }
 }
 
 impl ScanResult {
+    pub(crate) fn qoder_source(&self, path: &Path) -> crate::sessions::qoder::QoderSource {
+        self.qoder_config_roots
+            .iter()
+            .find(|(root, _)| path.starts_with(root))
+            .map_or_else(
+                || crate::sessions::qoder::QoderSource::from_path(path),
+                |(_, source)| *source,
+            )
+    }
+
     pub fn get(&self, client: ClientId) -> &Vec<PathBuf> {
         &self.files[client as usize]
     }
@@ -868,7 +879,11 @@ pub fn antigravity_conversation_roots(home_dir: &str, use_env_roots: bool) -> Ve
     }
     .resolve_with_env_strategy(home_dir, use_env_roots);
     let env_home = PathBuf::from(env_home);
-    if !gemini_homes.contains(&env_home) {
+    if env_home != gemini_homes[0]
+        && !std::fs::canonicalize(&env_home).is_ok_and(|resolved| {
+            std::fs::canonicalize(&gemini_homes[0]).is_ok_and(|default| resolved == default)
+        })
+    {
         gemini_homes.push(env_home);
     }
 
@@ -2012,7 +2027,7 @@ fn discover_copilot_session_state_events(home_dir: &str, use_env_roots: bool) ->
     if use_env_roots {
         if let Some(copilot_home) = std::env::var_os("COPILOT_HOME")
             .map(PathBuf::from)
-            .filter(|path| path.is_absolute())
+            .filter(|path| !path.as_os_str().is_empty())
         {
             roots.push(copilot_home.join("session-state"));
         }
@@ -2172,6 +2187,7 @@ fn scan_all_clients_with_env_strategy_inner(
     let mut tasks: Vec<(ClientId, String, &str)> = Vec::new();
     let mut seen_scan_roots: HashSet<(ClientId, PathBuf)> = HashSet::new();
     let mut devin_cli_roots: Vec<PathBuf> = Vec::new();
+    let mut extra_qoder_dbs = Vec::new();
     // Every OpenClaw agents root the scan covers; each is also searched for
     // per-agent SQLite transcript databases once the roots are settled.
     let mut openclaw_agent_roots: Vec<PathBuf> = Vec::new();
@@ -2221,6 +2237,13 @@ fn scan_all_clients_with_env_strategy_inner(
 
     for (client_id, path) in extra_scan_paths_for(scanner_settings, &enabled_with_lookups) {
         warn_if_escapes_home(Path::new(home_dir), client_id, &path);
+        if client_id == ClientId::Qoder
+            && crate::sessions::qoder::is_qoder_ide_db(&path)
+            && path.is_file()
+        {
+            extra_qoder_dbs.push(path);
+            continue;
+        }
         if client_id == ClientId::DevinCli {
             devin_cli_roots.push(path);
         } else if client_id == ClientId::Grok {
@@ -2243,9 +2266,10 @@ fn scan_all_clients_with_env_strategy_inner(
         // rather than a transcript. Only `<session>/segments/*.jsonl` is an
         // event stream; the siblings under `logs/sessions` (runs, router logs)
         // are diagnostics and are not scanned.
-        for (var, fallback_relative) in [
-            ("QODER_CONFIG_DIR", ".qoder"),
-            ("QODERCN_CONFIG_DIR", ".qoder-cn"),
+        use crate::sessions::qoder::QoderSource;
+        for (var, fallback_relative, source) in [
+            ("QODER_CONFIG_DIR", ".qoder", QoderSource::International),
+            ("QODERCN_CONFIG_DIR", ".qoder-cn", QoderSource::China),
         ] {
             let root = PathRoot::EnvVar {
                 var,
@@ -2259,7 +2283,12 @@ fn scan_all_clients_with_env_strategy_inner(
                 PathBuf::from(join_native(&root, "logs/sessions")),
                 "qoder-segments",
             );
+            result.qoder_config_roots.push((PathBuf::from(root), source));
         }
+        // A user may place one edition's root inside the other's.
+        result
+            .qoder_config_roots
+            .sort_by_key(|(root, _)| std::cmp::Reverse(root.components().count()));
     }
 
     if enabled.contains(&ClientId::CodeBuddy) {
@@ -2852,18 +2881,22 @@ fn scan_all_clients_with_env_strategy_inner(
         // Linux, and follows the caller's home under `--home`.
         let app_data = PathRoot::AppData.resolve_with_env_strategy(home_dir, use_env_roots);
         let mut seen_qoder_dbs: HashSet<PathBuf> = HashSet::new();
-        for candidate in
-            crate::sessions::qoder::qoder_ide_db_candidates(Path::new(&app_data), use_env_roots)
-        {
+        let mut candidates =
+            crate::sessions::qoder::qoder_ide_db_candidates(Path::new(&app_data), use_env_roots);
+        candidates.extend(extra_qoder_dbs.into_iter().map(|path| {
+            let source = result.qoder_source(&path);
+            (path, source)
+        }));
+        for (candidate, source) in candidates {
             if !candidate.is_file() {
                 continue;
             }
             let key = std::fs::canonicalize(&candidate).unwrap_or_else(|_| candidate.clone());
             if seen_qoder_dbs.insert(key) {
-                result.qoder_ide_dbs.push(candidate);
+                result.qoder_ide_dbs.push((candidate, source));
             }
         }
-        result.qoder_ide_dbs.sort_unstable();
+        result.qoder_ide_dbs.sort_unstable_by(|a, b| a.0.cmp(&b.0));
     }
 
     if enabled.contains(&ClientId::Crush) {
@@ -6325,6 +6358,21 @@ mod tests {
 
     #[test]
     #[serial]
+    fn relative_copilot_home_is_respected_only_for_env_scans() {
+        let tmp = TempDir::new_in(".").unwrap();
+        let folder = tmp.path().file_name().unwrap();
+        let journal = Path::new(folder).join("session-state/rel-session/events.jsonl");
+        fs::create_dir_all(journal.parent().unwrap()).unwrap();
+        fs::write(&journal, b"").unwrap();
+        let mut env = EnvGuard::capture(&["COPILOT_HOME"]);
+        env.set("COPILOT_HOME", folder.to_str().unwrap());
+        let home = TempDir::new().unwrap();
+        assert_eq!(discover_copilot_session_state_events(home.path().to_str().unwrap(), true), [journal]);
+        assert!(discover_copilot_session_state_events(home.path().to_str().unwrap(), false).is_empty());
+    }
+
+    #[test]
+    #[serial]
     fn test_scan_all_clients_copilot_includes_explicit_exporter_file() {
         let previous = std::env::var("COPILOT_OTEL_FILE_EXPORTER_PATH").ok();
 
@@ -9561,6 +9609,12 @@ mod tests {
             fs::write(stable.join(name), b"x").unwrap();
         }
         fs::write(insiders.join("ins.db"), b"x").unwrap();
+        #[cfg(unix)]
+        {
+            let alias = home.path().join("gemini-alias");
+            std::os::unix::fs::symlink(home.path().join(".gemini"), &alias).unwrap();
+            env.set("GEMINI_CLI_HOME", alias.to_str().unwrap());
+        }
 
         let enabled = HashSet::from([ClientId::Antigravity]);
         let roots: Vec<PathBuf> =

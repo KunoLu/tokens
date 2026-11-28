@@ -19,7 +19,7 @@
 //! previous one, at its own timestamp.
 
 use super::utils::lossy_lines;
-use super::{normalize_workspace_key, workspace_label_from_key, UnifiedMessage};
+use super::{normalize_workspace_key, workspace_label_from_key, TokenBreakdown, UnifiedMessage};
 use crate::provider_identity::inferred_provider_from_model;
 use chrono::DateTime;
 use rayon::prelude::*;
@@ -33,9 +33,8 @@ use std::path::{Path, PathBuf};
 /// records, so a corrupted chain cannot loop or fan out without limit.
 const MAX_JOURNAL_FILES: usize = 64;
 
-/// Cumulative counters in a fixed order so snapshots can be differenced
-/// bucket by bucket: input (inclusive of cache reads), output, cache read,
-/// cache write, reasoning, and API request count.
+/// SDK usage metrics report input inclusive of both cache reads and writes.
+/// Keep that input intact until the cumulative counters have been differenced.
 type Buckets = [i64; 6];
 const INPUT: usize = 0;
 const OUTPUT: usize = 1;
@@ -57,8 +56,9 @@ enum Record {
     Start {
         cwd: Option<String>,
         model: Option<String>,
+        replayed_start: bool,
     },
-    ModelChange(String),
+    ModelChange(Option<String>),
     Usage(UsageRecord),
 }
 
@@ -144,22 +144,24 @@ fn parse_session_events(path: &Path) -> Vec<UnifiedMessage> {
             Record::Start {
                 cwd: start_cwd,
                 model: start_model,
+                replayed_start,
             } => {
                 if cwd.is_none() {
                     cwd = start_cwd;
                 }
-                if start_model.is_some() {
+                // A replayed start describes creation, not the current selection.
+                if !replayed_start {
                     model = start_model;
                 }
             }
-            Record::ModelChange(new_model) => model = Some(new_model),
+            Record::ModelChange(new_model) => model = new_model,
             Record::Usage(usage) => {
                 for (tracker, buckets) in usage.trackers {
                     // `auto` (and usage without a recorded model) is a counter
                     // of its own; it is attributed to the concrete model in use
                     // for display and pricing, but keeps its own baseline.
                     let attributed_model = match tracker.as_str() {
-                        "" | "auto" => usage.current_model.clone().or_else(|| model.clone()),
+                        "" | "auto" => usage.current_model.as_ref().or(model.as_ref()).cloned(),
                         _ => Some(tracker.clone()),
                     };
                     snapshots.push(Snapshot {
@@ -176,18 +178,14 @@ fn parse_session_events(path: &Path) -> Vec<UnifiedMessage> {
 
     let workspace_key = cwd.as_deref().and_then(normalize_workspace_key);
     snapshot_deltas(snapshots, complete_from_start)
-        .into_iter()
-        .filter_map(|(snapshot, delta)| {
-            let tokens = super::copilot::normalize_input_tokens(
-                delta[INPUT],
-                delta[OUTPUT],
-                delta[CACHE_READ],
-                delta[CACHE_WRITE],
-                delta[REASONING],
-            );
-            if tokens.total() == 0 {
-                return None;
-            }
+        .map(|(snapshot, delta)| {
+            let tokens = TokenBreakdown {
+                input: delta[INPUT] - delta[CACHE_READ] - delta[CACHE_WRITE],
+                output: delta[OUTPUT],
+                cache_read: delta[CACHE_READ],
+                cache_write: delta[CACHE_WRITE],
+                reasoning: delta[REASONING],
+            };
             let model_id = snapshot
                 .attributed_model
                 .unwrap_or_else(|| "auto".to_string());
@@ -215,9 +213,14 @@ fn parse_session_events(path: &Path) -> Vec<UnifiedMessage> {
                 let workspace_label = workspace_label_from_key(&workspace_key);
                 message.set_workspace(Some(workspace_key), workspace_label);
             }
-            Some(message)
+            message
         })
         .collect()
+}
+
+struct TrackerPeak {
+    buckets: Buckets,
+    unassigned_cache: [i64; 2],
 }
 
 /// Turn cumulative snapshots into the increment each one added.
@@ -230,41 +233,70 @@ fn parse_session_events(path: &Path) -> Vec<UnifiedMessage> {
 fn snapshot_deltas(
     mut snapshots: Vec<Snapshot>,
     complete_from_start: bool,
-) -> Vec<(Snapshot, Buckets)> {
+) -> impl Iterator<Item = (Snapshot, Buckets)> {
     let mut seen = HashSet::new();
     snapshots.retain(|snapshot| seen.insert((snapshot.event_id.clone(), snapshot.tracker.clone())));
     // Stable: records that share a timestamp keep journal order.
     snapshots.sort_by_key(|snapshot| snapshot.timestamp_ms);
 
-    let mut peaks: HashMap<String, Buckets> = HashMap::new();
+    let mut peaks: HashMap<&str, TrackerPeak> = HashMap::new();
     let mut deltas = Vec::with_capacity(snapshots.len());
-    for snapshot in snapshots {
-        let current = snapshot.buckets;
-        let baseline = match peaks.get(&snapshot.tracker) {
-            Some(peak) => Some(*peak),
-            None if complete_from_start => Some(Buckets::default()),
-            None => None,
-        };
-        let peak = peaks.entry(snapshot.tracker.clone()).or_insert(current);
-        for (index, value) in current.iter().enumerate() {
-            peak[index] = peak[index].max(*value);
-        }
-        let Some(baseline) = baseline else {
-            continue;
-        };
+    for snapshot in &snapshots {
+        let peak = peaks
+            .entry(snapshot.tracker.as_str())
+            .or_insert_with(|| TrackerPeak {
+                buckets: if complete_from_start {
+                    Buckets::default()
+                } else {
+                    snapshot.buckets
+                },
+                unassigned_cache: [0; 2],
+            });
         let mut delta = Buckets::default();
-        for (index, value) in current.iter().enumerate() {
-            delta[index] = value.saturating_sub(baseline[index]).max(0);
+        for (index, &value) in snapshot.buckets.iter().enumerate() {
+            delta[index] = (value - peak.buckets[index]).max(0);
+            peak.buckets[index] = peak.buckets[index].max(value);
         }
-        // Input includes cache reads, so cache-read growth can never exceed
-        // input growth in the same snapshot without minting tokens.
-        delta[CACHE_READ] = delta[CACHE_READ].min(delta[INPUT]);
-        if delta[..REQUESTS].iter().all(|bucket| *bucket == 0) {
-            continue;
+        // The cache buckets share the same inclusive input budget.
+        let mut capacity = delta[INPUT];
+        for (cache, unassigned) in delta[CACHE_READ..=CACHE_WRITE]
+            .iter_mut()
+            .zip(&mut peak.unassigned_cache)
+        {
+            let assigned = (*cache).min(capacity);
+            *unassigned += *cache - assigned;
+            *cache = assigned;
+            capacity -= assigned;
         }
-        deltas.push((snapshot, delta));
+        deltas.push(delta);
     }
-    deltas
+
+    // A reset can raise a cache peak without adding input. Reclassify already
+    // counted input for that tracker, newest first, without minting more input
+    // or pulling any cache tokens out of a skipped baseline.
+    if peaks.values().any(|peak| peak.unassigned_cache != [0; 2]) {
+        for (snapshot, delta) in snapshots.iter().zip(&mut deltas).rev() {
+            let mut capacity = delta[INPUT] - delta[CACHE_READ] - delta[CACHE_WRITE];
+            if capacity == 0 {
+                continue;
+            }
+            let peak = peaks.get_mut(snapshot.tracker.as_str()).unwrap();
+            for (cache, unassigned) in delta[CACHE_READ..=CACHE_WRITE]
+                .iter_mut()
+                .zip(&mut peak.unassigned_cache)
+            {
+                let reassigned = (*unassigned).min(capacity);
+                *cache += reassigned;
+                *unassigned -= reassigned;
+                capacity -= reassigned;
+            }
+        }
+    }
+    drop(peaks);
+    snapshots
+        .into_iter()
+        .zip(deltas)
+        .filter(|(_, delta)| delta[..REQUESTS].iter().any(|bucket| *bucket > 0))
 }
 
 fn read_journal(path: &Path) -> Option<Journal> {
@@ -307,22 +339,30 @@ fn read_journal(path: &Path) -> Option<Journal> {
         }
         let data = event.get("data").unwrap_or(&Value::Null);
         match event_type {
-            "session.start" | "session.resume" => journal.records.push(Record::Start {
-                cwd: non_empty_str(data.pointer("/context/cwd")),
-                model: concrete_model(data.get("selectedModel")),
-            }),
-            "session.model_change" => {
-                if let Some(model) = concrete_model(data.get("newModel")) {
-                    journal.records.push(Record::ModelChange(model));
-                }
+            "session.start" | "session.resume" => {
+                let replayed_start = event_type == "session.start" && replayed;
+                journal.records.push(Record::Start {
+                    cwd: non_empty_str(data.pointer("/context/cwd")).map(str::to_owned),
+                    model: if replayed_start {
+                        None
+                    } else {
+                        concrete_model(data.get("selectedModel"))
+                    },
+                    replayed_start,
+                });
             }
+            "session.model_change" => journal
+                .records
+                .push(Record::ModelChange(concrete_model(data.get("newModel")))),
+            "session.model_deselected" => journal.records.push(Record::ModelChange(None)),
             "session.journal_link" => {
                 if journal.previous_file.is_none() {
-                    journal.previous_file = non_empty_str(data.get("previousFile"));
+                    journal.previous_file = non_empty_str(data.get("previousFile")).map(str::to_owned);
                 }
             }
             "session.usage_checkpoint" | "session.shutdown" => {
-                if let Some(usage) = usage_record(&event, data) {
+                let is_shutdown = event_type == "session.shutdown";
+                if let Some(usage) = usage_record(&event, data, is_shutdown) {
                     journal.records.push(Record::Usage(usage));
                 }
             }
@@ -332,24 +372,34 @@ fn read_journal(path: &Path) -> Option<Journal> {
     Some(journal)
 }
 
-fn usage_record(event: &Value, data: &Value) -> Option<UsageRecord> {
+fn usage_record(event: &Value, data: &Value, is_shutdown: bool) -> Option<UsageRecord> {
     let timestamp_ms = event
         .get("timestamp")
         .and_then(Value::as_str)
         .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
         .map(|timestamp| timestamp.timestamp_millis())?;
-    let trackers = usage_trackers(data);
+    let trackers = usage_trackers(data, is_shutdown);
     if trackers.is_empty() {
         return None;
     }
-    let event_id = non_empty_str(event.get("id")).unwrap_or_else(|| {
-        // Real records carry a UUID. Hash the content of one that does not so
-        // its key stays stable when earlier lines rotate away.
-        let digest = Sha256::digest(event.to_string().as_bytes());
-        format!("anon-{digest:x}")
-    });
-    let current_model = concrete_model(data.get("currentModel"))
-        .or_else(|| concrete_model(data.pointer("/accountingSnapshot/currentModel")));
+    let event_id = non_empty_str(event.get("id"))
+        .map(str::to_owned)
+        .unwrap_or_else(|| {
+            // Real records carry a UUID. Hash the content of one that does not so
+            // its key stays stable when earlier lines rotate away.
+            let digest = Sha256::digest(event.to_string().as_bytes());
+            format!("anon-{digest:x}")
+        });
+    // Only shutdown records report selection at the top level. If it is
+    // explicitly Auto with no active model, do not inherit a stale selection.
+    let shutdown_model = is_shutdown
+        .then_some(data)
+        .and_then(|data| non_empty_str(data.get("currentModel")));
+    let current_model = shutdown_model
+        .filter(|&model| model != "auto")
+        .or_else(|| non_empty_str(data.pointer("/accountingSnapshot/currentModel")))
+        .or(shutdown_model)
+        .map(str::to_owned);
     Some(UsageRecord {
         event_id,
         timestamp_ms,
@@ -365,7 +415,7 @@ fn usage_record(event: &Value, data: &Value) -> Option<UsageRecord> {
 /// events carry; entries are summed per model id so the tracker identity is
 /// the same as the model-keyed `modelMetrics` map that older shutdowns (and
 /// the checkpoint's internal `accountingSnapshot`) carry instead.
-fn usage_trackers(data: &Value) -> Vec<(String, Buckets)> {
+fn usage_trackers(data: &Value, is_shutdown: bool) -> Vec<(String, Buckets)> {
     let mut trackers: Vec<(String, Buckets)> = Vec::new();
     let mut add = |model: &str, metric: &Value| {
         let Some(buckets) = metric_buckets(metric) else {
@@ -393,8 +443,9 @@ fn usage_trackers(data: &Value) -> Vec<(String, Buckets)> {
                 add(model, metrics);
             }
         }
-    } else if let Some(metrics) = data
-        .get("modelMetrics")
+    } else if let Some(metrics) = is_shutdown
+        .then_some(data)
+        .and_then(|data| data.get("modelMetrics"))
         .or_else(|| data.pointer("/accountingSnapshot/modelMetrics"))
         .and_then(Value::as_object)
     {
@@ -420,16 +471,17 @@ fn metric_buckets(metric: &Value) -> Option<Buckets> {
     ])
 }
 
-fn non_empty_str(value: Option<&Value>) -> Option<String> {
+fn non_empty_str(value: Option<&Value>) -> Option<&str> {
     value
         .and_then(Value::as_str)
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .map(str::to_string)
 }
 
 fn concrete_model(value: Option<&Value>) -> Option<String> {
-    non_empty_str(value).filter(|model| model != "auto")
+    non_empty_str(value)
+        .filter(|&model| model != "auto")
+        .map(str::to_owned)
 }
 
 /// `previousFile` names a sibling in the session directory; anything that
@@ -459,6 +511,7 @@ mod tests {
     const CHECKPOINT_2: &str = r#"{"type":"session.usage_checkpoint","data":{"totalNanoAiu":2000000000,"totalPremiumRequests":2,"providerModelMetrics":[{"modelId":"gpt-5.4","provider":{"id":"github-copilot","kind":"copilot","label":"GitHub Copilot"},"metrics":{"requests":{"count":5,"cost":2},"usage":{"inputTokens":50000,"outputTokens":900,"cacheReadTokens":35000,"cacheWriteTokens":0,"reasoningTokens":150},"totalNanoAiu":2000000000}}]},"id":"0b6c1f1e-0000-4000-8000-000000000004","timestamp":"2026-11-19T09:00:00.000Z","parentId":"0b6c1f1e-0000-4000-8000-000000000003"}"#;
     // Older shutdowns carry only the model-keyed `modelMetrics` map.
     const SHUTDOWN: &str = r#"{"type":"session.shutdown","data":{"shutdownType":"routine","totalPremiumRequests":2,"totalApiDurationMs":41000,"sessionStartTime":1794996000000,"codeChanges":{"linesAdded":4,"linesRemoved":1,"filesModified":["src/main.rs"]},"modelMetrics":{"gpt-5.4":{"requests":{"count":6,"cost":2},"usage":{"inputTokens":60000,"outputTokens":1000,"cacheReadTokens":40000,"cacheWriteTokens":0,"reasoningTokens":150}}},"currentModel":"gpt-5.4","currentTokens":22592},"id":"0b6c1f1e-0000-4000-8000-000000000005","timestamp":"2026-11-19T09:30:00.000Z","parentId":"0b6c1f1e-0000-4000-8000-000000000004"}"#;
+    const DESELECT: &str = r#"{"type":"session.model_deselected","data":{"previousModel":"gpt-5.4","reason":"provider_withdrawn"},"id":"0b6c1f1e-0000-4000-8000-000000000011","timestamp":"2026-11-18T10:06:00.000Z","parentId":"0b6c1f1e-0000-4000-8000-000000000003"}"#;
 
     fn write_session(root: &Path, files: &[(&str, &[&str])]) -> PathBuf {
         let dir = root.join("session-state").join(SESSION_ID);
@@ -521,20 +574,51 @@ mod tests {
     #[test]
     fn shutdown_model_metrics_continue_the_checkpoint_counter() {
         let dir = tempfile::tempdir().unwrap();
+        let first = CHECKPOINT_1.replace(r#""cacheWriteTokens":0"#, r#""cacheWriteTokens":4000"#);
+        let second = CHECKPOINT_2.replace(r#""cacheWriteTokens":0"#, r#""cacheWriteTokens":8000"#);
+        let shutdown = SHUTDOWN.replace(r#""cacheWriteTokens":0"#, r#""cacheWriteTokens":10000"#);
         let path = write_session(
             dir.path(),
-            &[(
-                "events.jsonl",
-                &[START, CHECKPOINT_1, CHECKPOINT_2, SHUTDOWN],
-            )],
+            &[("events.jsonl", &[START, &first, &second, &shutdown])],
         );
 
         let messages = parse_copilot_session_state_files(&[path]);
 
         assert_eq!(messages.len(), 3);
         // The session total is the final cumulative snapshot, counted once.
-        assert_eq!(totals(&messages), (20_000, 1_000, 40_000, 150));
+        assert_eq!(totals(&messages), (10_000, 1_000, 40_000, 150));
+        assert_eq!(
+            messages
+                .iter()
+                .map(|message| message.tokens.cache_write)
+                .collect::<Vec<_>>(),
+            [4_000, 4_000, 2_000],
+        );
         assert_eq!(messages.iter().map(|m| m.message_count).sum::<i32>(), 6);
+    }
+
+    #[test]
+    fn rising_cache_peaks_reclassify_only_counted_input() {
+        let shutdown = SHUTDOWN
+            .replace(r#""inputTokens":60000"#, r#""inputTokens":49000"#)
+            .replace(r#""cacheReadTokens":40000"#, r#""cacheReadTokens":37000"#)
+            .replace(r#""cacheWriteTokens":0"#, r#""cacheWriteTokens":7000"#);
+        let events = [START, CHECKPOINT_1, CHECKPOINT_2, shutdown.as_str()];
+        let complete = [(6_000, 20_000, 4_000, 600), (0, 17_000, 3_000, 300), (0, 0, 0, 100)];
+        let partial = [(0, 17_000, 3_000, 300), (0, 0, 0, 100)];
+        for (lines, expected) in [(&events[..], &complete[..]), (&events[1..], &partial[..])] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = write_session(dir.path(), &[("events.jsonl", lines)]);
+            let messages = parse_copilot_session_state_files(&[path]);
+            let actual: Vec<_> = messages
+                .iter()
+                .map(|message| {
+                    let tokens = &message.tokens;
+                    (tokens.input, tokens.cache_read, tokens.cache_write, tokens.output)
+                })
+                .collect();
+            assert_eq!(actual.as_slice(), expected);
+        }
     }
 
     #[test]
@@ -604,6 +688,68 @@ mod tests {
             .is_some_and(|key| key.ends_with(":auto")));
     }
 
+    #[test]
+    fn selection_reset_leaves_auto_and_unattributed_trackers_unresolved() {
+        let to_auto = r#"{"type":"session.model_change","data":{"previousModel":"gpt-5.4","newModel":"auto"},"id":"0b6c1f1e-0000-4000-8000-000000000012","timestamp":"2026-11-18T10:06:00.000Z","parentId":"0b6c1f1e-0000-4000-8000-000000000003"}"#;
+        let resume = r#"{"type":"session.resume","data":{"resumeTime":"2026-11-18T10:06:00.000Z","eventCount":2},"id":"0b6c1f1e-0000-4000-8000-000000000013","timestamp":"2026-11-18T10:06:00.000Z","parentId":"0b6c1f1e-0000-4000-8000-000000000003"}"#;
+        for (transition, tracker) in [
+            (to_auto, r#""modelId":"auto""#),
+            (DESELECT, r#""modelId":null"#),
+            (resume, r#""modelId":"auto""#),
+        ] {
+            let first = CHECKPOINT_1.replace(r#""modelId":"gpt-5.4""#, tracker);
+            let second = CHECKPOINT_2.replace(r#""modelId":"gpt-5.4""#, tracker);
+            let dir = tempfile::tempdir().unwrap();
+            let path = write_session(
+                dir.path(),
+                &[("events.jsonl", &[START, &first, transition, &second])],
+            );
+            let messages = parse_copilot_session_state_files(&[path]);
+            assert_eq!(messages.len(), 2);
+            assert_eq!(messages[0].model_id, "gpt-5.4");
+            assert_eq!(messages[1].model_id, "auto");
+            assert_eq!(messages[1].tokens.input, 5_000);
+        }
+    }
+
+    #[test]
+    fn model_fallback_uses_documented_snapshot_fields() {
+        let first = CHECKPOINT_1
+            .replace(r#""modelId":"gpt-5.4""#, r#""modelId":"auto""#)
+            .replace(r#""data":{"#, r#""data":{"currentModel":"not-a-checkpoint-field","#);
+        let mut checkpoint: Value = serde_json::from_str(CHECKPOINT_2).unwrap();
+        let data = checkpoint["data"].as_object_mut().unwrap();
+        let mut entries = data.remove("providerModelMetrics").unwrap();
+        let metrics = entries[0]["metrics"].take();
+        data.insert("modelMetrics".into(), serde_json::json!({}));
+        data.insert(
+            "accountingSnapshot".into(),
+            serde_json::json!({
+                "codeChanges": {"linesAdded": 0, "linesRemoved": 0, "filesModified": []},
+                "currentModel": "claude-sonnet-4.6",
+                "lastCallInputTokens": 20000,
+                "lastCallOutputTokens": 300,
+                "modelMetrics": {"auto": metrics},
+                "sessionStartTime": "2026-11-18T10:00:00.000Z",
+                "totalApiDurationMs": 10000,
+                "totalPremiumRequestCost": 2,
+                "totalUserRequests": 2
+            }),
+        );
+        let second = checkpoint.to_string();
+        let shutdown = SHUTDOWN
+            .replace(r#""modelMetrics":{"gpt-5.4""#, r#""modelMetrics":{"auto""#)
+            .replace(r#""currentModel":"gpt-5.4""#, r#""currentModel":"auto""#);
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_session(
+            dir.path(),
+            &[("events.jsonl", &[START, &first, &second, &shutdown])],
+        );
+        let messages = parse_copilot_session_state_files(&[path]);
+        let models: Vec<_> = messages.iter().map(|m| m.model_id.as_str()).collect();
+        assert_eq!(models, ["gpt-5.4", "claude-sonnet-4.6", "auto"]);
+    }
+
     fn replay_head(previous_file: &str) -> Vec<String> {
         let start = START.replace(
             r#""type":"session.start","#,
@@ -636,6 +782,30 @@ mod tests {
 
         assert_eq!(messages.len(), 2);
         assert_eq!(totals(&messages), (15_000, 900, 35_000, 150));
+    }
+
+    #[test]
+    fn replayed_start_does_not_restore_a_deselected_model() {
+        let tracker = r#""modelId":"auto""#;
+        let first = CHECKPOINT_1.replace(r#""modelId":"gpt-5.4""#, tracker);
+        let mut head = replay_head("events.1.jsonl");
+        for checkpoint in &mut head[2..] {
+            *checkpoint = checkpoint.replace(r#""modelId":"gpt-5.4""#, tracker);
+        }
+        let head: Vec<&str> = head.iter().map(String::as_str).collect();
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_session(
+            dir.path(),
+            &[
+                ("events.1.jsonl", &[START, &first, DESELECT]),
+                ("events.jsonl", &head),
+            ],
+        );
+        let messages = parse_copilot_session_state_files(&[path]);
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0].model_id, "gpt-5.4");
+        assert_eq!(messages[1].model_id, "auto");
+        assert_eq!(messages[1].tokens.input, 5_000);
     }
 
     #[test]

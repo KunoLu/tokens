@@ -6,6 +6,7 @@ Feature: CLI 按客户端来源与消息日期统计本地用量
     When CLI 扫描本地用量
     Then 这两个版本都归入 qoder
     And 同一请求出现在多个来源时不重复计数
+    And 不同版本即使请求标识相同也分别计数
 
   Scenario: 区分独立客户端及其记录格式
     Given 本地存在 kwwk 的 pi 格式用量和 TRAE CLI 会话
@@ -28,6 +29,16 @@ Feature: CLI 按客户端来源与消息日期统计本地用量
     When CLI 扫描这些来源
     Then 每个来源的已记录用量计入对应客户端
 
+  Scenario: Copilot 日志报告的输入已包含缓存
+    Given SDK 将同一批输入的缓存读取和写入同时列在输入总量之内
+    When CLI 汇总用量
+    Then 每个输入 token 只计一次，缓存类别仍分别保留
+
+  Scenario: 已取消的 Copilot 模型选择不再影响下一次请求
+    Given 用户从指定模型切回自动选择
+    When 后续请求没有报告具体模型
+    Then CLI 不把该用量记到已取消的模型
+
   Scenario: pi 格式保留已上报速度
     Given 一条 pi 格式用量记录包含明确上报的推理速度
     When CLI 解析该记录
@@ -37,3 +48,4 @@ Feature: CLI 按客户端来源与消息日期统计本地用量
     Given 上次自动提交已开始且正常结束
     When 下一次调度因轻微抖动提前到达允许窗口
     Then CLI 不会仅因上次提交的执行耗时而跳过本次提交
+    And 相对日期筛选不会因为跨午夜的早醒而使用前一天

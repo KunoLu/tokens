@@ -67,20 +67,22 @@
 
 use super::utils::{
     extract_i64, file_modified_timestamp_ms, for_each_json_line, open_readonly_sqlite,
-    parse_timestamp_value, sqlite_for_each_row_on, SqliteScan,
+    parse_timestamp_value, sqlite_for_each_row_on,
 };
 use super::{
     normalize_agent_name, normalize_workspace_key, workspace_label_from_key, UnifiedMessage,
 };
 use crate::TokenBreakdown;
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 /// Bumped whenever a change makes byte-identical input parse differently.
 ///
 /// - Version 1: initial implementation.
-pub const QODER_PARSER_BASE_VERSION: u32 = 1;
+/// - Version 2: edition-scoped source keys and gross-prompt merging.
+pub const QODER_PARSER_BASE_VERSION: u32 = 2;
 
 /// Public client id. Both editions report under it.
 pub const CLIENT_ID: &str = "qoder";
@@ -103,30 +105,40 @@ pub enum QoderSource {
 
 impl QoderSource {
     /// Client/source spelling used in dedup keys and diagnostics.
-    pub fn as_str(self) -> &'static str {
+    pub const fn as_str(self) -> &'static str {
         match self {
             QoderSource::International => "qoder",
             QoderSource::China => "qoder-cn",
         }
     }
 
-    /// Which edition a path belongs to, from the directory names Qoder writes.
-    ///
-    /// The China edition uses `.qoder-cn` for the CLI root and `QoderCN` /
-    /// `com.qodercn.app.stable` for the desktop app. A root redirected through
-    /// `QODERCN_CONFIG_DIR` carries none of those markers; the edition then only
-    /// affects the dedup namespace, which is still unique per file, and both
-    /// editions share the same token semantics, so the fallback is harmless.
+    fn dedup_key(self, key: std::fmt::Arguments<'_>) -> String {
+        format!("{CLIENT_ID}:{}:{key}", self.as_str())
+    }
+
+    /// Edition fallback for extra paths without a registered scan root.
     pub fn from_path(path: &Path) -> Self {
-        let looks_china = path.components().any(|component| {
-            let name = component.as_os_str().to_string_lossy().to_ascii_lowercase();
-            name == ".qoder-cn" || name == "qodercn" || name.starts_with("com.qodercn.")
-        });
-        if looks_china {
-            QoderSource::China
-        } else {
-            QoderSource::International
+        for component in path.components().rev() {
+            let name = component.as_os_str();
+            if name.eq_ignore_ascii_case(".qoder-cn") || name.eq_ignore_ascii_case("qodercn") {
+                return Self::China;
+            }
+            if name.eq_ignore_ascii_case(".qoder") || name.eq_ignore_ascii_case("qoder") {
+                return Self::International;
+            }
+            let name = name.to_string_lossy();
+            if let Some(bundle) = name.get(.."com.qodercn.".len()) {
+                if bundle.eq_ignore_ascii_case("com.qodercn.") {
+                    return Self::China;
+                }
+            }
+            if let Some(bundle) = name.get(.."com.qoder.".len()) {
+                if bundle.eq_ignore_ascii_case("com.qoder.") {
+                    return Self::International;
+                }
+            }
         }
+        Self::International
     }
 }
 
@@ -254,10 +266,10 @@ fn resolve_model_and_provider(
     (bare, provider)
 }
 
-/// Token counters from one `usage` block, already net of the cached subset.
+/// Token counters from one `usage` block, with cache reads inside gross input.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 struct QoderUsage {
-    input: i64,
+    gross_input: i64,
     output: i64,
     cache_read: i64,
     cache_write: i64,
@@ -266,14 +278,13 @@ struct QoderUsage {
 
 impl QoderUsage {
     fn total(self) -> i64 {
-        self.input
+        self.gross_input
             .saturating_add(self.output)
-            .saturating_add(self.cache_read)
             .saturating_add(self.cache_write)
     }
 
     fn merge_max(&mut self, other: Self) {
-        self.input = self.input.max(other.input);
+        self.gross_input = self.gross_input.max(other.gross_input);
         self.output = self.output.max(other.output);
         self.cache_read = self.cache_read.max(other.cache_read);
         self.cache_write = self.cache_write.max(other.cache_write);
@@ -282,7 +293,7 @@ impl QoderUsage {
 
     fn to_breakdown(self) -> TokenBreakdown {
         TokenBreakdown {
-            input: self.input,
+            input: self.gross_input - self.cache_read,
             output: self.output,
             cache_read: self.cache_read,
             cache_write: self.cache_write,
@@ -295,7 +306,7 @@ fn first_i64(value: &Value, keys: &[&str]) -> Option<i64> {
     keys.iter().find_map(|key| extract_i64(value.get(*key)))
 }
 
-/// Parse one `usage`-shaped JSON object into a net token breakdown.
+/// Parse one `usage`-shaped JSON object into raw prompt and token counters.
 ///
 /// Returns `None` when the block names no token counter at all (the managed
 /// model credits-only shape) or when every counter is zero — neither is
@@ -353,12 +364,11 @@ fn usage_from_value(usage: &Value) -> Option<QoderUsage> {
     let input_raw = input_raw.max(0);
     let output = output_raw.max(0);
     let cache_read = cache_read_raw.max(0).min(input_raw);
-    let input = input_raw - cache_read;
     let cache_write = cache_write_raw.max(0);
     let cache_write_1h = cache_write_1h_from_value(usage, cache_write);
 
     let usage = QoderUsage {
-        input,
+        gross_input: input_raw,
         output,
         cache_read,
         cache_write,
@@ -425,7 +435,7 @@ impl Turn {
             0.0,
             self.agent,
         );
-        message.dedup_key = Some(format!("{CLIENT_ID}:{}:{}", source.as_str(), self.key));
+        message.dedup_key = Some(source.dedup_key(format_args!("{}", self.key)));
         message.duration_ms = self.duration_ms;
         message.is_turn_start = self.is_turn_start;
         message.cache_write_1h = usage.cache_write_1h;
@@ -479,50 +489,50 @@ fn segment_session_id(path: &Path) -> Option<String> {
         .map(str::to_string)
 }
 
-/// Subagent identity for a transcript: `(normalized name, agent id)`.
-fn subagent_context(path: &Path) -> Option<(String, Option<String>)> {
-    let in_subagents_dir = path.ancestors().any(|ancestor| {
-        ancestor
-            .file_name()
-            .and_then(|name| name.to_str())
-            .is_some_and(|name| name.eq_ignore_ascii_case("subagents"))
-    });
-    let stem = path
-        .file_stem()
-        .and_then(|stem| stem.to_str())
-        .unwrap_or("");
-    let agent_id = stem
+fn subagent_id(path: &Path) -> Option<&str> {
+    path.file_stem()?
+        .to_str()?
         .strip_prefix("agent-")
         .map(str::trim)
         .filter(|id| !id.is_empty())
-        .map(str::to_string);
+}
 
-    if !in_subagents_dir && agent_id.is_none() {
+/// Sidecar used for subagent attribution, whether or not it exists yet.
+pub(crate) fn subagent_meta_path(path: &Path) -> Option<PathBuf> {
+    if is_qoder_segment_path(path) || should_skip_qoder_file(path) {
         return None;
     }
+    let is_subagent = subagent_id(path).is_some()
+        || path.ancestors().any(|ancestor| {
+            ancestor
+                .file_name()
+                .is_some_and(|name| name.eq_ignore_ascii_case("subagents"))
+        });
+    is_subagent.then(|| path.with_extension("meta.json"))
+}
 
-    if !stem.is_empty() {
-        let meta_path = path.with_file_name(format!("{stem}.meta.json"));
-        if let Ok(text) = std::fs::read_to_string(&meta_path) {
-            if let Ok(meta) = serde_json::from_str::<Value>(&text) {
-                let agent_type = meta
-                    .get("agentType")
-                    .or_else(|| meta.get("agent_type"))
-                    .and_then(Value::as_str)
-                    .map(str::trim)
-                    .filter(|agent| !agent.is_empty());
-                if let Some(agent_type) = agent_type {
-                    return Some((normalize_agent_name(agent_type), agent_id));
-                }
+/// Subagent identity for a transcript: `(normalized name, agent id)`.
+fn subagent_context(path: &Path) -> Option<(String, Option<String>)> {
+    let meta_path = subagent_meta_path(path)?;
+    let agent_id = subagent_id(path);
+    if let Ok(text) = std::fs::read_to_string(meta_path) {
+        if let Ok(meta) = serde_json::from_str::<Value>(&text) {
+            let agent_type = meta
+                .get("agentType")
+                .or_else(|| meta.get("agent_type"))
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|agent| !agent.is_empty());
+            if let Some(agent_type) = agent_type {
+                return Some((normalize_agent_name(agent_type), agent_id.map(str::to_owned)));
             }
         }
     }
 
-    if let Some(id) = agent_id.clone() {
-        return Some((normalize_agent_name(&id), agent_id));
-    }
-
-    Some((normalize_agent_name("qoder-subagent"), None))
+    Some((
+        normalize_agent_name(agent_id.unwrap_or("qoder-subagent")),
+        agent_id.map(str::to_owned),
+    ))
 }
 
 fn content_len(value: Option<&Value>) -> bool {
@@ -546,12 +556,11 @@ fn is_tool_result_only(content: Option<&Value>) -> bool {
 }
 
 /// Parse a Qoder or Qoder CN transcript into one message per model request.
-pub fn parse_qoder_transcript_file(path: &Path) -> Vec<UnifiedMessage> {
+pub fn parse_qoder_transcript_file(path: &Path, source: QoderSource) -> Vec<UnifiedMessage> {
     if should_skip_qoder_file(path) || is_qoder_segment_path(path) {
         return Vec::new();
     }
 
-    let source = QoderSource::from_path(path);
     let fallback_timestamp = file_modified_timestamp_ms(path);
     let fallback_session_id = super::utils::session_id_from_path(path);
     let path_workspace_key = workspace_key_from_qoder_path(path);
@@ -574,7 +583,7 @@ pub fn parse_qoder_transcript_file(path: &Path) -> Vec<UnifiedMessage> {
 
     let mut turns: Vec<Turn> = Vec::new();
     let mut index_by_key: HashMap<String, usize> = HashMap::new();
-    let mut anonymous_turns: usize = 0;
+    let mut anonymous_path_hash = None;
 
     for_each_json_line(path, &mut |line_index, trimmed| {
         let Ok(value) = serde_json::from_str::<Value>(trimmed) else {
@@ -763,7 +772,7 @@ pub fn parse_qoder_transcript_file(path: &Path) -> Vec<UnifiedMessage> {
                 } else if let Some(uuid) = uuid {
                     format!("uuid:{uuid}")
                 } else {
-                    anchor_anonymous_turn(&mut anonymous_turns, &resolved_session, line_index)
+                    anonymous_key(path, &mut anonymous_path_hash, line_index)
                 };
                 let turn_key = match &request_id {
                     Some(request_id) => format!("req:{request_id}"),
@@ -881,10 +890,12 @@ fn collect_measured_turns(turns: Vec<Turn>, source: QoderSource) -> (Vec<Unified
     (messages, without_usage)
 }
 
-fn anchor_anonymous_turn(counter: &mut usize, session_id: &str, line_index: usize) -> String {
-    let anchor = format!("anon:{session_id}:{line_index}");
-    *counter += 1;
-    anchor
+fn anonymous_key(path: &Path, path_hash: &mut Option<String>, line_index: usize) -> String {
+    // The file scopes the line number; a hash keeps private paths out of keys.
+    let path_hash = path_hash.get_or_insert_with(|| {
+        format!("{:x}", Sha256::digest(path.as_os_str().as_encoded_bytes()))
+    });
+    format!("anon:{path_hash}:{line_index}")
 }
 
 /// Parse a structured segment log into one message per completed model request.
@@ -892,12 +903,11 @@ fn anchor_anonymous_turn(counter: &mut usize, session_id: &str, line_index: usiz
 /// Only `model.response.completed` events are per-request records. The
 /// `turn.finished` roll-up carries the same counters a second time and is
 /// deliberately ignored.
-pub fn parse_qoder_segment_file(path: &Path) -> Vec<UnifiedMessage> {
+pub fn parse_qoder_segment_file(path: &Path, source: QoderSource) -> Vec<UnifiedMessage> {
     if should_skip_qoder_file(path) || !is_qoder_segment_path(path) {
         return Vec::new();
     }
 
-    let source = QoderSource::from_path(path);
     let fallback_timestamp = file_modified_timestamp_ms(path);
     let fallback_session = segment_session_id(path)
         .or_else(|| path.parent().map(super::utils::session_id_from_path))
@@ -907,7 +917,7 @@ pub fn parse_qoder_segment_file(path: &Path) -> Vec<UnifiedMessage> {
     let mut workspace: Option<(String, Option<String>)> = None;
     let mut requests: Vec<Turn> = Vec::new();
     let mut index_by_key: HashMap<String, usize> = HashMap::new();
-    let mut anonymous_events: usize = 0;
+    let mut anonymous_path_hash = None;
 
     for_each_json_line(path, &mut |line_index, trimmed| {
         let Ok(value) = serde_json::from_str::<Value>(trimmed) else {
@@ -962,18 +972,7 @@ pub fn parse_qoder_segment_file(path: &Path) -> Vec<UnifiedMessage> {
 
         let event_key = match &request_id {
             Some(request_id) => format!("req:{request_id}"),
-            None => {
-                // No stable request identity: anchor on the event's own file
-                // position so distinct events never merge, and accept that a
-                // replayed copy in another file cannot be recognized.
-                anonymous_events += 1;
-                format!(
-                    "anon:{}:{line_index}",
-                    path.file_name()
-                        .and_then(|name| name.to_str())
-                        .unwrap_or("segment")
-                )
-            }
+            None => anonymous_key(path, &mut anonymous_path_hash, line_index),
         };
 
         let timestamp = value
@@ -1105,7 +1104,7 @@ fn collect_ide_rows(rows: &mut Vec<IdeRow>, row: &rusqlite::Row<'_>) -> rusqlite
 ///
 /// Only token/model/timing columns are selected. Message bodies, tool output,
 /// titles and credentials are never read.
-pub fn scan_qoder_ide_db(db_path: &Path) -> QoderIdeScan {
+pub fn scan_qoder_ide_db(db_path: &Path, source: QoderSource) -> QoderIdeScan {
     let conn = match open_readonly_sqlite(db_path) {
         Ok(conn) => conn,
         Err(err) => {
@@ -1142,19 +1141,32 @@ pub fn scan_qoder_ide_db(db_path: &Path) -> QoderIdeScan {
         });
     }
 
-    if matches!(scan, SqliteScan::NotPrepared | SqliteScan::NotOpened) {
-        // No `chat_message` table: a pre-usage schema, which is an empty source
-        // rather than an unread one.
+    if !scan.prepared() {
+        // A pre-usage database is empty only when its schema confirms the
+        // table is absent. Other failures must not become a complete scan.
+        let missing_table = conn
+            .query_row(
+                "SELECT NOT EXISTS (
+                     SELECT 1 FROM main.sqlite_schema
+                     WHERE name = 'chat_message' COLLATE NOCASE AND type IN ('table', 'view')
+                 )",
+                [],
+                |row| row.get::<_, bool>(0),
+            )
+            .unwrap_or(false);
+        if !missing_table {
+            tracing::debug!(db_path = %db_path.display(), "Failed to prepare Qoder IDE usage query");
+        }
         return QoderIdeScan {
             messages: Vec::new(),
-            complete: true,
+            complete: missing_table,
         };
     }
 
     let mut messages = Vec::new();
     let mut without_usage = 0usize;
     for row in &rows {
-        match ide_row_message(row) {
+        match ide_row_message(row, source) {
             Some(message) => messages.push(message),
             None => without_usage += 1,
         }
@@ -1174,7 +1186,7 @@ pub fn scan_qoder_ide_db(db_path: &Path) -> QoderIdeScan {
     }
 }
 
-fn ide_row_message(row: &IdeRow) -> Option<UnifiedMessage> {
+fn ide_row_message(row: &IdeRow, source: QoderSource) -> Option<UnifiedMessage> {
     let tokens = parse_ide_token_info(&row.token_info)?;
 
     let timestamp = row
@@ -1208,15 +1220,15 @@ fn ide_row_message(row: &IdeRow) -> Option<UnifiedMessage> {
     };
     let dedup_key = match row.request_id.as_deref().map(str::trim) {
         Some(request_id) if !request_id.is_empty() => {
-            format!("{CLIENT_ID}:ide:{session_id}:req:{request_id}")
+            source.dedup_key(format_args!("req:{request_id}"))
         }
         _ => {
-            let anchor = if row.id.trim().is_empty() {
-                format!("{session_id}:{timestamp}")
+            let id = row.id.trim();
+            if id.is_empty() {
+                source.dedup_key(format_args!("ide:{session_id}:{timestamp}"))
             } else {
-                row.id.trim().to_string()
-            };
-            format!("{CLIENT_ID}:ide:{anchor}")
+                source.dedup_key(format_args!("ide:{id}"))
+            }
         }
     };
 
@@ -1230,6 +1242,7 @@ fn ide_row_message(row: &IdeRow) -> Option<UnifiedMessage> {
         0.0,
         Some(dedup_key),
     );
+    message.cache_write_1h = tokens.cache_write_1h;
     message.set_workspace(ide_workspace_key(row), None);
     Some(message)
 }
@@ -1289,7 +1302,10 @@ fn parse_ide_token_info(value: &str) -> Option<QoderUsage> {
 /// never reaches into the machine's real profile. Each override is accepted in
 /// both documented spellings — the data root itself, or the full
 /// `SharedClientCache/...` parent.
-pub fn qoder_ide_db_candidates(app_data_root: &Path, use_env_roots: bool) -> Vec<PathBuf> {
+pub fn qoder_ide_db_candidates(
+    app_data_root: &Path,
+    use_env_roots: bool,
+) -> Vec<(PathBuf, QoderSource)> {
     const RELATIVE_DB: &str = "SharedClientCache/cache/db/local.db";
 
     let env_root = |var: &str| -> Option<PathBuf> {
@@ -1302,13 +1318,16 @@ pub fn qoder_ide_db_candidates(app_data_root: &Path, use_env_roots: bool) -> Vec
     };
 
     let mut candidates = Vec::new();
-    for (var, edition_dir) in [("QODER_HOME", "Qoder"), ("QODER_CN_HOME", "QoderCN")] {
+    for (var, edition_dir, source) in [
+        ("QODER_HOME", "Qoder", QoderSource::International),
+        ("QODER_CN_HOME", "QoderCN", QoderSource::China),
+    ] {
         match env_root(var) {
             Some(root) => {
-                candidates.push(root.join("cache/db/local.db"));
-                candidates.push(root.join(RELATIVE_DB));
+                candidates.push((root.join("cache/db/local.db"), source));
+                candidates.push((root.join(RELATIVE_DB), source));
             }
-            None => candidates.push(app_data_root.join(edition_dir).join(RELATIVE_DB)),
+            None => candidates.push((app_data_root.join(edition_dir).join(RELATIVE_DB), source)),
         }
     }
     candidates
@@ -1318,82 +1337,68 @@ pub fn qoder_ide_db_candidates(app_data_root: &Path, use_env_roots: bool) -> Vec
 ///
 /// Qoder writes the same request more than once — a forked session replays the
 /// parent's turns, a segment log repeats a completed event, and one request can
-/// appear in both a transcript and a segment file. Every duplicate carries the
-/// same dedup key (request id first), so collapsing on that key counts each
+/// appear across all three sources. The edition-scoped request key counts each
 /// request once regardless of the order files were scanned in.
 ///
-/// The surviving row keeps the earliest timestamp and the metadata recorded
-/// with it; token counters merge by per-field maximum, which is monotonic in a
-/// reply's fragments and never sums two observations of one request.
-pub fn collapse_qoder_messages(messages: Vec<UnifiedMessage>) -> Vec<UnifiedMessage> {
-    let mut ordered = messages;
-    ordered.sort_by(|left, right| {
-        let left_key = left.dedup_key.as_deref().unwrap_or("");
-        let right_key = right.dedup_key.as_deref().unwrap_or("");
-        left_key
-            .cmp(right_key)
-            .then(left.timestamp.cmp(&right.timestamp))
-            .then(left.session_id.cmp(&right.session_id))
-            .then(left.model_id.cmp(&right.model_id))
-            .then(left.provider_id.cmp(&right.provider_id))
+/// The surviving row keeps the earliest timestamp and its metadata. Merge
+/// gross prompt and cache reads separately before deriving net input. Callers
+/// price the resulting messages, never the individual observations.
+pub fn collapse_qoder_messages(mut messages: Vec<UnifiedMessage>) -> Vec<UnifiedMessage> {
+    messages.sort_unstable_by(|left, right| {
+        left.dedup_key
+            .cmp(&right.dedup_key)
+            .then_with(|| left.timestamp.cmp(&right.timestamp))
+            .then_with(|| left.session_id.cmp(&right.session_id))
+            .then_with(|| left.model_id.cmp(&right.model_id))
+            .then_with(|| left.provider_id.cmp(&right.provider_id))
+            .then_with(|| left.workspace_key.cmp(&right.workspace_key))
+            .then_with(|| left.workspace_label.cmp(&right.workspace_label))
+            .then_with(|| left.agent.cmp(&right.agent))
+            .then_with(|| left.duration_ms.cmp(&right.duration_ms))
     });
-
-    let mut collapsed: Vec<UnifiedMessage> = Vec::with_capacity(ordered.len());
-    let mut index_by_key: HashMap<String, usize> = HashMap::new();
-    for message in ordered {
-        let Some(key) = message.dedup_key.clone() else {
-            collapsed.push(message);
-            continue;
-        };
-        match index_by_key.get(&key).copied() {
-            Some(index) => {
-                let existing = &mut collapsed[index];
-                existing.tokens.input = existing.tokens.input.max(message.tokens.input);
-                existing.tokens.output = existing.tokens.output.max(message.tokens.output);
-                existing.tokens.cache_read =
-                    existing.tokens.cache_read.max(message.tokens.cache_read);
-                existing.tokens.cache_write =
-                    existing.tokens.cache_write.max(message.tokens.cache_write);
-                existing.tokens.reasoning = existing.tokens.reasoning.max(message.tokens.reasoning);
-                existing.cache_write_1h = existing.cache_write_1h.max(message.cache_write_1h);
-                existing.is_turn_start |= message.is_turn_start;
-                if existing.duration_ms.is_none() {
-                    existing.duration_ms = message.duration_ms;
-                }
-                if existing.workspace_key.is_none() {
-                    existing.workspace_key = message.workspace_key;
-                }
-                if existing.workspace_label.is_none() {
-                    existing.workspace_label = message.workspace_label;
-                }
-                if existing.agent.is_none() {
-                    existing.agent = message.agent;
-                }
-            }
-            None => {
-                index_by_key.insert(key, collapsed.len());
-                collapsed.push(message);
-            }
+    messages.dedup_by(|candidate, existing| {
+        if existing.dedup_key.is_none() || existing.dedup_key != candidate.dedup_key {
+            return false;
         }
-    }
 
-    collapsed.sort_by(|left, right| {
+        let tokens = &mut existing.tokens;
+        let other = &candidate.tokens;
+        let gross_input = tokens
+            .input
+            .saturating_add(tokens.cache_read)
+            .max(other.input.saturating_add(other.cache_read));
+        tokens.cache_read = tokens.cache_read.max(other.cache_read);
+        tokens.input = gross_input - tokens.cache_read;
+        tokens.output = tokens.output.max(other.output);
+        tokens.cache_write = tokens.cache_write.max(other.cache_write);
+        tokens.reasoning = tokens.reasoning.max(other.reasoning);
+        existing.cache_write_1h = existing.cache_write_1h.max(candidate.cache_write_1h);
+        existing.is_turn_start |= candidate.is_turn_start;
+        if existing.duration_ms.is_none() {
+            existing.duration_ms = candidate.duration_ms;
+        }
+        if existing.workspace_key.is_none() {
+            existing.workspace_key = candidate.workspace_key.take();
+        }
+        if existing.workspace_label.is_none() {
+            existing.workspace_label = candidate.workspace_label.take();
+        }
+        if existing.agent.is_none() {
+            existing.agent = candidate.agent.take();
+        }
+        true
+    });
+    messages.sort_unstable_by(|left, right| {
         left.timestamp
             .cmp(&right.timestamp)
-            .then(left.dedup_key.cmp(&right.dedup_key))
+            .then_with(|| left.dedup_key.cmp(&right.dedup_key))
     });
-    collapsed
+    messages
 }
 
-/// Whether `path` is one of the two Qoder IDE database spellings.
+/// Whether an explicit extra path names a Qoder IDE database.
 pub fn is_qoder_ide_db(path: &Path) -> bool {
-    path.file_name()
-        .and_then(|name| name.to_str())
-        .is_some_and(|name| name == "local.db")
-        && path
-            .parent()
-            .and_then(Path::file_name)
-            .is_some_and(|dir| dir == "db")
+    path.file_name().is_some_and(|name| name == "local.db")
 }
 
 #[cfg(test)]
@@ -1420,7 +1425,7 @@ mod tests {
         )
         .unwrap();
         let parsed = usage_from_value(&usage).unwrap();
-        assert_eq!(parsed.input, 1520);
+        assert_eq!(parsed.to_breakdown().input, 1520);
         assert_eq!(parsed.cache_read, 37485);
         assert_eq!(parsed.output, 67);
         assert_eq!(parsed.total(), 39072);
@@ -1453,7 +1458,7 @@ mod tests {
         // A cached subset larger than the prompt cannot be gross input, so the
         // prompt is kept whole and the subset is clamped to it.
         assert_eq!(parsed.cache_read, 100);
-        assert_eq!(parsed.input, 0);
+        assert_eq!(parsed.to_breakdown().input, 0);
         assert_eq!(parsed.cache_write, 20);
         assert_eq!(parsed.cache_write_1h, 20);
     }
@@ -1498,11 +1503,12 @@ mod tests {
                 r#"{"type":"runtime-config","sessionId":"sess-1","model":"qmodel","timestamp":1794041573406}"#,
                 r#"{"type":"user","uuid":"u1","sessionId":"sess-1","cwd":"/work/app","timestamp":"2026-11-07T10:00:00.000Z","message":{"role":"user","content":"hello"}}"#,
                 r#"{"type":"assistant","uuid":"a1","sessionId":"sess-1","timestamp":"2026-11-07T10:00:01.000Z","message":{"id":"msg_1","role":"assistant","model":"qmodel","content":[{"type":"thinking","thinking":"plan"}]}}"#,
+                r#"{"type":"assistant","uuid":"partial","sessionId":"sess-1","timestamp":"2026-11-07T10:00:02.000Z","message":{"id":"msg_1","role":"assistant","model":"qmodel","usage":{"input_tokens":1200,"output_tokens":5}}}"#,
                 r#"{"type":"assistant","uuid":"a2","sessionId":"sess-1","timestamp":"2026-11-07T10:00:04.000Z","message":{"id":"msg_1","role":"assistant","model":"qmodel","content":[{"type":"text","text":"done"}],"usage":{"input_tokens":1200,"output_tokens":40,"cache_read_input_tokens":800,"cache_creation_input_tokens":100,"cache_creation":{"ephemeral_1h_input_tokens":50},"request_id":"req_1"}}}"#,
             ],
         );
 
-        let messages = parse_qoder_transcript_file(&path);
+        let messages = parse_qoder_transcript_file(&path, QoderSource::International);
         assert_eq!(messages.len(), 1);
         let message = &messages[0];
         assert_eq!(message.client, "qoder");
@@ -1538,7 +1544,7 @@ mod tests {
             ],
         );
 
-        assert!(parse_qoder_transcript_file(&path).is_empty());
+        assert!(parse_qoder_transcript_file(&path, QoderSource::China).is_empty());
         assert_eq!(QoderSource::from_path(&path), QoderSource::China);
     }
 
@@ -1559,7 +1565,7 @@ mod tests {
             ],
         );
 
-        let messages = parse_qoder_transcript_file(&path);
+        let messages = parse_qoder_transcript_file(&path, QoderSource::China);
         assert_eq!(messages.len(), 2);
         assert_eq!(messages[0].model_id, "gfmodel");
         assert_eq!(messages[0].provider_id, "qoder");
@@ -1593,7 +1599,7 @@ mod tests {
             ],
         );
 
-        let messages = parse_qoder_transcript_file(&path);
+        let messages = parse_qoder_transcript_file(&path, QoderSource::China);
         assert_eq!(messages.len(), 1);
         let message = &messages[0];
         assert_eq!(message.agent.as_deref(), Some("Code Reviewer"));
@@ -1614,7 +1620,7 @@ mod tests {
                 r#"{"type":"assistant","message":{"id":"j","model":"qmodel","usage":{"input_tokens":9,"output_tokens":9}}}"#,
             ],
         );
-        assert!(parse_qoder_transcript_file(&journal).is_empty());
+        assert!(parse_qoder_transcript_file(&journal, QoderSource::International).is_empty());
 
         let checkpoints = write_transcript(
             &dir.path().join(".qoder/projects/-repo"),
@@ -1623,7 +1629,7 @@ mod tests {
                 r#"{"type":"assistant","message":{"id":"c","model":"qmodel","usage":{"input_tokens":9,"output_tokens":9}}}"#,
             ],
         );
-        assert!(parse_qoder_transcript_file(&checkpoints).is_empty());
+        assert!(parse_qoder_transcript_file(&checkpoints, QoderSource::International).is_empty());
     }
 
     #[test]
@@ -1640,7 +1646,7 @@ mod tests {
             ],
         );
 
-        let messages = parse_qoder_transcript_file(&path);
+        let messages = parse_qoder_transcript_file(&path, QoderSource::International);
         assert_eq!(messages.len(), 2);
         assert_eq!(
             messages[0].dedup_key.as_deref(),
@@ -1667,7 +1673,7 @@ mod tests {
             ],
         );
 
-        let messages = parse_qoder_transcript_file(&path);
+        let messages = parse_qoder_transcript_file(&path, QoderSource::International);
         // The all-negative row is not measured usage.
         assert_eq!(messages.len(), 2);
         assert_eq!(messages[0].tokens.input, 0);
@@ -1699,7 +1705,7 @@ mod tests {
         )
         .unwrap();
 
-        let messages = parse_qoder_segment_file(&path);
+        let messages = parse_qoder_segment_file(&path, QoderSource::International);
         assert_eq!(messages.len(), 2);
         assert_eq!(messages[0].session_id, "sess-seg");
         assert_eq!(messages[0].workspace_key.as_deref(), Some("/work/app"));
@@ -1732,7 +1738,7 @@ mod tests {
         )
         .unwrap();
 
-        let messages = parse_qoder_segment_file(&path);
+        let messages = parse_qoder_segment_file(&path, QoderSource::International);
         assert_eq!(messages.len(), 2);
         assert_eq!(messages[0].tokens.input + messages[1].tokens.input, 300);
     }
@@ -1763,8 +1769,8 @@ mod tests {
         )
         .unwrap();
 
-        let mut parsed = parse_qoder_transcript_file(&transcript);
-        parsed.extend(parse_qoder_segment_file(&segment));
+        let mut parsed = parse_qoder_transcript_file(&transcript, QoderSource::International);
+        parsed.extend(parse_qoder_segment_file(&segment, QoderSource::International));
         let collapsed = collapse_qoder_messages(parsed);
 
         assert_eq!(collapsed.len(), 2);
@@ -1824,8 +1830,8 @@ mod tests {
             ],
         );
 
-        let mut parsed = parse_qoder_transcript_file(&intl);
-        parsed.extend(parse_qoder_transcript_file(&cn));
+        let mut parsed = parse_qoder_transcript_file(&intl, QoderSource::International);
+        parsed.extend(parse_qoder_transcript_file(&cn, QoderSource::China));
         let collapsed = collapse_qoder_messages(parsed);
 
         assert_eq!(collapsed.len(), 2);
@@ -1898,7 +1904,7 @@ mod tests {
             )],
         );
 
-        let scan = scan_qoder_ide_db(&db);
+        let scan = scan_qoder_ide_db(&db, QoderSource::International);
         assert!(scan.complete);
         assert_eq!(scan.messages.len(), 1);
         let message = &scan.messages[0];
@@ -1913,7 +1919,7 @@ mod tests {
         assert_eq!(message.workspace_key.as_deref(), Some("/work/ide-app"));
         assert_eq!(
             message.dedup_key.as_deref(),
-            Some("qoder:ide:sess-ide:req:req-ide-1")
+            Some("qoder:qoder:req:req-ide-1")
         );
     }
 
@@ -1934,7 +1940,7 @@ mod tests {
             )],
         );
 
-        let scan = scan_qoder_ide_db(&db);
+        let scan = scan_qoder_ide_db(&db, QoderSource::China);
         assert!(scan.complete);
         assert_eq!(scan.messages.len(), 1);
         assert_eq!(scan.messages[0].tokens.input, 100);
@@ -1942,7 +1948,7 @@ mod tests {
         assert_eq!(scan.messages[0].workspace_key, None);
         assert_eq!(
             scan.messages[0].dedup_key.as_deref(),
-            Some("qoder:ide:row-1762509600000")
+            Some("qoder:qoder-cn:ide:row-1762509600000")
         );
     }
 
@@ -1961,7 +1967,7 @@ mod tests {
             )],
         );
 
-        let scan = scan_qoder_ide_db(&db);
+        let scan = scan_qoder_ide_db(&db, QoderSource::International);
         assert!(scan.complete);
         assert_eq!(scan.messages.len(), 1);
         assert_eq!(scan.messages[0].model_id, "qmodel");
@@ -1969,10 +1975,10 @@ mod tests {
     }
 
     #[test]
-    fn ide_missing_database_is_an_empty_complete_read() {
+    fn ide_only_confirms_empty_when_chat_message_is_absent() {
         let dir = TempDir::new().unwrap();
         let db = dir.path().join("Qoder/SharedClientCache/cache/db/local.db");
-        let scan = scan_qoder_ide_db(&db);
+        let scan = scan_qoder_ide_db(&db, QoderSource::International);
         assert!(scan.messages.is_empty());
         assert!(!scan.complete);
 
@@ -1983,9 +1989,16 @@ mod tests {
         conn.execute_batch("CREATE TABLE other (id INTEGER);")
             .unwrap();
         drop(conn);
-        let scan = scan_qoder_ide_db(&db);
+        let scan = scan_qoder_ide_db(&db, QoderSource::International);
         assert!(scan.messages.is_empty());
         assert!(scan.complete);
+
+        let conn = rusqlite::Connection::open(&db).unwrap();
+        conn.execute_batch("CREATE TABLE Chat_Message (id TEXT);")
+            .unwrap();
+        let scan = scan_qoder_ide_db(&db, QoderSource::International);
+        assert!(scan.messages.is_empty());
+        assert!(!scan.complete, "required usage columns are missing");
     }
 
     #[test]
@@ -2011,7 +2024,7 @@ mod tests {
             ],
         );
 
-        let scan = scan_qoder_ide_db(&db);
+        let scan = scan_qoder_ide_db(&db, QoderSource::International);
         assert!(scan.complete);
         assert!(scan.messages.is_empty());
     }
@@ -2030,7 +2043,12 @@ mod tests {
                 "req-1",
             )],
         );
-        assert_eq!(scan_qoder_ide_db(&db).messages.len(), 1);
+        assert_eq!(
+            scan_qoder_ide_db(&db, QoderSource::International)
+                .messages
+                .len(),
+            1
+        );
 
         // The IDE keeps its connection open, so the newest row lives in the
         // -wal sidecar and the main database's mtime does not move.
@@ -2049,7 +2067,7 @@ mod tests {
         let wal = PathBuf::from(format!("{}-wal", db.display()));
         assert!(wal.exists(), "the writer must leave a -wal sidecar");
 
-        let scan = scan_qoder_ide_db(&db);
+        let scan = scan_qoder_ide_db(&db, QoderSource::International);
         assert_eq!(scan.messages.len(), 2);
         assert_eq!(scan.messages[1].tokens.input, 150);
         assert_eq!(scan.messages[1].tokens.cache_read, 50);
@@ -2060,10 +2078,13 @@ mod tests {
     fn ide_candidates_honour_edition_layouts() {
         let app_data = Path::new("/data");
         let candidates = qoder_ide_db_candidates(app_data, false);
-        assert!(candidates
-            .contains(&Path::new("/data/Qoder/SharedClientCache/cache/db/local.db").to_path_buf()));
-        assert!(candidates.contains(
-            &Path::new("/data/QoderCN/SharedClientCache/cache/db/local.db").to_path_buf()
-        ));
+        assert!(candidates.contains(&(
+            app_data.join("Qoder/SharedClientCache/cache/db/local.db"),
+            QoderSource::International,
+        )));
+        assert!(candidates.contains(&(
+            app_data.join("QoderCN/SharedClientCache/cache/db/local.db"),
+            QoderSource::China,
+        )));
     }
 }

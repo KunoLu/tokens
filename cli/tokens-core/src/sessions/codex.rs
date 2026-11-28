@@ -132,6 +132,10 @@ pub struct CodexTokenUsage {
     pub output_tokens: Option<i64>,
     pub cached_input_tokens: Option<i64>,
     pub cache_read_input_tokens: Option<i64>,
+    #[serde(default, deserialize_with = "deserialize_lenient_i64")]
+    pub cache_write_input_tokens: Option<i64>,
+    #[serde(default, deserialize_with = "deserialize_lenient_i64")]
+    pub cache_creation_input_tokens: Option<i64>,
     pub reasoning_output_tokens: Option<i64>,
     pub total_tokens: Option<i64>,
 }
@@ -141,19 +145,49 @@ pub(crate) struct CodexTotals {
     input: i64,
     output: i64,
     cached: i64,
+    cache_write: i64,
     reasoning: i64,
 }
 
 impl CodexTotals {
     pub(crate) fn from_usage(usage: &CodexTokenUsage) -> Self {
+        let input = usage.input_tokens.unwrap_or(0).max(0);
+        let output = usage.output_tokens.unwrap_or(0).max(0);
+        let cached = usage
+            .cached_input_tokens
+            .unwrap_or(0)
+            .max(usage.cache_read_input_tokens.unwrap_or(0))
+            .max(0);
+        let cache_write = usage
+            .cache_write_input_tokens
+            .unwrap_or(0)
+            .max(usage.cache_creation_input_tokens.unwrap_or(0))
+            .max(0);
+
+        // Codex's cache counts are subsets of input. TRAE's creation counter
+        // can also appear with disjoint input, so normalize to inclusive
+        // input before comparing or subtracting cumulative snapshots.
+        let input = if usage.cache_creation_input_tokens.is_some() {
+            let all_cache = cached.saturating_add(cache_write);
+            let extra = input
+                .checked_add(output)
+                .zip(usage.total_tokens)
+                .and_then(|(base, total)| total.checked_sub(base));
+            let disjoint = match extra {
+                Some(0) => 0,
+                Some(extra) if extra == all_cache || extra == cache_write => extra,
+                _ if usage.cached_input_tokens.is_none() => all_cache,
+                _ => 0,
+            };
+            input.saturating_add(disjoint)
+        } else {
+            input
+        };
         Self {
-            input: usage.input_tokens.unwrap_or(0).max(0),
-            output: usage.output_tokens.unwrap_or(0).max(0),
-            cached: usage
-                .cached_input_tokens
-                .unwrap_or(0)
-                .max(usage.cache_read_input_tokens.unwrap_or(0))
-                .max(0),
+            input,
+            output,
+            cached,
+            cache_write,
             reasoning: usage.reasoning_output_tokens.unwrap_or(0).max(0),
         }
     }
@@ -162,6 +196,7 @@ impl CodexTotals {
         if self.input < previous.input
             || self.output < previous.output
             || self.cached < previous.cached
+            || self.cache_write < previous.cache_write
             || self.reasoning < previous.reasoning
         {
             return None;
@@ -171,6 +206,7 @@ impl CodexTotals {
             input: self.input - previous.input,
             output: self.output - previous.output,
             cached: self.cached - previous.cached,
+            cache_write: self.cache_write - previous.cache_write,
             reasoning: self.reasoning - previous.reasoning,
         })
     }
@@ -180,6 +216,7 @@ impl CodexTotals {
             input: self.input.saturating_add(other.input),
             output: self.output.saturating_add(other.output),
             cached: self.cached.saturating_add(other.cached),
+            cache_write: self.cache_write.saturating_add(other.cache_write),
             reasoning: self.reasoning.saturating_add(other.reasoning),
         }
     }
@@ -188,6 +225,7 @@ impl CodexTotals {
         self.input
             .saturating_add(self.output)
             .saturating_add(self.cached)
+            .saturating_add(self.cache_write)
             .saturating_add(self.reasoning)
     }
 
@@ -195,6 +233,7 @@ impl CodexTotals {
         self.input <= baseline.input
             && self.output <= baseline.output
             && self.cached <= baseline.cached
+            && self.cache_write <= baseline.cache_write
             && self.reasoning <= baseline.reasoning
     }
 
@@ -219,6 +258,8 @@ impl CodexTotals {
         // Clamp cached to not exceed input to prevent inflated totals when
         // malformed data reports more cached tokens than input tokens.
         let clamped_cached = self.cached.min(self.input).max(0);
+        let uncached_input = (self.input - clamped_cached).max(0);
+        let clamped_write = self.cache_write.clamp(0, uncached_input);
         // `reasoning_output_tokens` is a SUBSET of `output_tokens`, not a
         // sibling of it: every Codex snapshot satisfies
         // `total_tokens == input_tokens + output_tokens`, with the reasoning
@@ -234,10 +275,10 @@ impl CodexTotals {
         // `candidatesTokenCount`) must keep feeding it unmodified.
         let clamped_reasoning = self.reasoning.max(0).min(self.output.max(0));
         TokenBreakdown {
-            input: (self.input - clamped_cached).max(0),
+            input: uncached_input - clamped_write,
             output: (self.output.max(0) - clamped_reasoning).max(0),
             cache_read: clamped_cached,
-            cache_write: 0,
+            cache_write: clamped_write,
             reasoning: clamped_reasoning,
         }
     }
@@ -510,7 +551,7 @@ fn parse_codex_reader<R: BufRead>(
     let mut messages = Vec::with_capacity(64);
     let mut fallback_timestamp_indices = Vec::new();
     let mut buffer = Vec::with_capacity(4096);
-    let mut line = String::with_capacity(4096);
+    let mut line = Vec::with_capacity(4096);
     let mut consumed_offset = start_offset;
     let mut parse_succeeded = true;
     let mut pending_model_messages = Vec::new();
@@ -518,7 +559,7 @@ fn parse_codex_reader<R: BufRead>(
 
     loop {
         line.clear();
-        let bytes_read = match reader.read_line(&mut line) {
+        let bytes_read = match reader.read_until(b'\n', &mut line) {
             Ok(0) => break,
             Ok(bytes_read) => bytes_read,
             Err(_) => {
@@ -528,6 +569,10 @@ fn parse_codex_reader<R: BufRead>(
         };
         consumed_offset += bytes_read as u64;
 
+        let Ok(line) = std::str::from_utf8(&line) else {
+            parse_succeeded = false;
+            continue;
+        };
         let trimmed = line.trim();
         if trimmed.is_empty() {
             continue;
@@ -604,66 +649,19 @@ fn parse_codex_reader<R: BufRead>(
                     handled = true;
                 }
 
-                if state.forked_child_waiting_for_turn_context {
-                    if entry.entry_type == "turn_context"
-                        && forked_child_turn_starts_own_session(&state, payload.turn_id.as_deref())
-                    {
-                        state.forked_child_waiting_for_turn_context = false;
-                        state.forked_child_replay_session_id = None;
-                        state.forked_child_task_started_turn_ids.clear();
-                        state.forked_child_is_user_fork = false;
-                        if let Some(ref id) = state.forked_child_session_id {
-                            state.session_id_from_meta = Some(id.clone());
+                if state.skip_replayed_entry(
+                    &entry.entry_type,
+                    payload.payload_type.as_deref(),
+                    payload.id.as_deref(),
+                    payload.turn_id.as_deref(),
+                    payload.started_at,
+                ) {
+                    if is_token_count {
+                        if let Some(info) = payload.info.as_ref() {
+                            remember_forked_child_inherited_baseline(&mut state, info);
                         }
-                        state.current_model = payload_model.clone();
-                        handled = true;
-                    } else {
-                        if entry.entry_type == "event_msg"
-                            && payload.payload_type.as_deref() == Some("task_started")
-                        {
-                            // The child's own turn is introduced by a
-                            // `task_started`; remember it only when its id or
-                            // timestamp places it at/after the child session.
-                            // Nested child logs can replay ancestor task_started
-                            // events before the child's live turn.
-                            if forked_child_task_starts_own_session(
-                                &state,
-                                payload.turn_id.as_deref(),
-                                payload.started_at,
-                            ) {
-                                // Safety of this branch is coupled to
-                                // `forked_child_task_starts_own_session`
-                                // returning false when `turn_id` is `None`.
-                                if let Some(turn_id) = payload.turn_id.as_deref() {
-                                    state
-                                        .forked_child_task_started_turn_ids
-                                        .insert(turn_id.to_string());
-                                }
-                            }
-                        }
-                        if entry.entry_type == "session_meta" {
-                            if let Some(ref id) = payload.id {
-                                if state
-                                    .forked_child_session_id
-                                    .as_deref()
-                                    .is_some_and(|child_id| child_id != id)
-                                {
-                                    // Newer Codex fork logs can embed the
-                                    // parent session metadata before replaying
-                                    // parent token_count history. Keep
-                                    // skipping while that copied upstream
-                                    // transcript is active.
-                                    state.forked_child_replay_session_id = Some(id.clone());
-                                }
-                            }
-                        }
-                        if is_token_count {
-                            if let Some(info) = payload.info.as_ref() {
-                                remember_forked_child_inherited_baseline(&mut state, info);
-                            }
-                        }
-                        continue;
                     }
+                    continue;
                 }
 
                 if entry.entry_type == "token_usage_record" {
@@ -741,28 +739,12 @@ fn parse_codex_reader<R: BufRead>(
                         }
                         state.session_id_from_meta = Some(id.clone());
                     }
-                    let forked_from_id = payload
-                        .forked_from_id
-                        .as_deref()
-                        .filter(|id| !id.is_empty())
-                        .or_else(|| forked_from_id_from_source(payload.source.as_ref()));
-                    if let Some(forked_from_id) = forked_from_id {
-                        let repeated_active_child_meta = !state
-                            .forked_child_waiting_for_turn_context
-                            && payload.id.as_deref().is_some()
-                            && state.forked_child_session_id.as_deref() == payload.id.as_deref();
-                        state.session_forked_from_id = Some(forked_from_id.to_string());
-                        state.forked_child_session_id = payload.id.clone();
-                        if !repeated_active_child_meta {
-                            state.forked_child_waiting_for_turn_context = true;
-                            state.forked_child_replay_session_id = None;
-                            state.forked_child_inherited_baseline = None;
-                            state.forked_child_inherited_reported_total = None;
-                            state.forked_child_task_started_turn_ids.clear();
-                            state.forked_child_is_user_fork =
-                                payload.thread_source.as_deref() == Some("user");
-                        }
-                    }
+                    state.start_fork_from_meta(
+                        payload.id.as_deref(),
+                        payload.forked_from_id.as_deref(),
+                        payload.source.as_ref(),
+                        payload.thread_source.as_deref(),
+                    );
                     if let Some(ref provider) = payload.model_provider {
                         state.session_provider = Some(provider.clone());
                     }
@@ -943,6 +925,7 @@ fn parse_codex_reader<R: BufRead>(
                     if tokens.input == 0
                         && tokens.output == 0
                         && tokens.cache_read == 0
+                        && tokens.cache_write == 0
                         && tokens.reasoning == 0
                     {
                         continue;
@@ -1195,6 +1178,83 @@ fn forked_from_id_from_source(source: Option<&Value>) -> Option<&str> {
         .filter(|id| !id.is_empty())
 }
 
+impl CodexParseState {
+    pub(crate) fn start_fork_from_meta(
+        &mut self,
+        id: Option<&str>,
+        forked_from_id: Option<&str>,
+        source: Option<&Value>,
+        thread_source: Option<&str>,
+    ) {
+        let Some(parent_id) = forked_from_id
+            .filter(|id| !id.is_empty())
+            .or_else(|| forked_from_id_from_source(source))
+        else {
+            return;
+        };
+        let repeated_active_child_meta = !self.forked_child_waiting_for_turn_context
+            && id.is_some()
+            && self.forked_child_session_id.as_deref() == id;
+        self.session_forked_from_id = Some(parent_id.to_string());
+        self.forked_child_session_id = id.map(str::to_string);
+        if !repeated_active_child_meta {
+            self.forked_child_waiting_for_turn_context = true;
+            self.forked_child_replay_session_id = None;
+            self.forked_child_inherited_baseline = None;
+            self.forked_child_inherited_reported_total = None;
+            self.forked_child_task_started_turn_ids.clear();
+            self.forked_child_is_user_fork = thread_source == Some("user");
+        }
+    }
+
+    pub(crate) fn skip_replayed_entry(
+        &mut self,
+        entry_type: &str,
+        event_type: Option<&str>,
+        id: Option<&str>,
+        turn_id: Option<&str>,
+        started_at: Option<i64>,
+    ) -> bool {
+        if !self.forked_child_waiting_for_turn_context {
+            return false;
+        }
+
+        match entry_type {
+            "turn_context" if forked_child_turn_starts_own_session(self, turn_id) => {
+                self.forked_child_waiting_for_turn_context = false;
+                self.forked_child_replay_session_id = None;
+                self.forked_child_task_started_turn_ids.clear();
+                self.forked_child_is_user_fork = false;
+                if let Some(id) = &self.forked_child_session_id {
+                    self.session_id_from_meta = Some(id.clone());
+                }
+                return false;
+            }
+            "event_msg" if event_type == Some("task_started") => {
+                // A nested child can replay ancestor task_started events.
+                if let Some(turn_id) = turn_id
+                    .filter(|id| forked_child_task_starts_own_session(self, Some(id), started_at))
+                {
+                    self.forked_child_task_started_turn_ids
+                        .insert(turn_id.to_string());
+                }
+            }
+            "session_meta" => {
+                // The copied metadata marks a replayed ancestor transcript.
+                if let Some(id) = id.filter(|id| {
+                    self.forked_child_session_id
+                        .as_deref()
+                        .is_some_and(|child_id| child_id != *id)
+                }) {
+                    self.forked_child_replay_session_id = Some(id.to_string());
+                }
+            }
+            _ => {}
+        }
+        true
+    }
+}
+
 fn forked_child_turn_starts_own_session(state: &CodexParseState, turn_id: Option<&str>) -> bool {
     if state.forked_child_replay_session_id.is_none() {
         return true;
@@ -1337,13 +1397,14 @@ fn codex_token_count_dedup_key(
         // cumulative total is the stable upstream identity; timestamp is only
         // a fallback when older rows do not carry totals.
         return format!(
-            "codex:token_count-total:{}:{}:{}:{}:{}:{}:{}",
+            "codex:token_count-total:{}:{}:{}:{}:{}:{}:{}:{}",
             upstream_session_id,
             message.provider_id,
             model,
             total.input,
             total.output,
             total.cached,
+            total.cache_write,
             total.reasoning
         );
     }
@@ -1424,14 +1485,14 @@ pub fn parse_codex_file(path: &Path) -> Vec<UnifiedMessage> {
 /// Upper bound on the decoded size of one compressed rollout. The archive is
 /// decoded as a stream, so this does not bound memory; it stops a corrupt or
 /// hostile archive from expanding without end. Real rollouts stay far below it.
-const MAX_CODEX_ARCHIVE_BYTES: u64 = 1024 * 1024 * 1024;
+pub(crate) const MAX_CODEX_ARCHIVE_BYTES: u64 = 1024 * 1024 * 1024;
 
 /// The name a compressed rollout had before Codex compressed it in place:
 /// `rollout-….jsonl.zst` -> `rollout-….jsonl`. Identities derived from the
 /// file name (the fallback session id, the rollout thread id) then agree
 /// between the plain and compressed copies of one session, so the dedup keys
 /// built from them collapse the copies instead of counting both.
-fn uncompressed_rollout_path(path: &Path) -> Cow<'_, Path> {
+pub(crate) fn uncompressed_rollout_path(path: &Path) -> Cow<'_, Path> {
     if is_zst_path(path) {
         Cow::Owned(path.with_extension(""))
     } else {
@@ -1605,6 +1666,7 @@ struct CodexHeadlessUsage {
     input: i64,
     output: i64,
     cached: i64,
+    cache_write: i64,
     model: Option<String>,
     timestamp_ms: Option<i64>,
 }
@@ -1632,7 +1694,7 @@ fn parse_codex_headless_line(
         .unwrap_or_else(|| "unknown".to_string());
     let timestamp = usage.timestamp_ms.unwrap_or(fallback_timestamp);
 
-    if usage.input == 0 && usage.output == 0 && usage.cached == 0 {
+    if usage.input == 0 && usage.output == 0 && usage.cached == 0 && usage.cache_write == 0 {
         return None;
     }
 
@@ -1656,7 +1718,7 @@ fn parse_codex_headless_line(
                 input: usage.input.max(0),
                 output: usage.output.max(0),
                 cache_read: usage.cached.max(0),
-                cache_write: 0,
+                cache_write: usage.cache_write,
                 reasoning: 0,
             },
             0.0,
@@ -1685,15 +1747,20 @@ fn extract_headless_usage(value: &Value) -> Option<CodexHeadlessUsage> {
         .or_else(|| extract_i64(usage.get("cache_read_input_tokens")))
         .or_else(|| extract_i64(usage.get("cached_tokens")))
         .unwrap_or(0);
+    let uncached = input_tokens.saturating_sub(cached_tokens);
+    let cache_write = extract_i64(usage.get("cache_write_input_tokens"))
+        .unwrap_or(0)
+        .clamp(0, uncached.max(0));
 
     let model = extract_model_from_value(value)
         .or_else(|| value.get("data").and_then(extract_model_from_value));
     let timestamp_ms = extract_timestamp_from_value(value);
 
     Some(CodexHeadlessUsage {
-        input: input_tokens.saturating_sub(cached_tokens),
+        input: uncached - cache_write,
         output: output_tokens,
         cached: cached_tokens,
+        cache_write,
         model,
         timestamp_ms,
     })
@@ -1935,25 +2002,15 @@ mod tests {
 
     impl BufRead for FailAfterFirstLine {
         fn fill_buf(&mut self) -> std::io::Result<&[u8]> {
+            if self.fail_next_read {
+                return Err(Error::new(ErrorKind::InvalidData, "synthetic read failure"));
+            }
             self.inner.fill_buf()
         }
 
         fn consume(&mut self, amt: usize) {
             self.inner.consume(amt);
-        }
-
-        fn read_line(&mut self, buf: &mut String) -> std::io::Result<usize> {
-            if self.fail_next_read {
-                return Err(Error::new(
-                    ErrorKind::InvalidData,
-                    "synthetic line decode failure",
-                ));
-            }
-            let bytes_read = self.inner.read_line(buf)?;
-            if bytes_read > 0 {
-                self.fail_next_read = true;
-            }
-            Ok(bytes_read)
+            self.fail_next_read |= amt != 0;
         }
     }
 
@@ -2738,6 +2795,7 @@ mod tests {
             output: 63_820,
             cached: 16_358_912,
             reasoning: 24_882,
+            cache_write: 0,
         };
         let reported_total = totals.input + totals.output; // 16_909_180
 
@@ -2762,6 +2820,7 @@ mod tests {
             output: 10,
             cached: 0,
             reasoning: 999,
+            cache_write: 0,
         };
 
         let tokens = totals.into_tokens();
@@ -2780,6 +2839,7 @@ mod tests {
             output: 30,
             cached: 100, // More than input — malformed
             reasoning: 5,
+            cache_write: 0,
         };
         let tokens = totals.into_tokens();
         assert_eq!(tokens.cache_read, 50); // Clamped to input
@@ -3645,11 +3705,42 @@ mod tests {
             output_tokens: Some(30),
             cached_input_tokens: Some(10),
             cache_read_input_tokens: Some(20),
+            cache_write_input_tokens: None,
+            cache_creation_input_tokens: None,
             reasoning_output_tokens: Some(5),
             total_tokens: None,
         };
         let totals = CodexTotals::from_usage(&usage);
         assert_eq!(totals.cached, 20);
+    }
+
+    #[test]
+    fn test_codex_rollout_and_headless_input_include_cache_writes() {
+        let rollout = create_test_file("");
+        let record = r#"{"type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":100,"cached_input_tokens":40,"cache_write_input_tokens":10,"output_tokens":12,"total_tokens":112}}}}"#;
+        std::fs::write(rollout.path(), [&b"\xff\n"[..], record.as_bytes()].concat()).unwrap();
+        let headless = create_test_file(
+            r#"{"type":"turn.completed","usage":{"input_tokens":100,"cached_input_tokens":40,"cache_write_input_tokens":10,"output_tokens":12}}"#,
+        );
+
+        for file in [rollout, headless] {
+            let messages = parse_codex_file(file.path());
+            assert_eq!(messages.len(), 1);
+            let tokens = &messages[0].tokens;
+            assert_eq!(tokens.input, 50);
+            assert_eq!(tokens.cache_read, 40);
+            assert_eq!(tokens.cache_write, 10);
+            assert_eq!(tokens.output, 12);
+            assert_eq!(tokens.total(), 112);
+        }
+
+        let write_only = create_test_file(
+            r#"{"type":"turn.completed","usage":{"input_tokens":10,"cache_write_input_tokens":10}}"#,
+        );
+        let messages = parse_codex_file(write_only.path());
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].tokens.input, 0);
+        assert_eq!(messages[0].tokens.cache_write, 10);
     }
 
     #[test]

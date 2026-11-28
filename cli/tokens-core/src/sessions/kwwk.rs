@@ -3,17 +3,16 @@
 //! kwwk (https://github.com/yellowplushq/kwwk) is a Swift port of pi and keeps
 //! each session as a pi-format JSONL transcript: a `session` header, then
 //! `message` records whose assistant turns carry `usage.input / output /
-//! cacheRead / cacheWrite`, `model`, `provider` and `responseId`. Parsing
-//! therefore delegates to `super::pi::parse_pi_format_file`; only the scan
-//! layout and the client id differ.
+//! cacheRead / cacheWrite`, `model`, `provider` and `responseId`. The shared
+//! `super::pi::parse_pi_format_file` parser reads kwwk's usage extensions only
+//! for this client.
 //!
-//! Two kwwk spellings differ from pi and are handled in the shared parser:
-//! record timestamps are epoch milliseconds rather than RFC 3339 strings, and
-//! records carry no entry `id`, so the standard lane's dedup key falls back to
-//! `message.responseId` (one per provider request).
+//! kwwk records use epoch milliseconds rather than RFC 3339 strings and
+//! carry no entry `id`, so assistant turns deduplicate on `message.responseId`.
 //!
-//! `compaction` records embed earlier messages in `replacementMessages`; they
-//! are not `message` records and are not counted again.
+//! A `compaction` record's top-level `usage` accounts for summary requests
+//! absent from the transcript. `replacementMessages` only projects prior
+//! context for replay and must not be counted again.
 //!
 //! Layout: the kwwk CLI writes `~/.kwwk/sessions/<session-id>.jsonl`. Programs
 //! embedding kwwk can keep sessions anywhere; a bot running one agent per task
@@ -79,6 +78,71 @@ mod tests {
         assert!(keys[0].contains("msg_01A"), "{keys:?}");
         assert!(keys[1].contains("msg_01B"), "{keys:?}");
         assert_ne!(keys[0], keys[1]);
+    }
+
+    #[test]
+    fn kwwk_compaction_counts_only_top_level_usage() {
+        let summaries = r#"{"type":"compaction","timestamp":1795279800001,"messagesCompacted":2,"model":"claude-sonnet-5","provider":"anthropic","usage":{"input":8,"output":3,"cacheWrite":7,"cacheWrite1h":5,"cost":{"total":3}},"replacementMessages":[{"role":"assistant","model":"claude-opus-5-5","provider":"anthropic","responseId":"replacement","usage":{"input":9999,"output":12}}]}
+{"type":"compaction","timestamp":1795279800002,"messagesCompacted":1,"usage":{"input":2,"output":1},"replacementMessages":[]}
+"#;
+        let file = session_file(&format!("{SESSION}{summaries}"));
+        let messages = parse_kwwk_file(file.path());
+
+        assert_eq!(messages.len(), 4);
+        let summary = &messages[2];
+        assert_eq!(summary.session_id, messages[0].session_id);
+        assert_eq!(summary.model_id, "claude-sonnet-5");
+        assert_eq!(summary.provider_id, "anthropic");
+        assert_eq!(summary.timestamp, 1_795_279_800_001);
+        assert_eq!(summary.tokens.input, 8);
+        assert_eq!(summary.tokens.output, 3);
+        assert_eq!(summary.tokens.cache_write, 7);
+        assert_eq!(summary.cache_write_1h, 5);
+        assert!(!summary.has_authoritative_cost());
+        assert_eq!(messages[3].model_id, "unknown");
+        assert_eq!(messages[3].tokens.input, 2);
+        assert_eq!(super::super::pi::parse_pi_file(file.path()).len(), 2);
+    }
+
+    #[test]
+    fn kwwk_cache_retention_and_billed_cost_do_not_change_other_pi_clients() {
+        let cases = [
+            (
+                r#""cacheWrite1h":4,"cost":{"input":0.1,"total":0.25,"billed":true}"#,
+                4,
+                0.25,
+                true,
+            ),
+            (r#""cacheWrite1h":30,"cost":{"total":0,"billed":true}"#, 10, 0.0, true),
+            (r#""cacheWrite1h":-4,"cost":{"total":3,"billed":false}"#, 0, 0.0, false),
+            (r#""cacheWrite1h":"4","cost":{"total":3}"#, 0, 0.0, false),
+            (r#""cost":{"total":3,"billed":"true"}"#, 0, 0.0, false),
+            (r#""cost":{"billed":true}"#, 0, 0.0, false),
+            (r#""cost":{"total":-1,"billed":true}"#, 0, 0.0, false),
+        ];
+        let mut file = session_file(&format!("{}\n", SESSION.lines().next().unwrap()));
+        for (id, (details, ..)) in cases.iter().enumerate() {
+            writeln!(
+                file,
+                r#"{{"type":"message","timestamp":1795279700123,"message":{{"role":"assistant","model":"claude-sonnet-5","provider":"openrouter","responseId":"msg_{id}","usage":{{"input":3,"cacheWrite":10,{details}}}}}}}"#,
+            )
+            .unwrap();
+        }
+
+        let messages = parse_kwwk_file(file.path());
+        assert_eq!(messages.len(), cases.len());
+        for (message, (_, cache_write_1h, cost, billed)) in messages.iter().zip(cases) {
+            assert_eq!(message.tokens.cache_write, 10);
+            assert_eq!(message.cache_write_1h, cache_write_1h);
+            assert_eq!(message.cost, cost);
+            assert_eq!(message.has_authoritative_cost(), billed);
+        }
+        let pi_messages = super::super::pi::parse_pi_file(file.path());
+        assert_eq!(pi_messages.len(), cases.len());
+        assert!(pi_messages.iter().all(|message| message.tokens.cache_write == 10
+            && message.cache_write_1h == 0
+            && message.cost == 0.0
+            && !message.has_authoritative_cost()));
     }
 
     #[test]

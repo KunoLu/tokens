@@ -6,6 +6,7 @@ mod common;
 use std::path::Path;
 
 use tokens_core::scanner::{scan_all_clients_with_scanner_settings, ScannerSettings};
+use tokens_core::sessions::trae_cli::parse_trae_cli_file;
 use tokens_core::{
     parse_local_clients, parse_local_unified_messages_with_pricing_uncached, ClientId,
     LocalParseOptions, UnifiedMessage,
@@ -100,4 +101,175 @@ async fn trae_cli_rollouts_are_counted_under_their_own_client() {
             .await
             .expect("uncached codex parse");
     assert!(codex.is_empty());
+}
+
+#[test]
+fn only_appended_human_input_marks_a_turn() {
+    let home = common::temp_home();
+    let path = home.path().join("rollout-mutations.jsonl");
+    let replacement = HISTORY_MUTATION_ROLLOUT[2].replace(r#""append""#, r#""replace""#);
+    let second = HISTORY_MUTATION_ROLLOUT[3].replace("resp_1", "resp_2");
+    let third = HISTORY_MUTATION_ROLLOUT[3].replace("resp_1", "resp_3");
+    let mut lines = HISTORY_MUTATION_ROLLOUT.to_vec();
+    lines.extend([
+        replacement.as_str(),
+        second.as_str(),
+        HISTORY_MUTATION_ROLLOUT[2],
+        third.as_str(),
+    ]);
+    write_jsonl(&path, &lines);
+
+    let messages = parse_trae_cli_file(&path);
+    assert_eq!(
+        messages
+            .iter()
+            .map(|message| (message.is_turn_start, message.tokens.total()))
+            .collect::<Vec<_>>(),
+        [(true, 112), (false, 112), (true, 112)]
+    );
+}
+
+#[tokio::test]
+async fn usage_only_fork_drops_parent_replay_without_losing_own_usage() {
+    let home = common::temp_home();
+    let root = home.path().join(".trae/cli/archived_sessions");
+    let parent = [
+        HISTORY_MUTATION_ROLLOUT[0],
+        r#"{"type":"turn_context","payload":{"turn_id":"019fcf70-1112-7000-8000-000000000001","model":"gpt-5-codex"}}"#,
+        HISTORY_MUTATION_ROLLOUT[2],
+        HISTORY_MUTATION_ROLLOUT[3],
+    ];
+    write_jsonl(
+        &root.join("rollout-2026-09-01T10-00-00-019fcf70-1111-7000-8000-000000000001.jsonl"),
+        &parent,
+    );
+    let own_usage = HISTORY_MUTATION_ROLLOUT[3].replace("resp_1", "resp_child");
+    let mut child = vec![
+        r#"{"type":"session_meta","payload":{"id":"019fcf70-2222-7000-8000-000000000001","forked_from_id":"019fcf70-1111-7000-8000-000000000001","thread_source":"user","model_provider":"trae","cwd":"/synthetic/child"}}"#,
+    ];
+    child.extend(parent);
+    child.extend([
+        r#"{"type":"turn_context","payload":{"turn_id":"019fcf70-2223-7000-8000-000000000001","model":"gpt-5-codex"}}"#,
+        HISTORY_MUTATION_ROLLOUT[3],
+        own_usage.as_str(),
+        HISTORY_MUTATION_ROLLOUT[2],
+        r#"{"timestamp":"2026-09-01T10:00:05Z","type":"token_usage_record","payload":{"response_id":"resp_next","usage":{"input_tokens":20,"output_tokens":2}}}"#,
+    ]);
+    write_jsonl(
+        &root.join("rollout-2026-09-01T10-00-04-019fcf70-2222-7000-8000-000000000001.jsonl"),
+        &child,
+    );
+
+    let messages =
+        parse_local_unified_messages_with_pricing_uncached(options(home.path(), "trae-cli"), None)
+            .await
+            .unwrap();
+    assert_eq!(messages.len(), 3);
+    assert_eq!(total_tokens(&messages), 246);
+    let mut child_turns: Vec<_> = messages
+        .iter()
+        .filter(|message| message.workspace_key.as_deref() == Some("/synthetic/child"))
+        .map(|message| (message.tokens.total(), message.is_turn_start))
+        .collect();
+    child_turns.sort_unstable();
+    assert_eq!(child_turns, [(22, true), (112, false)]);
+}
+
+#[test]
+fn trae_response_usage_splits_inclusive_and_disjoint_cache_buckets() {
+    let home = common::temp_home();
+    let path = home.path().join("rollout-cache-buckets.jsonl");
+    write_jsonl(
+        &path,
+        &[
+            HISTORY_MUTATION_ROLLOUT[0],
+            HISTORY_MUTATION_ROLLOUT[1],
+            r#"{"type":"token_usage_record","payload":{"response_id":"inclusive","usage":{"input_tokens":100,"cached_input_tokens":40,"cache_creation_input_tokens":10,"output_tokens":12,"reasoning_output_tokens":2,"total_tokens":112}}}"#,
+            r#"{"type":"token_usage_record","payload":{"response_id":"disjoint","usage":{"input_tokens":100,"cache_read_input_tokens":40,"cache_creation_input_tokens":10,"output_tokens":12,"reasoning_output_tokens":2,"total_tokens":162}}}"#,
+            r#"{"type":"token_usage_record","payload":{"response_id":"separate-write","usage":{"input_tokens":100,"cached_input_tokens":40,"cache_creation_input_tokens":10,"output_tokens":12,"reasoning_output_tokens":2,"total_tokens":122}}}"#,
+        ],
+    );
+
+    let messages = parse_trae_cli_file(&path);
+    assert_eq!(
+        messages
+            .iter()
+            .map(|message| {
+                let tokens = &message.tokens;
+                [
+                    tokens.input,
+                    tokens.cache_read,
+                    tokens.cache_write,
+                    tokens.output,
+                    tokens.reasoning,
+                ]
+            })
+            .collect::<Vec<_>>(),
+        [[50, 40, 10, 10, 2], [100, 40, 10, 10, 2], [60, 40, 10, 10, 2]]
+    );
+    assert_eq!(total_tokens(&messages), 396);
+}
+
+#[test]
+fn trae_token_count_preserves_cache_write_only_delta() {
+    let home = common::temp_home();
+    let path = home.path().join("rollout-cache-delta.jsonl");
+    write_jsonl(
+        &path,
+        &[
+            TOKEN_COUNT_ROLLOUT[0],
+            TOKEN_COUNT_ROLLOUT[1],
+            r#"{"timestamp":"2026-08-01T18:07:05Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"cached_input_tokens":40,"cache_creation_input_tokens":10,"output_tokens":12,"total_tokens":112}}}}"#,
+            r#"{"timestamp":"2026-08-01T18:07:06Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":106,"cached_input_tokens":40,"cache_creation_input_tokens":16,"output_tokens":12,"total_tokens":118}}}}"#,
+        ],
+    );
+
+    let messages = parse_trae_cli_file(&path);
+    assert_eq!(messages.len(), 2);
+    assert_eq!(messages[0].tokens.input, 50);
+    assert_eq!(messages[0].tokens.cache_write, 10);
+    assert_eq!(messages[1].tokens.input, 0);
+    assert_eq!(messages[1].tokens.cache_write, 6);
+    assert_eq!(total_tokens(&messages), 118);
+}
+
+#[test]
+fn damaged_json_and_truncated_tail_keep_complete_responses_once() {
+    let home = common::temp_home();
+    let path = home.path().join("rollout-damaged.jsonl");
+    let archive = path.with_extension("jsonl.zst");
+    let zero = r#"{"type":"token_usage_record","payload":{"response_id":"resp_1","usage":{"input_tokens":0}}}"#;
+    let valid = HISTORY_MUTATION_ROLLOUT[3];
+    let prefix = format!(
+        "{}\n{zero}\n{{bad json}}\n",
+        HISTORY_MUTATION_ROLLOUT[..3].join("\n")
+    );
+    let tail = format!("{valid}\n{valid}\n{{\"type\":\"token_usage_record\",\"payload\":");
+    let contents = [prefix.as_bytes(), &b"\xff\n"[..], tail.as_bytes()].concat();
+    std::fs::write(&path, &contents).unwrap();
+    std::fs::write(&archive, zstd::encode_all(contents.as_slice(), 0).unwrap()).unwrap();
+
+    for path in [path, archive] {
+        let messages = parse_trae_cli_file(&path);
+        assert_eq!(messages.len(), 1);
+        assert_eq!(total_tokens(&messages), 112);
+        assert!(messages[0].is_turn_start);
+    }
+}
+
+#[test]
+fn damaged_zstd_frame_rejects_even_the_valid_archive_prefix() {
+    let home = common::temp_home();
+    let path = home.path().join("rollout-corrupt.jsonl.zst");
+    let rollout = HISTORY_MUTATION_ROLLOUT.join("\n") + "\n";
+    let prefix = zstd::encode_all(rollout.as_bytes(), 0).unwrap();
+    std::fs::write(&path, &prefix).unwrap();
+    assert_eq!(total_tokens(&parse_trae_cli_file(&path)), 112);
+
+    let mut truncated = zstd::encode_all(rollout.as_bytes(), 0).unwrap();
+    truncated.pop().unwrap();
+    for tail in [truncated.as_slice(), &b"not a zstd frame"[..]] {
+        std::fs::write(&path, [prefix.as_slice(), tail].concat()).unwrap();
+        assert!(parse_trae_cli_file(&path).is_empty());
+    }
 }

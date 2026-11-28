@@ -2643,11 +2643,11 @@ fn run_autosubmit_command(subcommand: commands::autosubmit::AutosubmitSubcommand
         AutosubmitSubcommand::Disable => commands::autosubmit::disable(),
         AutosubmitSubcommand::Run { force } => {
             // Schedulers tick start-to-start; recording finish time made every other tick NotDue.
-            let started_at_ms = chrono::Utc::now().timestamp_millis();
-            let (settings, decision) = commands::autosubmit::load_run_config(force, started_at_ms)?;
+            let tick_ms = chrono::Utc::now().timestamp_millis();
+            let (settings, decision) = commands::autosubmit::load_run_config(force, tick_ms)?;
             // No-op unless Windows, enabled, and the task predates tokensw.exe.
             commands::autosubmit::self_heal_windows_task(&settings);
-            match decision {
+            let wait_ms = match decision {
                 AutosubmitRunDecision::Disabled => {
                     println!("{}", t!("cli.autosubmit.disabled"));
                     return Ok(());
@@ -2662,13 +2662,17 @@ fn run_autosubmit_command(subcommand: commands::autosubmit::AutosubmitSubcommand
                     );
                     return Ok(());
                 }
-                AutosubmitRunDecision::Due => {}
-            }
+                AutosubmitRunDecision::Due { wait_ms } => wait_ms,
+            };
 
             let Some(_lock) = commands::autosubmit::try_acquire_run_lock()? else {
                 println!("{}", t!("cli.autosubmit.alreadyRunning"));
                 return Ok(());
             };
+            if wait_ms != 0 {
+                std::thread::sleep(std::time::Duration::from_millis(wait_ms));
+            }
+            let started_at_ms = chrono::Utc::now().timestamp_millis();
 
             let (clients, since, until, year) = commands::autosubmit::submit_filters(&settings);
             match run_submit_command(

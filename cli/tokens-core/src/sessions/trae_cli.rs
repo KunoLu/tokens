@@ -15,11 +15,10 @@
 //! with the account-level API dump the `trae` client reads.
 //!
 //! Newer TRAE CLI rollouts carry the transcript in `history_mutation` records
-//! and their per-response usage in `token_usage_record.payload.usage` (same
-//! shape as Codex's `last_token_usage`). Upstream Codex writes that record
-//! beside a `token_count` event, so it is only read when the rollout has no
-//! `token_count` event at all; otherwise the Codex parser's accounting stands
-//! and nothing is counted twice.
+//! and per-response usage in `token_usage_record.payload.usage`. A
+//! `token_count` event owned by the thread takes precedence. Like Codex, TRAE
+//! can report inclusive input; its `total_tokens` also identifies disjoint
+//! cache buckets when recorded separately.
 //!
 //! Sources: the store layout and both rollout dialects follow the TraeX
 //! readers in kenn-io/agentsview (`internal/parser/traex.go`, `types.go`,
@@ -27,11 +26,12 @@
 //! deepcoldy/botmux `src/services/traex-paths.ts` for `TRAE_HOME`.
 
 use super::codex::{
-    self, codex_message_is_human_turn, codex_workspace_from_cwd, CodexTokenUsage, CodexTotals,
-    CODEX_DEFAULT_AGENT,
+    self, codex_message_is_human_turn, codex_workspace_from_cwd, uncompressed_rollout_path,
+    CodexParseState, CodexTokenUsage, CodexTotals, CODEX_DEFAULT_AGENT, MAX_CODEX_ARCHIVE_BYTES,
 };
 use super::utils::{file_modified_timestamp_ms, is_zst_path, session_id_from_path};
 use super::UnifiedMessage;
+use serde::Deserialize;
 use serde_json::Value;
 use std::collections::HashSet;
 use std::io::{BufRead, BufReader, Read};
@@ -42,13 +42,10 @@ pub const TRAE_CLI_CLIENT_ID: &str = "trae-cli";
 /// Added to the Codex parser version for the `trae-cli` cache identity. Bump
 /// it when this wrapper (relabel or `token_usage_record` fallback) changes how
 /// byte-identical rollouts parse.
-pub const TRAE_CLI_PARSER_OFFSET: u32 = 0;
+pub const TRAE_CLI_PARSER_OFFSET: u32 = 1;
 
 /// Agents-tab bucket for TRAE CLI threads, in place of the Codex names.
 const TRAE_CLI_AGENT: &str = "TRAE CLI";
-
-/// Same bound as the Codex parser puts on one decoded compressed rollout.
-const MAX_ROLLOUT_ARCHIVE_BYTES: u64 = 1024 * 1024 * 1024;
 
 pub fn parse_trae_cli_file(path: &Path) -> Vec<UnifiedMessage> {
     let mut messages = codex::parse_codex_file(path);
@@ -78,12 +75,12 @@ fn relabel_codex_message(message: &mut UnifiedMessage) {
     }
 }
 
-fn open_rollout(path: &Path) -> Option<Box<dyn BufRead>> {
+fn open_rollout(path: &Path, is_archive: bool) -> Option<Box<dyn BufRead>> {
     let file = std::fs::File::open(path).ok()?;
-    if is_zst_path(path) {
+    if is_archive {
         let decoder = zstd::stream::read::Decoder::new(file).ok()?;
         Some(Box::new(BufReader::new(
-            decoder.take(MAX_ROLLOUT_ARCHIVE_BYTES),
+            decoder.take(MAX_CODEX_ARCHIVE_BYTES + 1),
         )))
     } else {
         Some(Box::new(BufReader::new(file)))
@@ -103,6 +100,9 @@ fn str_field<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
 /// such as `<environment_context>` and are excluded the way the Codex parser
 /// excludes them from `user_message` events.
 fn history_mutation_has_human_turn(payload: &Value) -> bool {
+    if payload.get("operation").and_then(Value::as_str) != Some("append") {
+        return false;
+    }
     let Some(items) = payload.get("items").and_then(Value::as_array) else {
         return false;
     };
@@ -120,49 +120,74 @@ fn history_mutation_has_human_turn(payload: &Value) -> bool {
     })
 }
 
-/// Read the per-response `token_usage_record` rows of a rollout that has no
-/// `token_count` event. Returns nothing as soon as a `token_count` event shows
-/// up, because the Codex parser already accounted for that rollout.
+/// Read per-response usage only when this thread has no `token_count` event.
+/// Replay history is not evidence of the child's usage dialect.
 fn parse_token_usage_records(path: &Path) -> Vec<UnifiedMessage> {
-    let Some(reader) = open_rollout(path) else {
+    let is_archive = is_zst_path(path);
+    let Some(mut reader) = open_rollout(path, is_archive) else {
         return Vec::new();
     };
-    let plain_path = if is_zst_path(path) {
-        path.with_extension("")
-    } else {
-        path.to_path_buf()
-    };
-    let session_id = session_id_from_path(&plain_path);
+    let session_id = session_id_from_path(&uncompressed_rollout_path(path));
     let fallback_timestamp = file_modified_timestamp_ms(path);
 
     let mut messages = Vec::new();
     let mut seen_responses: HashSet<String> = HashSet::new();
+    let mut replayed_responses: HashSet<String> = HashSet::new();
+    let mut replay = CodexParseState::default();
     let mut thread_id: Option<String> = None;
     let mut provider: Option<String> = None;
     let mut model: Option<String> = None;
     let mut workspace: (Option<String>, Option<String>) = (None, None);
     let mut pending_turn_start = false;
 
-    for (line_index, line) in reader.lines().enumerate() {
-        let Ok(line) = line else {
-            break;
-        };
-        let line = line.trim();
-        if line.is_empty() {
-            continue;
+    let mut line = Vec::new();
+    let mut decoded_bytes = 0;
+    for line_index in 0usize.. {
+        line.clear();
+        match reader.read_until(b'\n', &mut line) {
+            Ok(0) => break,
+            Ok(bytes) if is_archive => {
+                decoded_bytes += bytes as u64;
+                if decoded_bytes > MAX_CODEX_ARCHIVE_BYTES {
+                    return Vec::new();
+                }
+            }
+            Ok(_) => {}
+            Err(_) if is_archive => return Vec::new(),
+            Err(_) => break,
         }
-        let Ok(entry) = serde_json::from_str::<Value>(line) else {
+        let Ok(entry) = serde_json::from_slice::<Value>(&line) else {
             continue;
         };
         let Some(payload) = entry.get("payload") else {
             continue;
         };
-        match entry.get("type").and_then(Value::as_str) {
-            Some("session_meta") => {
+        let entry_type = entry.get("type").and_then(Value::as_str).unwrap_or_default();
+        let event_type = payload.get("type").and_then(Value::as_str);
+        let skip_replay = replay.forked_child_waiting_for_turn_context
+            && replay.skip_replayed_entry(
+                entry_type,
+                event_type,
+                str_field(payload, "id"),
+                str_field(payload, "turn_id"),
+                payload.get("started_at").and_then(Value::as_i64),
+            );
+        if skip_replay && entry_type != "token_usage_record" {
+            continue;
+        }
+        match entry_type {
+            "session_meta" => {
                 // A forked or spawned thread replays ancestors' metadata after
                 // its own; the first record names the file's thread.
                 if thread_id.is_none() {
-                    thread_id = str_field(payload, "id").map(str::to_string);
+                    let id = str_field(payload, "id");
+                    thread_id = id.map(str::to_string);
+                    replay.start_fork_from_meta(
+                        id,
+                        str_field(payload, "forked_from_id"),
+                        payload.get("source"),
+                        str_field(payload, "thread_source"),
+                    );
                     if let Some(value) = str_field(payload, "model_provider") {
                         provider = Some(value.to_string());
                     }
@@ -171,7 +196,7 @@ fn parse_token_usage_records(path: &Path) -> Vec<UnifiedMessage> {
                     }
                 }
             }
-            Some("turn_context") => {
+            "turn_context" => {
                 if let Some(value) = str_field(payload, "model") {
                     model = Some(value.to_string());
                 }
@@ -179,7 +204,7 @@ fn parse_token_usage_records(path: &Path) -> Vec<UnifiedMessage> {
                     provider = Some(value.to_string());
                 }
             }
-            Some("event_msg") => match payload.get("type").and_then(Value::as_str) {
+            "event_msg" => match event_type {
                 Some("token_count") => return Vec::new(),
                 Some("user_message")
                     if codex_message_is_human_turn(
@@ -190,35 +215,45 @@ fn parse_token_usage_records(path: &Path) -> Vec<UnifiedMessage> {
                 }
                 _ => {}
             },
-            Some("history_mutation") => {
+            "history_mutation" => {
                 if history_mutation_has_human_turn(payload) {
                     pending_turn_start = true;
                 }
             }
-            Some("token_usage_record") => {
-                if let (Some(owner), Some(record_thread)) =
-                    (thread_id.as_deref(), str_field(payload, "thread_id"))
-                {
-                    if owner != record_thread {
-                        continue;
+            "token_usage_record" => {
+                let owner = thread_id.as_deref();
+                let record_thread = str_field(payload, "thread_id");
+                let response_id = str_field(payload, "response_id");
+                if skip_replay && (record_thread.is_none() || record_thread != owner) {
+                    // Some copies of an inherited response trail the first
+                    // child turn. Suppress those without an explicit owner.
+                    if let Some(id) = response_id {
+                        replayed_responses.insert(id.to_string());
                     }
+                    continue;
+                }
+                if owner
+                    .zip(record_thread)
+                    .is_some_and(|(owner, recorded)| owner != recorded)
+                    || (record_thread.is_none()
+                        && response_id.is_some_and(|id| replayed_responses.contains(id)))
+                {
+                    continue;
                 }
                 let Some(usage) = payload
                     .get("usage")
-                    .cloned()
-                    .and_then(|usage| serde_json::from_value::<CodexTokenUsage>(usage).ok())
+                    .and_then(|usage| CodexTokenUsage::deserialize(usage).ok())
                 else {
                     continue;
                 };
-                let response_id = str_field(payload, "response_id");
+                let tokens = CodexTotals::from_usage(&usage).into_tokens();
+                if tokens.total() == 0 {
+                    continue;
+                }
                 if let Some(id) = response_id {
                     if !seen_responses.insert(id.to_string()) {
                         continue;
                     }
-                }
-                let tokens = CodexTotals::from_usage(&usage).into_tokens();
-                if tokens.total() == 0 {
-                    continue;
                 }
                 let timestamp = entry
                     .get("timestamp")

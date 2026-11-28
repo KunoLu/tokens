@@ -3162,18 +3162,25 @@ fn parse_all_messages_streaming<S: MessageSink>(
     // never reach this lane: they carry no measurable tokens, and the parser
     // does not estimate them.
     {
-        let qoder_identity = message_cache::CacheIdentity::for_client(ClientId::Qoder);
         let qoder_outcomes: Vec<CachedParseOutcome> = scan_result
             .get(ClientId::Qoder)
             .par_iter()
             .map(|path| {
-                let parse: fn(&Path) -> Vec<UnifiedMessage> =
-                    if sessions::qoder::is_qoder_segment_path(path) {
-                        sessions::qoder::parse_qoder_segment_file
-                    } else {
-                        sessions::qoder::parse_qoder_transcript_file
-                    };
-                load_or_parse_source(qoder_identity, path, &source_cache, pricing, parse)
+                let source = scan_result.qoder_source(path);
+                load_or_parse_source_with_fingerprint(
+                    message_cache::CacheIdentity::for_qoder_source(source),
+                    path,
+                    &source_cache,
+                    None,
+                    message_cache::SourceFingerprint::check_qoder_path,
+                    |path| {
+                        if sessions::qoder::is_qoder_segment_path(path) {
+                            sessions::qoder::parse_qoder_segment_file(path, source)
+                        } else {
+                            sessions::qoder::parse_qoder_transcript_file(path, source)
+                        }
+                    },
+                )
             })
             .collect();
 
@@ -3183,16 +3190,16 @@ fn parse_all_messages_streaming<S: MessageSink>(
         let qoder_ide_outcomes: Vec<CachedParseOutcome> = scan_result
             .qoder_ide_dbs
             .par_iter()
-            .map(|db_path| {
+            .map(|(db_path, source)| {
                 load_or_parse_source_with_fingerprint_and_policy(
-                    qoder_identity,
+                    message_cache::CacheIdentity::for_qoder_source(*source),
                     db_path,
                     &source_cache,
-                    pricing,
+                    None,
                     HistoryRetention::LiveFileOnly,
                     message_cache::SourceFingerprint::check_sqlite_path,
                     |path, _| {
-                        let scan = sessions::qoder::scan_qoder_ide_db(path);
+                        let scan = sessions::qoder::scan_qoder_ide_db(path, *source);
                         (scan.messages, scan.complete)
                     },
                 )
@@ -3206,7 +3213,9 @@ fn parse_all_messages_streaming<S: MessageSink>(
                 source_cache.insert(entry);
             }
         }
-        all_messages.extend(sessions::qoder::collapse_qoder_messages(qoder_lane));
+        let mut collapsed = sessions::qoder::collapse_qoder_messages(qoder_lane);
+        apply_pricing_to_messages(&mut collapsed, pricing);
+        all_messages.extend(collapsed);
     }
 
     let roocode_outcomes: Vec<CachedParseOutcome> = scan_result
@@ -5586,7 +5595,7 @@ pub fn parse_local_clients(options: LocalParseOptions) -> Result<ParsedMessages,
     }
     let copilot_msgs: Vec<ParsedMessage> =
         copilot_unified_msgs.iter().map(unified_to_parsed).collect();
-    let copilot_count = copilot_msgs.len() as i32;
+    let copilot_count = summed_parsed_message_count(&copilot_msgs);
     counts.set(ClientId::Copilot, copilot_count);
     messages.extend(copilot_msgs);
 
@@ -6164,17 +6173,20 @@ pub fn parse_local_clients(options: LocalParseOptions) -> Result<ParsedMessages,
         .get(ClientId::Qoder)
         .par_iter()
         .flat_map(|path| {
+            let source = scan_result.qoder_source(path);
             if sessions::qoder::is_qoder_segment_path(path) {
-                sessions::qoder::parse_qoder_segment_file(path)
+                sessions::qoder::parse_qoder_segment_file(path, source)
             } else {
-                sessions::qoder::parse_qoder_transcript_file(path)
+                sessions::qoder::parse_qoder_transcript_file(path, source)
             }
         })
         .chain(
             scan_result
                 .qoder_ide_dbs
                 .par_iter()
-                .flat_map(|db_path| sessions::qoder::scan_qoder_ide_db(db_path).messages),
+                .flat_map(|(path, source)| {
+                    sessions::qoder::scan_qoder_ide_db(path, *source).messages
+                }),
         )
         .collect();
     let qoder_msgs: Vec<ParsedMessage> = sessions::qoder::collapse_qoder_messages(qoder_msgs_raw)
@@ -17274,6 +17286,8 @@ mod tests {
             scanner_settings: scanner::ScannerSettings::default(),
         })
         .unwrap();
+        // One desktop request plus two SDK requests in a single checkpoint.
+        assert_eq!(local.counts.get(ClientId::Copilot), 3);
         let local: Vec<(String, i64)> = local
             .messages
             .iter()
@@ -18869,7 +18883,7 @@ mod tests {
     #[test]
     #[serial_test::serial]
     fn test_prime_agent_rejects_damaged_child_lineage_and_timestamp_cold_and_warm() {
-        for damage in ["parent-value", "timestamp-value"] {
+        for damage in ["parent-value", "timestamp-value", "timestamp-bool", "timestamp-object"] {
             let cache_home = tempfile::TempDir::new().unwrap();
             let source_home = tempfile::TempDir::new().unwrap();
             let _cache_env = redirect_cache_home(cache_home.path());
@@ -18904,11 +18918,15 @@ mod tests {
             } else {
                 child.extend_from_slice(format!("{{\"type\":\"session\",\"version\":3,\"id\":\"child\",\"cwd\":\"/tmp/project\",\"parentSession\":{clean_parent},\"rlmDepth\":1}}\n").as_bytes());
             }
-            if damage == "timestamp-value" {
-                child.extend_from_slice(b"{\"type\":\"message\",\"id\":\"child-message\",\"timestamp\":\"2026-08-08T00:00:0\xffZ\",\"message\":{\"role\":\"assistant\",\"provider\":\"anthropic\",\"model\":\"claude-opus-5\",\"usage\":{\"input\":50,\"output\":0}}}\n");
-            } else {
-                child.extend_from_slice(b"{\"type\":\"message\",\"id\":\"child-message\",\"timestamp\":\"2026-08-08T00:00:02.000Z\",\"message\":{\"role\":\"assistant\",\"provider\":\"anthropic\",\"model\":\"claude-opus-5\",\"usage\":{\"input\":50,\"output\":0}}}\n");
-            }
+            let timestamp: &[u8] = match damage {
+                "timestamp-value" => b"\"2026-08-08T00:00:0\xffZ\"",
+                "timestamp-bool" => b"true",
+                "timestamp-object" => b"{}",
+                _ => b"\"2026-08-08T00:00:02.000Z\"",
+            };
+            child.extend_from_slice(br#"{"type":"message","id":"child-message","timestamp":"#);
+            child.extend_from_slice(timestamp);
+            child.extend_from_slice(b",\"message\":{\"role\":\"assistant\",\"provider\":\"anthropic\",\"model\":\"claude-opus-5\",\"usage\":{\"input\":50,\"output\":0}}}\n");
             std::fs::write(child_path, child).unwrap();
 
             let clients = ["prime-agent".to_string()];

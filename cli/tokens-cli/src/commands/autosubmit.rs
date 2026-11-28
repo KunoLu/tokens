@@ -86,7 +86,7 @@ impl SchedulerKind {
 pub enum AutosubmitRunDecision {
     Disabled,
     NotDue { next_run_at_ms: i64 },
-    Due,
+    Due { wait_ms: u64 },
 }
 
 pub struct AutosubmitRunLock {
@@ -347,19 +347,25 @@ pub fn run_decision(
     if !settings.enabled {
         return AutosubmitRunDecision::Disabled;
     }
-    if force {
-        return AutosubmitRunDecision::Due;
-    }
+    let due_now = AutosubmitRunDecision::Due { wait_ms: 0 };
+    let Some(last) = settings.last_run_at_ms.filter(|_| !force) else {
+        return due_now;
+    };
     let interval_ms = (settings.interval_minutes as i64).saturating_mul(60_000);
-    match settings.last_run_at_ms {
-        Some(last)
-            if now_ms < last.saturating_add(interval_ms.saturating_sub(DUE_JITTER_TOLERANCE_MS)) =>
-        {
-            AutosubmitRunDecision::NotDue {
-                next_run_at_ms: last.saturating_add(interval_ms),
-            }
+    let next_run_at_ms = last.saturating_add(interval_ms);
+    let remaining = next_run_at_ms.saturating_sub(now_ms);
+    if remaining > DUE_JITTER_TOLERANCE_MS {
+        AutosubmitRunDecision::NotDue { next_run_at_ms }
+    } else if remaining > 0
+        && (settings.today || settings.yesterday || settings.week || settings.month)
+    {
+        // Relative dates must be evaluated at the due tick, not just before
+        // midnight. Wait out the bounded slack rather than skipping the tick.
+        AutosubmitRunDecision::Due {
+            wait_ms: remaining as u64,
         }
-        _ => AutosubmitRunDecision::Due,
+    } else {
+        due_now
     }
 }
 
@@ -1163,11 +1169,11 @@ mod tests {
         };
         assert_eq!(
             run_decision(&settings, next_run_at_ms - 1, false),
-            AutosubmitRunDecision::Due
+            AutosubmitRunDecision::Due { wait_ms: 0 }
         );
         assert_eq!(
             run_decision(&settings, next_run_at_ms - DUE_JITTER_TOLERANCE_MS, false),
-            AutosubmitRunDecision::Due
+            AutosubmitRunDecision::Due { wait_ms: 0 }
         );
         assert_eq!(
             run_decision(
@@ -1176,6 +1182,18 @@ mod tests {
                 false
             ),
             AutosubmitRunDecision::NotDue { next_run_at_ms }
+        );
+        let monthly = AutosubmitSettings {
+            month: true,
+            ..settings
+        };
+        assert_eq!(
+            run_decision(&monthly, next_run_at_ms - 1_000, false),
+            AutosubmitRunDecision::Due { wait_ms: 1_000 }
+        );
+        assert_eq!(
+            run_decision(&monthly, next_run_at_ms - 1_000, true),
+            AutosubmitRunDecision::Due { wait_ms: 0 }
         );
     }
 }
