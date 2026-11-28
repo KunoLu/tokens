@@ -5,25 +5,33 @@
 use super::utils::read_file_or_none;
 use super::UnifiedMessage;
 use crate::{provider_identity, TokenBreakdown};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::path::Path;
 
+/// Synced thread IDs become file names. Leave room for the atomic write suffix.
+pub fn is_thread_id(id: &str) -> bool {
+    id.len() <= 128
+        && id.strip_prefix("T-").is_some_and(|rest| {
+            !rest.is_empty() && rest.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+        })
+}
+
 /// Amp usage event from usageLedger
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct AmpUsageEvent {
     pub timestamp: Option<String>,
     pub model: Option<String>,
     pub credits: Option<f64>,
     pub tokens: Option<AmpTokens>,
-    #[serde(rename = "operationType")]
+    #[serde(rename = "operationType", skip_serializing)]
     pub _operation_type: Option<String>,
-    #[serde(rename = "fromMessageId")]
+    #[serde(rename = "fromMessageId", skip_serializing)]
     pub _from_message_id: Option<i64>,
     #[serde(rename = "toMessageId")]
     pub to_message_id: Option<i64>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct AmpTokens {
     pub input: Option<i64>,
     pub output: Option<i64>,
@@ -34,7 +42,7 @@ pub struct AmpTokens {
 }
 
 /// Amp message usage (per-message, more detailed)
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct AmpMessageUsage {
     pub model: Option<String>,
     /// When the request was made. Threads exported from ampcode.com
@@ -60,7 +68,7 @@ pub struct AmpMessage {
     pub usage: Option<AmpMessageUsage>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct AmpUsageLedger {
     pub events: Option<Vec<AmpUsageEvent>>,
 }

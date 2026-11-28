@@ -151,7 +151,7 @@ this fork does not republish them as `27.x`.
 | [Qoder / Qoder CN](https://qoder.com/) | `~/.qoder/projects/` and `~/.qoder-cn/projects/` (override with `QODER_CONFIG_DIR` / `QODERCN_CONFIG_DIR`), `~/.qoder{,-cn}/logs/sessions/**/segments/`, plus the IDE's `SharedClientCache/cache/db/local.db`. Both editions report as one `qoder` client |
 | [Qwen CLI](https://github.com/QwenLM/qwen-cli) | `~/.qwen/projects/` |
 | Reasonix | `~/.reasonix/stats/*.jsonl` (override via `REASONIX_STATE_HOME` or `REASONIX_HOME`) |
-| [Amp](https://ampcode.com/) | `~/.local/share/amp/threads/` |
+| [Amp](https://ampcode.com/) | `tokens amp sync` → `~/.config/tokens/amp-cache/threads/`; older Amp releases write to `~/.local/share/amp/threads/` |
 | [Droid](https://factory.ai/) | `~/.factory/sessions/` |
 | [Cline](https://github.com/cline/cline) | VS Code globalStorage tasks, or `~/.cline/data/sessions/` for the Cline CLI / desktop |
 | [Roo Code](https://github.com/RooCodeInc/Roo-Code) | VS Code globalStorage tasks |
@@ -192,6 +192,43 @@ Pricing comes from [LiteLLM](https://github.com/BerriAI/litellm),
 [OpenRouter](https://openrouter.ai) and
 [models.dev](https://github.com/anomalyco/models.dev), with the best matching
 rate used per model.
+
+### Amp thread sync
+
+Current Amp stores threads on ampcode.com, including threads run in Amp's
+cloud. With the local `amp` CLI installed and signed in, run `tokens amp sync`
+to opt in or `tokens amp status` to see the detected executable, cache path,
+cached thread count, and last sync time. Status does not run `amp` or contact
+Amp. Both commands support `--json`.
+
+Sync uses `amp threads list --json --include-archived --limit 500 --offset <offset>`
+to page through listed threads. It also runs
+`amp threads search author:me --json --limit 100` to find recently active
+threads that the list can miss and get more up-to-date activity timestamps.
+It runs `amp threads export <thread-id>` for new or changed threads and for
+missing cache files. `tokens amp sync --force` re-exports all discovered
+threads.
+
+Tokens does not read Amp credentials. The local `amp` CLI uses its own sign-in.
+The cache stores only usage metadata in
+`<tokens config dir>/amp-cache/threads/T-<id>.json`, not prompts, replies,
+tool output, or thread titles. The config directory is normally
+`~/.config/tokens` on macOS and Linux and can be overridden with
+`TOKENS_CONFIG_DIR`; `tokens amp status` shows the resolved cache path.
+
+Once an explicit sync writes `<tokens config dir>/amp-cache/state.json`,
+`tokens submit` and `tokens serve` refresh the cache incrementally when the
+submission includes Amp. They do not contact Amp before this opt-in.
+If a refresh fails, submission continues using the existing cache. The
+scanner also reads legacy files from `~/.local/share/amp/threads/` (or
+`$XDG_DATA_HOME/amp/threads/`). If both sources have the same thread ID,
+only the synced copy counts.
+
+Amp exports only the main agent's requests. They exclude subagent (`Task`)
+requests and system-model requests such as title generation. In one upstream
+sample, synced token totals were about 15% below `amp usage`; the gap is not
+guaranteed. A first sync can also miss older threads absent from `threads list`:
+`threads search` returns only the 100 most recently active threads.
 
 ## Repository layout
 

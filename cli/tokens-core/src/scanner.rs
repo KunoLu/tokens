@@ -899,6 +899,16 @@ pub fn antigravity_conversation_roots(home_dir: &str, use_env_roots: bool) -> Ve
         .collect()
 }
 
+/// Where `tokens amp sync` keeps the usage of threads stored on ampcode.com,
+/// one `T-<id>.json` per thread. Current Amp no longer writes the legacy
+/// `amp/threads` data directory (missuo/tokens#64).
+pub fn amp_sync_cache_root(home_dir: &str, use_env_roots: bool) -> PathBuf {
+    join_native_path(
+        Path::new(&PathRoot::Config.resolve_with_env_strategy(home_dir, use_env_roots)),
+        "amp-cache/threads",
+    )
+}
+
 pub fn built_in_extra_scan_paths_for(
     home_dir: &str,
     enabled: &HashSet<ClientId>,
@@ -3254,7 +3264,43 @@ fn scan_all_clients_with_env_strategy_inner(
     // twice.
     prefer_cursor_json_over_csv(result.get_mut(ClientId::Cursor));
 
+    // A thread can sit both in the legacy Amp data directory (written by old
+    // Amp releases, or by scripts that export threads into it) and in the
+    // `tokens amp sync` cache. Both are named `T-<id>.json`; parse the synced
+    // copy only, so the thread is never counted twice.
+    if enabled.contains(&ClientId::Amp) {
+        prefer_synced_amp_threads(
+            result.get_mut(ClientId::Amp),
+            &amp_sync_cache_root(home_dir, use_env_roots),
+        );
+    }
+
     result
+}
+
+/// Merge the writer's flat cache into the discovered local inputs. Select by
+/// thread filename, not a path prefix: an extra scan root can alias the cache.
+fn prefer_synced_amp_threads(files: &mut Vec<PathBuf>, sync_root: &Path) {
+    let Ok(entries) = std::fs::read_dir(sync_root) else {
+        return;
+    };
+    let synced: HashSet<_> = entries
+        .flatten()
+        .filter_map(|entry| {
+            let name = entry.file_name();
+            let id = name.to_str()?.strip_suffix(".json")?;
+            if !crate::sessions::amp::is_thread_id(id) || !entry.file_type().ok()?.is_file() {
+                return None;
+            }
+            Some(name)
+        })
+        .collect();
+    if synced.is_empty() {
+        return;
+    }
+    files.retain(|path| !path.file_name().is_some_and(|name| synced.contains(name)));
+    files.extend(synced.into_iter().map(|name| sync_root.join(name)));
+    files.sort_unstable();
 }
 
 /// Drop each Cursor `usage[.account].csv` whose `usage[.account].json` sibling
@@ -3588,6 +3634,52 @@ mod tests {
             std::slice::from_ref(&expected)
         );
         assert_eq!(result.total_files(), 1);
+    }
+
+    #[test]
+    #[serial]
+    fn test_scan_amp_prefers_synced_threads_over_legacy_copies() {
+        let dir = TempDir::new().unwrap();
+        let home = dir.path().to_str().unwrap();
+        let legacy = dir.path().join(".local/share/amp/threads");
+        let synced = amp_sync_cache_root(home, false);
+        fs::create_dir_all(&legacy).unwrap();
+        fs::create_dir_all(&synced).unwrap();
+        // A stale legacy copy must not contribute on top of the synced copy.
+        for (root, name, input) in [
+            (&legacy, "T-both", 900),
+            (&legacy, "T-legacy", 10),
+            (&synced, "T-both", 20),
+            (&synced, "T-synced", 30),
+        ] {
+            fs::write(
+                root.join(format!("{name}.json")),
+                serde_json::json!({
+                    "id": name, "created": 1_795_279_800_001_i64,
+                    "messages": [{"role":"assistant","messageId":1,
+                        "usage":{"model":"example","inputTokens":input}}]
+                }).to_string(),
+            ).unwrap();
+        }
+        // The sync state beside the threads is not a thread.
+        File::create(synced.parent().unwrap().join("state.json")).unwrap();
+
+        let result = scan_all_clients_with_env_strategy(home, &["amp".to_string()], false);
+
+        let mut found = result.get(ClientId::Amp).clone();
+        found.sort();
+        let mut expected = vec![
+            legacy.join("T-legacy.json"),
+            synced.join("T-both.json"),
+            synced.join("T-synced.json"),
+        ];
+        expected.sort();
+        assert_eq!(found, expected);
+        let input: i64 = found.iter()
+            .flat_map(|path| crate::sessions::amp::parse_amp_file(path))
+            .map(|message| message.tokens.input)
+            .sum();
+        assert_eq!(input, 60);
     }
 
     #[test]
