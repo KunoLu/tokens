@@ -7,6 +7,26 @@ Tags such as `v27.x` belong to upstream `missuo/tokens` and are not releases of 
 
 ## [Unreleased]
 
+## [1.0.7] - 2026-11-28
+
+### Added
+
+- The scanner and site support Qoder (including Qoder CN under the same `qoder` ID), `kwwk`, and TRAE CLI (`trae-cli`, distinct from `trae`). The scanner now recognizes 57 clients (#30–32).
+- Antigravity can read desktop conversation databases and discover ACP sessions under T3 Code. Copilot can read SDK `session-state` usage (#32).
+- `tokens amp sync` imports usage through the locally signed-in Amp CLI; `tokens amp status` inspects the cache without contacting Amp. Only a completed explicit sync enables refresh for `submit` and `serve`. The cache excludes prompts, replies, titles and tool output. Ordinary submissions can use cached usage after a refresh failure; `--replace` is not available for cloud-synced Amp history (#33).
+
+### Fixed
+
+- Hermes now attributes session usage across assistant messages, and Amp uses message timestamps rather than assigning the whole thread to its creation day. Amp also strips upstream organization prefixes from model IDs. The site accepts parser revision 2 for Hermes and Amp so corrections can supersede older counts (#30, #32).
+- The CLI accepts bridged Cursor JWT subjects for desktop sign-in. Autosubmit measures its interval from the start of a run and tolerates scheduler jitter instead of skipping alternating runs (#32).
+- Overlapping or replayed local sources no longer inflate usage in the affected parsers, including Qoder observations and forked Codex rollouts (#32). Switching the site's language now reloads the whole page (#31).
+
+### Changed
+
+- Pi-format sessions retain reported inference speed. Profile speed breakdowns show only known tiers; omitting the unknown row does not remove tokens from usage totals (#31, #32). The CLI and docs also distinguish Claude Code logs from the Claude web, desktop and mobile apps, which are not scanned.
+- `CACHE_FORMAT_VERSION` stays at **9**. Only clients whose `parser_version` changed automatically refresh their local parsed-message cache; no global cache reset or new database migration is required. The CLI and CI use Rust `1.100.0` (#32, #33).
+- This fork's Cargo and npm manifests use `1.0.7`; its documentation pins helper scripts to `v1.0.7`. Those script links resolve once the tag is pushed. `/install.sh` still installs the latest upstream `missuo/tokens` release binary (`v27.4.1` at preparation), not the fork's CLI build.
+
 ## [1.0.6] - 2026-11-15
 
 ### Changed

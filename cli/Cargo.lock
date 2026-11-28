@@ -2059,7 +2059,7 @@ checksum = "fd3ca314f692efd6c868f8408f53fe444634a845f96c028b97d35f6a1f79f0ee"
 
 [[package]]
 name = "tokens-cli"
-version = "1.0.6"
+version = "1.0.7"
 dependencies = [
  "aes",
  "anyhow",
@@ -2093,7 +2093,7 @@ dependencies = [
 
 [[package]]
 name = "tokens-core"
-version = "1.0.6"
+version = "1.0.7"
 dependencies = [
  "bincode",
  "chrono",
