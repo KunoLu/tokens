@@ -796,6 +796,20 @@ mod tests {
         }
         let ready = dir.join("ready");
         if matches!(mode.as_str(), "wrapper" | "wrapper-closed") {
+            #[cfg(windows)]
+            if mode == "wrapper-closed" {
+                use std::os::windows::io::AsRawHandle;
+                use windows_sys::Win32::Foundation::{SetHandleInformation, HANDLE_FLAG_INHERIT};
+                // NUL redirects the child's stdout, but does not make the wrapper's
+                // original pipe handle non-inheritable. Model a genuinely closed writer.
+                let stdout = io::stdout();
+                assert_ne!(
+                    unsafe { SetHandleInformation(stdout.as_raw_handle(), HANDLE_FLAG_INHERIT, 0) },
+                    0,
+                    "{}",
+                    io::Error::last_os_error()
+                );
+            }
             fixture("hold", &dir)
                 .stdout(if mode == "wrapper" {
                     Stdio::inherit()
@@ -819,7 +833,7 @@ mod tests {
 
         let lock = File::create(dir.join("alive")).unwrap();
         fs2::FileExt::lock_exclusive(&lock).unwrap();
-        fs::write(ready, []).unwrap();
+        fs::write(ready, std::process::id().to_string()).unwrap();
         if mode == "oversize" {
             let mut stdout = io::stdout().lock();
             let _ = stdout.write_all(&[b'x'; 8192]).and_then(|()| stdout.flush());
@@ -835,6 +849,20 @@ mod tests {
             .write(true)
             .open(dir.join("alive"))
             .unwrap();
+        #[cfg(windows)]
+        {
+            let pid = fs::read_to_string(dir.join("ready")).unwrap().parse().unwrap();
+            assert!(!crate::process_liveness::pid_is_alive(pid), "fixture {pid} is still running");
+            // LockFileEx permits deferred unlock after termination. Check the
+            // process above immediately, then wait only for its OS lock to clear.
+            wait_for_exit(|| match fs2::FileExt::try_lock_exclusive(&lock) {
+                Ok(()) => Ok(true),
+                Err(err) if crate::commands::autosubmit::is_lock_contention(&err) => Ok(false),
+                Err(err) => Err(err),
+            })
+            .expect("Windows did not release the terminated fixture's lock");
+        }
+        #[cfg(not(windows))]
         fs2::FileExt::try_lock_exclusive(&lock).expect("fixture still holds its lock");
     }
 
