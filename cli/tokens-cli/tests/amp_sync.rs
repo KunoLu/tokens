@@ -452,7 +452,7 @@ fn amp_sync_keeps_state_and_retries_when_all_exports_fail() {
     fixture.sync(&[], 2, 0);
     fixture.assert_calls(BOTH_EXPORTS);
     let state_path = fixture.path("config/amp-cache/state.json");
-    let state = fs::read(&state_path).unwrap();
+    let state: Value = serde_json::from_slice(&fs::read(&state_path).unwrap()).unwrap();
     let listed = fixture.cached_thread(LISTED);
     let recent = fixture.cached_thread(RECENT);
     let old_listed = fs::read(&listed).unwrap();
@@ -464,7 +464,9 @@ fn amp_sync_keeps_state_and_retries_when_all_exports_fail() {
     let failures = [fixture.fail_export(LISTED), fixture.fail_export(RECENT)];
     fixture.sync(&[], 0, 2);
     fixture.assert_calls(BOTH_EXPORTS);
-    assert_eq!(fs::read(&state_path).unwrap(), state);
+    let failed_state: Value = serde_json::from_slice(&fs::read(&state_path).unwrap()).unwrap();
+    assert_eq!(failed_state["threads"], state["threads"]);
+    assert_eq!(failed_state["syncedAt"], state["syncedAt"]);
     assert_eq!(fs::read(&listed).unwrap(), old_listed);
     assert_eq!(fs::read(&recent).unwrap(), old_recent);
 
@@ -488,6 +490,11 @@ fn amp_sync_does_not_echo_a_malformed_usage_value() {
     fixture.sync(&[], 1, 1);
     fixture.assert_calls(BOTH_EXPORTS);
     assert!(!fixture.cached_thread(LISTED).exists());
+    assert!(!fixture.path("config/amp-cache/state.json").exists());
+    fixture.prepare_offline_submit();
+    let preview = output_json(&fixture.run(SUBMIT));
+    assert_eq!(preview["summary"]["totalTokens"], 141);
+    fixture.assert_calls(&[]);
 }
 
 #[test]
@@ -518,6 +525,37 @@ fn amp_submit_uses_cached_usage_after_failure_but_replace_refuses_partial_refres
     fixture.assert_replace_refused();
     fixture.assert_calls(BOTH_EXPORTS);
     assert!(!fixture.cached_thread(RECENT).exists());
+}
+
+#[test]
+fn amp_replace_refuses_an_id_only_cache_file() {
+    let fixture = AmpFixture::new();
+    fixture.prepare_offline_submit();
+    fixture.sync(&[], 2, 0);
+    fixture.assert_calls(BOTH_EXPORTS);
+    fixture.response("search", json!([]));
+    fs::write(fixture.cached_thread(RECENT), json!({"id": RECENT}).to_string()).unwrap();
+    fixture.assert_replace_refused();
+}
+
+#[test]
+fn amp_failed_update_outside_the_search_window_cannot_authorize_replacement() {
+    let fixture = AmpFixture::new();
+    fixture.prepare_offline_submit();
+    fixture.sync(&[], 2, 0);
+    fixture.assert_calls(BOTH_EXPORTS);
+    fixture.discovery(FIRST, UPDATED);
+    let error = fixture.fail_export(RECENT);
+    fixture.sync(&[], 0, 1);
+    fixture.assert_calls(&["list", "search", RECENT]);
+    fixture.response("search", json!([]));
+    fixture.assert_replace_refused();
+
+    fs::remove_file(error).unwrap();
+    fixture.discovery(FIRST, UPDATED);
+    fixture.sync(&[], 1, 0);
+    let payload = output_json(&fixture.run(&[SUBMIT, SUBMIT_BOUNDS, &["--replace"]].concat()));
+    assert_eq!(payload["clientManifest"]["clients"][0]["coverage"]["mode"], "full");
 }
 
 #[test]

@@ -158,7 +158,6 @@ mod platform {
     impl Signals {
         pub(super) fn new() -> io::Result<Self> {
             let exclusive = SIGNAL_SCOPE.lock().unwrap_or_else(|error| error.into_inner());
-            ensure_group_observable()?;
             let child_action = signal_action(libc::SIGCHLD)?;
             if child_action.sa_sigaction != libc::SIG_DFL
                 || child_action.sa_flags & libc::SA_NOCLDWAIT != 0
@@ -246,6 +245,7 @@ mod platform {
     }
 
     impl Tree {
+        #[cfg(target_vendor = "apple")]
         pub(super) fn cleanup(&mut self, child: &mut Child) -> io::Result<()> {
             let group = self.0.expect("cleanup runs once");
             let idle = wait_for_exit(|| {
@@ -258,6 +258,28 @@ mod platform {
             idle?;
             reaped?.ok_or(io::ErrorKind::TimedOut)?;
             Ok(())
+        }
+
+        #[cfg(not(target_vendor = "apple"))]
+        pub(super) fn cleanup(&mut self, child: &mut Child) -> io::Result<()> {
+            let group = self.0.expect("cleanup runs once");
+            wait_for_exit(|| {
+                signal_group(group)?;
+                Ok(exit_status(child)?.is_some())
+            })?;
+            // The leader pinned the group ID through the last SIGKILL. Reap
+            // it, then only probe: even if the ID is reused, no new process
+            // can receive a terminating signal from this supervisor.
+            self.0 = None;
+            child.wait()?;
+            wait_for_exit(|| {
+                // SAFETY: signal 0 asks the kernel whether the group exists.
+                if unsafe { libc::killpg(group, 0) } == 0 {
+                    return Ok(false);
+                }
+                let error = io::Error::last_os_error();
+                if error.raw_os_error() == Some(libc::ESRCH) { Ok(true) } else { Err(error) }
+            })
         }
     }
 
@@ -281,69 +303,6 @@ mod platform {
         Ok(())
     }
 
-    // Process groups cannot contain programs that deliberately leave the group.
-    // Linux/Android also require procfs visibility in the caller's PID namespace.
-    fn ensure_group_observable() -> io::Result<()> {
-        if cfg!(any(target_os = "linux", target_os = "android")) {
-            let own_pid = std::fs::read_link("/proc/self")?;
-            if own_pid.to_str().and_then(|pid| pid.parse().ok()) != Some(std::process::id()) {
-                return Err(io::ErrorKind::Unsupported.into());
-            }
-        } else if !cfg!(target_vendor = "apple") {
-            return Err(io::ErrorKind::Unsupported.into());
-        }
-        Ok(())
-    }
-
-    #[cfg(any(target_os = "linux", target_os = "android"))]
-    fn group_is_idle(group: libc::pid_t) -> io::Result<bool> {
-        let mut stat = [0; 256];
-        for entry in std::fs::read_dir("/proc")? {
-            let entry = entry?;
-            let name = entry.file_name();
-            let Ok(pid) = name.to_str().unwrap_or_default().parse::<libc::pid_t>() else {
-                continue;
-            };
-            if pid == group {
-                continue; // waitid already confirmed the leader exited.
-            }
-            // SAFETY: getpgid only queries the PID found in procfs.
-            let pgid = unsafe { libc::getpgid(pid) };
-            if pgid == -1 {
-                let error = io::Error::last_os_error();
-                if error.raw_os_error() == Some(libc::ESRCH) {
-                    continue;
-                }
-                return Err(error);
-            }
-            if pgid != group {
-                continue;
-            }
-            let mut path = entry.path();
-            path.push("stat");
-            let n = match std::fs::File::open(path).and_then(|mut file| file.read(&mut stat)) {
-                Ok(n) => n,
-                Err(error) if matches!(error.raw_os_error(), Some(libc::ENOENT | libc::ESRCH)) => {
-                    continue;
-                }
-                Err(error) => return Err(error),
-            };
-            // The command name can itself contain spaces and parentheses.
-            let end = stat[..n]
-                .iter()
-                .rposition(|&byte| byte == b')')
-                .ok_or(io::ErrorKind::InvalidData)?;
-            let mut fields = stat[end + 1..n].split(|&byte| byte == b' ').skip(1);
-            if !matches!(fields.next(), Some(b"Z" | b"X" | b"x")) {
-                return Ok(false);
-            }
-            // A zombie thread-group leader can still have live threads. Field 20 is num_threads.
-            if fields.nth(16).ok_or(io::ErrorKind::InvalidData)? != b"1" {
-                return Ok(false);
-            }
-        }
-        Ok(true)
-    }
 
     #[cfg(target_vendor = "apple")]
     fn group_is_idle(group: libc::pid_t) -> io::Result<bool> {
@@ -373,10 +332,6 @@ mod platform {
         Ok(count == 1 && pids[0] == group)
     }
 
-    #[cfg(not(any(target_vendor = "apple", target_os = "linux", target_os = "android")))]
-    fn group_is_idle(_group: libc::pid_t) -> io::Result<bool> {
-        Err(io::ErrorKind::Unsupported.into())
-    }
 
     pub(super) fn prepare_stdout(stdout: &ChildStdout) -> io::Result<()> {
         let fd = stdout.as_raw_fd();

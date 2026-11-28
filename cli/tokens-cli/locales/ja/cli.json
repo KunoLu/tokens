@@ -242,7 +242,7 @@
   "cli.submit.replaceNeedsClient": "--replace には明示的な --client が少なくとも 1 つ必要です",
   "cli.submit.replaceNeedsSince": "--replace には範囲を定める --since が必要です",
   "cli.submit.replaceNeedsUntil": "--replace には範囲を定める --until が必要です",
-  "cli.submit.ampReplaceIncomplete": "Amp の同期が完了していないため --replace は実行しません。同期後に再試行してください。",
+  "cli.submit.ampReplaceIncomplete": "Amp のキャッシュが完全であることを確認できないため、--replace を拒否しました。同期エラーを解消し、失われたスレッドのキャッシュを復元してから再試行してください。",
   "cli.submit.replaceNoContributions": "--replace は {start} 〜 {end} に {client} の寄与を見つけられませんでした。アンカーのない置換は行いません",
   "cli.submit.replaceOnlyExplicitBounds": "--replace は明示的な --since と --until の範囲のみ受け付けます。--today/--yesterday/--week/--month/--year を外してください",
   "cli.submit.replaceSinceFormat": "--replace の --since は YYYY-MM-DD 形式で指定してください",

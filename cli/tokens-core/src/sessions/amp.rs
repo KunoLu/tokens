@@ -6,8 +6,9 @@ use super::utils::read_file_or_none;
 use super::UnifiedMessage;
 use crate::{provider_identity, TokenBreakdown};
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
-use std::path::Path;
+use serde_json::Value as JsonValue;
+use std::collections::{hash_map::Entry, HashMap};
+use std::path::{Path, PathBuf};
 
 /// Synced thread IDs become file names. Leave room for the atomic write suffix.
 pub fn is_thread_id(id: &str) -> bool {
@@ -61,7 +62,7 @@ pub struct AmpMessageUsage {
     pub credits: Option<f64>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct AmpMessage {
     pub role: Option<String>,
     #[serde(rename = "messageId")]
@@ -74,13 +75,93 @@ pub struct AmpUsageLedger {
     pub events: Option<Vec<AmpUsageEvent>>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct AmpThread {
     pub id: Option<String>,
     pub created: Option<i64>,
     pub messages: Option<Vec<AmpMessage>>,
-    #[serde(rename = "usageLedger")]
+    #[serde(rename = "usageLedger", skip_serializing_if = "Option::is_none")]
     pub usage_ledger: Option<AmpUsageLedger>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AmpCacheProjectionError {
+    OtherThread,
+    UnexpectedOutput,
+}
+
+/// Project a raw export into the usage-only cache. Never return raw Amp data in errors.
+pub fn project_cached_thread(
+    thread_id: &str,
+    export: &[u8],
+) -> Result<Vec<u8>, AmpCacheProjectionError> {
+    use AmpCacheProjectionError::{OtherThread, UnexpectedOutput};
+
+    if !is_thread_id(thread_id)
+        || export.iter().copied().find(|b| !b.is_ascii_whitespace()) != Some(b'{')
+    {
+        return Err(UnexpectedOutput);
+    }
+    let mut thread: AmpThread = serde_json::from_slice(export).map_err(|_| UnexpectedOutput)?;
+    let id = thread.id.as_deref().ok_or(UnexpectedOutput)?;
+    if id != thread_id {
+        return Err(OtherThread);
+    }
+    thread
+        .messages
+        .as_mut()
+        .ok_or(UnexpectedOutput)?
+        .retain(|message| {
+            message.role.as_deref() == Some("assistant")
+                && message
+                    .usage
+                    .as_ref()
+                    .is_some_and(|usage| usage.model.is_some())
+        });
+    if let Some(events) = thread
+        .usage_ledger
+        .as_mut()
+        .and_then(|ledger| ledger.events.as_mut())
+    {
+        events.retain(|event| event.model.is_some());
+    }
+    if !has_valid_cached_usage(&thread) {
+        return Err(UnexpectedOutput);
+    }
+    serde_json::to_vec(&thread).map_err(|_| UnexpectedOutput)
+}
+
+fn has_valid_cached_usage(thread: &AmpThread) -> bool {
+    fn valid(model: Option<&str>, timestamp: Option<&str>, credits: Option<f64>) -> bool {
+        model.is_some_and(|id| {
+            id.len() <= 256
+                && id.as_bytes().first().is_some_and(u8::is_ascii_alphanumeric)
+                && !id.contains("://")
+                && id.bytes().all(|b| {
+                    b.is_ascii_alphanumeric()
+                        || matches!(b, b'-' | b'_' | b'.' | b'/' | b':' | b'@' | b'+')
+                })
+        }) && timestamp.is_none_or(|ts| chrono::DateTime::parse_from_rfc3339(ts).is_ok())
+            && credits.is_none_or(f64::is_finite)
+    }
+
+    let Some(messages) = &thread.messages else {
+        return false;
+    };
+    messages.iter().all(|message| {
+        message.role.as_deref() == Some("assistant")
+            && message.usage.as_ref().is_some_and(|usage| {
+                valid(usage.model.as_deref(), usage.timestamp.as_deref(), usage.credits)
+            })
+    }) && thread
+        .usage_ledger
+        .as_ref()
+        .and_then(|ledger| ledger.events.as_ref())
+        .is_none_or(|events| {
+            events.iter().all(|event| {
+                valid(event.model.as_deref(), event.timestamp.as_deref(), event.credits)
+            })
+        })
 }
 
 /// Amp names some models by their upstream org, such as
@@ -97,7 +178,7 @@ fn get_provider_from_model(model: &str) -> &'static str {
     provider_identity::inferred_provider_from_model(model).unwrap_or("anthropic")
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct AmpUsageRecord {
     model: String,
     timestamp: i64,
@@ -197,6 +278,7 @@ fn parse_amp_message_records(
     thread_messages: Option<Vec<AmpMessage>>,
     thread_created_ms: i64,
     file_mtime_ms: i64,
+    mut timing_only: Option<&mut HashMap<i64, i64>>,
 ) -> Vec<AmpUsageRecord> {
     let Some(thread_messages) = thread_messages else {
         return Vec::new();
@@ -216,28 +298,32 @@ fn parse_amp_message_records(
             }
 
             let usage = msg.usage?;
-            let model = usage.model?;
-            if usage.credits.is_none()
-                && usage.input_tokens.is_none()
-                && usage.output_tokens.is_none()
-                && usage.cache_read_input_tokens.is_none()
-                && usage.cache_creation_input_tokens.is_none()
-            {
+            let message_id = msg.message_id.filter(|id| *id > 0);
+            let metered = usage.credits.is_some()
+                || usage.input_tokens.is_some()
+                || usage.output_tokens.is_some()
+                || usage.cache_read_input_tokens.is_some()
+                || usage.cache_creation_input_tokens.is_some();
+            let Some(model) = usage.model.filter(|_| metered) else {
+                if let (Some(timestamps), Some(id)) = (timing_only.as_deref_mut(), message_id) {
+                    if let Some(timestamp) = parse_amp_timestamp(usage.timestamp) {
+                        timestamps.entry(id).or_insert(timestamp);
+                    }
+                }
                 return None;
-            }
-            let message_id = msg.message_id.unwrap_or(0).max(0);
-            // Without a recorded time, messages are spaced a second apart from
-            // the thread's creation, which books a thread that ran for days on
-            // the day it started.
+            };
+            // Without a recorded time, older local messages are spaced a
+            // second apart from the thread's creation.
             let explicit_timestamp = parse_amp_timestamp(usage.timestamp);
-            let timestamp = explicit_timestamp
-                .unwrap_or_else(|| base_timestamp.saturating_add(message_id.saturating_mul(1000)));
+            let timestamp = explicit_timestamp.unwrap_or_else(|| {
+                base_timestamp.saturating_add(message_id.unwrap_or(0).saturating_mul(1000))
+            });
 
             Some(AmpUsageRecord {
                 model,
                 timestamp,
                 has_explicit_timestamp: explicit_timestamp.is_some(),
-                message_id: Some(message_id).filter(|id| *id > 0),
+                message_id,
                 ledger_to_message_id: None,
                 tokens: TokenBreakdown {
                     input: usage.input_tokens.unwrap_or(0).max(0),
@@ -277,34 +363,12 @@ fn find_matching_ledger_record(
     })
 }
 
-fn merge_amp_records(
-    ledger_record: AmpUsageRecord,
-    message_record: &AmpUsageRecord,
-) -> AmpUsageRecord {
-    if ledger_record.has_explicit_timestamp {
-        if ledger_record.cost > 0.0 || message_record.cost <= 0.0 {
-            ledger_record
-        } else {
-            AmpUsageRecord {
-                cost: message_record.cost,
-                message_id: message_record.message_id,
-                ..ledger_record
-            }
-        }
-    } else {
-        AmpUsageRecord {
-            model: ledger_record.model,
-            timestamp: message_record.timestamp,
-            has_explicit_timestamp: false,
-            message_id: message_record.message_id,
-            ledger_to_message_id: ledger_record.ledger_to_message_id,
-            tokens: ledger_record.tokens,
-            cost: if ledger_record.cost > 0.0 {
-                ledger_record.cost
-            } else {
-                message_record.cost
-            },
-        }
+fn merge_amp_records(ledger_record: &mut AmpUsageRecord, message_record: &AmpUsageRecord) {
+    if !ledger_record.has_explicit_timestamp {
+        ledger_record.timestamp = message_record.timestamp;
+    }
+    if ledger_record.cost <= 0.0 && message_record.cost > 0.0 {
+        ledger_record.cost = message_record.cost;
     }
 }
 
@@ -316,8 +380,8 @@ fn read_amp_thread(path: &Path) -> Option<AmpThread> {
     simd_json::from_slice(&mut bytes).ok()
 }
 
-/// Check a synced thread without counting usage. An empty thread is valid,
-/// but a cache entry must name itself explicitly, not rely on the stem fallback.
+/// An empty projected thread is valid. A legacy or incomplete JSON file is
+/// not evidence that a synced thread is safe to use for replacement.
 pub fn is_valid_cached_thread(path: &Path) -> bool {
     let Some(id) = path
         .file_name()
@@ -327,12 +391,99 @@ pub fn is_valid_cached_thread(path: &Path) -> bool {
     else {
         return false;
     };
-    std::fs::symlink_metadata(path).is_ok_and(|metadata| metadata.is_file())
-        && read_amp_thread(path).is_some_and(|thread| thread.id.as_deref() == Some(id))
+    if !std::fs::symlink_metadata(path).is_ok_and(|metadata| metadata.is_file()) {
+        return false;
+    }
+    let Some(bytes) = read_file_or_none(path) else {
+        return false;
+    };
+    // Decode from the original bytes so duplicate recognized fields fail.
+    // A separate shape check rejects unknown fields and struct-as-array input.
+    serde_json::from_slice::<AmpThread>(&bytes).is_ok_and(|thread| {
+        thread.id.as_deref() == Some(id) && has_valid_cached_usage(&thread)
+    }) && serde_json::from_slice::<JsonValue>(&bytes)
+        .is_ok_and(|value| has_cached_thread_shape(&value))
+}
+
+fn has_cached_thread_shape(thread: &JsonValue) -> bool {
+    fn has_only_keys(value: &JsonValue, keys: &[&str]) -> bool {
+        value
+            .as_object()
+            .is_some_and(|object| object.keys().all(|key| keys.contains(&key.as_str())))
+    }
+
+    fn message_shape(message: &JsonValue) -> bool {
+        has_only_keys(message, &["role", "messageId", "usage"])
+            && message.get("usage").is_some_and(|usage| {
+                has_only_keys(
+                    usage,
+                    &[
+                        "model",
+                        "timestamp",
+                        "inputTokens",
+                        "outputTokens",
+                        "cacheReadInputTokens",
+                        "cacheCreationInputTokens",
+                        "credits",
+                    ],
+                )
+            })
+    }
+
+    fn event_shape(event: &JsonValue) -> bool {
+        has_only_keys(event, &["timestamp", "model", "credits", "tokens", "toMessageId"])
+            && event.get("tokens").is_none_or(|tokens| {
+                tokens.is_null()
+                    || has_only_keys(
+                        tokens,
+                        &["input", "output", "cacheReadInputTokens", "cacheCreationInputTokens"],
+                    )
+            })
+    }
+
+    has_only_keys(thread, &["id", "created", "messages", "usageLedger"])
+        && thread
+            .get("messages")
+            .and_then(JsonValue::as_array)
+            .is_some_and(|messages| messages.iter().all(message_shape))
+        && thread.get("usageLedger").is_none_or(|ledger| {
+            has_only_keys(ledger, &["events"])
+                && ledger.get("events").is_none_or(|events| {
+                    events.is_null()
+                        || events
+                            .as_array()
+                            .is_some_and(|events| events.iter().all(event_shape))
+                })
+        })
+}
+
+fn fallback_session_id(path: &Path) -> &str {
+    path.file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or("unknown")
+}
+
+fn restore_fallback_session_id(path: &Path, messages: &mut [UnifiedMessage]) {
+    if messages
+        .first()
+        .is_some_and(|message| message.session_id.is_empty())
+    {
+        let stem = fallback_session_id(path);
+        for message in messages {
+            message.session_id.push_str(stem);
+        }
+    }
 }
 
 /// Parse an Amp thread JSON file
 pub fn parse_amp_file(path: &Path) -> Vec<UnifiedMessage> {
+    let mut messages = parse_amp_source(path);
+    restore_fallback_session_id(path, &mut messages);
+    messages
+}
+
+/// Keep missing IDs distinct from explicit IDs in the parsed source cache.
+pub(crate) fn parse_amp_source(path: &Path) -> Vec<UnifiedMessage> {
     let Some(thread) = read_amp_thread(path) else {
         return Vec::new();
     };
@@ -349,17 +500,20 @@ pub fn parse_amp_file(path: &Path) -> Vec<UnifiedMessage> {
         .id
         .as_deref()
         .filter(|id| !id.trim().is_empty())
-        .or_else(|| path.file_stem().and_then(|stem| stem.to_str()))
-        .unwrap_or("unknown");
+        .unwrap_or("");
 
     let thread_created_ms = thread.created.unwrap_or(0);
     let mut ledger_records =
         parse_amp_ledger_records(thread.usage_ledger, thread_created_ms, file_mtime_ms);
-    let message_records =
-        parse_amp_message_records(thread.messages, thread_created_ms, file_mtime_ms);
+    let mut timing_only = HashMap::new();
+    let mut message_records = parse_amp_message_records(
+        thread.messages,
+        thread_created_ms,
+        file_mtime_ms,
+        (!ledger_records.is_empty()).then_some(&mut timing_only),
+    );
 
     if ledger_records.is_empty() {
-        let mut message_records = message_records;
         message_records.sort_by_key(|record| record.timestamp);
         return message_records
             .into_iter()
@@ -367,20 +521,33 @@ pub fn parse_amp_file(path: &Path) -> Vec<UnifiedMessage> {
             .collect();
     }
 
-    let mut consumed = vec![false; ledger_records.len()];
+    // Timestamp-only messages identify their exact ledger events, never
+    // heuristic matches. Reserve those events before reconciling usage rows.
+    let mut consumed: Vec<_> = ledger_records
+        .iter_mut()
+        .map(|record| {
+            let Some(timestamp) = record.ledger_to_message_id.and_then(|id| timing_only.get(&id))
+            else {
+                return false;
+            };
+            if !record.has_explicit_timestamp {
+                record.timestamp = *timestamp;
+            }
+            true
+        })
+        .collect();
     let mut search_start = 0usize;
     let mut unmatched_message_records = Vec::new();
 
-    for message_record in &message_records {
+    for message_record in message_records {
         if let Some(index) =
-            find_matching_ledger_record(&ledger_records, &consumed, search_start, message_record)
+            find_matching_ledger_record(&ledger_records, &consumed, search_start, &message_record)
         {
             consumed[index] = true;
             search_start = index.saturating_add(1);
-            let merged = merge_amp_records(ledger_records[index].clone(), message_record);
-            ledger_records[index] = merged;
+            merge_amp_records(&mut ledger_records[index], &message_record);
         } else {
-            unmatched_message_records.push(message_record.clone());
+            unmatched_message_records.push(message_record);
         }
     }
 
@@ -392,30 +559,52 @@ pub fn parse_amp_file(path: &Path) -> Vec<UnifiedMessage> {
         .collect()
 }
 
-/// Select whole threads in scanner priority order. Empty sources cannot hide
-/// usable copies. The parser's ID (including the stem fallback) is already
-/// present on each message, even for a warm cache hit.
-pub(crate) fn mark_preferred_sources<T>(
-    sources: Vec<T>,
-    messages: impl Fn(&T) -> &[UnifiedMessage],
-) -> impl Iterator<Item = (T, bool)> {
+/// Select whole threads in scanner priority order. The scanner already
+/// deduplicates canonical source paths, so ID-less files are independent
+/// unless a usable synced thread explicitly names their filename stem.
+pub(crate) fn mark_preferred_sources<'a, T: 'a>(
+    paths: &'a [PathBuf],
+    synced_root: &Path,
+    mut sources: Vec<T>,
+    messages: impl Fn(&mut T) -> &mut [UnifiedMessage] + 'a,
+) -> impl Iterator<Item = (T, bool)> + 'a {
     let selected: Vec<_> = {
-        let mut seen = HashSet::new();
-        sources
+        let mut seen_ids = HashMap::new();
+        paths
             .iter()
-            .map(|source| {
-                messages(source)
-                    .first()
-                    .is_some_and(|message| seen.insert(message.session_id.as_str()))
+            .zip(&mut sources)
+            .map(|(path, source)| {
+                let Some(message) = messages(source).first() else {
+                    return false;
+                };
+                let id = message.session_id.as_str();
+                if id.is_empty() {
+                    return seen_ids.get(fallback_session_id(path)) != Some(&true);
+                }
+                if let Entry::Vacant(entry) = seen_ids.entry(id) {
+                    entry.insert(path.parent() == Some(synced_root));
+                    true
+                } else {
+                    false
+                }
             })
             .collect()
     };
-    sources.into_iter().zip(selected)
+    paths
+        .iter()
+        .zip(sources)
+        .zip(selected)
+        .map(move |((path, mut source), selected)| {
+            if selected {
+                restore_fallback_session_id(path, messages(&mut source));
+            }
+            (source, selected)
+        })
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{is_valid_cached_thread, parse_amp_file};
+    use super::{is_valid_cached_thread, parse_amp_file, project_cached_thread};
     use std::path::Path;
 
     fn write_amp_thread(path: &Path, content: &str) {
@@ -464,9 +653,22 @@ mod tests {
         assert!(!is_valid_cached_thread(&path));
         for payload in [
             "",
+            r#"{"id":"T-empty"}"#,
+            r#"{"id":"T-empty","messages":null}"#,
+            r#"{"id":"T-empty","messages":{}}"#,
             r#"{"id":"T-empty","messages":["#,
             r#"{"id":"T-empty","messages":[]} {}"#,
             r#"{"id":"T-empty","messages":[{"usage":{"outputTokens":"wrong type"}}]}"#,
+            r#"{"id":"T-empty","messages":[{"role":"assistant","usage":null}]}"#,
+            r#"{"id":"T-empty","messages":[{"role":"user","usage":{"model":"claude-sonnet-4-0"}}]}"#,
+            r#"{"id":"T-empty","messages":[{"role":"assistant","usage":{"model":"not a model"}}]}"#,
+            r#"{"id":"T-empty","messages":[{"role":"assistant","usage":{"model":"ok","timestamp":"bad"}}]}"#,
+            r#"{"id":"T-empty","messages":[{"role":"assistant","usage":{"model":"ok","inputToken":1}}]}"#,
+            r#"{"id":"T-empty","messages":[["assistant",null,{"model":"ok","inputTokens":1}]]}"#,
+            r#"{"id":"T-empty","messages":[],"usageLedger":{"events":[{"credits":1}]}}"#,
+            r#"{"id":"T-empty","messages":[],"usageLedger":{"events":[{"model":"ok","tokens":{"wrong":1}}]}}"#,
+            r#"{"id":"T-empty","messages":[],"title":"not projected"}"#,
+            r#"{"id":"T-empty","id":"T-empty","messages":[]}"#,
             r#"["T-empty",null,[],null]"#,
             r#"{"messages":[]}"#,
             r#"{"id":"","messages":[]}"#,
@@ -487,6 +689,75 @@ mod tests {
             std::os::unix::fs::symlink(&target, &path).unwrap();
             assert!(!is_valid_cached_thread(&path));
         }
+    }
+
+    #[test]
+    fn test_amp_projection_satisfies_cache_validation() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("T-projected.json");
+        let export = br#"{
+            "id":"T-projected","title":"synthetic conversation","created":null,
+            "messages":[
+                {"role":"user","usage":{"model":"ignored"}},
+                {"role":"assistant","messageId":7,"content":["not cached"],"usage":{
+                    "model":"claude-sonnet-4-0","timestamp":"2026-04-06T12:00:00Z","extra":1
+                }}
+            ],
+            "usageLedger":{"events":[{
+                "model":"claude-sonnet-4-0","toMessageId":7,"operationType":"not cached",
+                "tokens":{"input":5,"extra":1}
+            }]}
+        }"#;
+        let projected = project_cached_thread("T-projected", export).unwrap();
+        std::fs::write(&path, &projected).unwrap();
+        assert!(is_valid_cached_thread(&path));
+        let messages = parse_amp_file(&path);
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].tokens.input, 5);
+        assert_eq!(messages[0].timestamp, timestamp_ms("2026-04-06T12:00:00Z"));
+    }
+
+    #[test]
+    fn test_amp_unmetered_messages_only_date_exact_ledger_events() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("T-dates.json");
+        let thread = serde_json::json!({
+            "id": "T-dates",
+            "created": timestamp_ms("2026-04-01T12:00:00Z"),
+            "usageLedger": {"events": [
+                {"model":"claude-sonnet-4-0","tokens":{"input":17},"toMessageId":7},
+                {"model":"claude-sonnet-4-0","credits":0,"toMessageId":8,
+                 "timestamp":"2026-04-05T12:00:00Z"}
+            ]},
+            "messages": [
+                {"role":"assistant","messageId":7,"usage":{
+                    "model":"claude-sonnet-4-0","timestamp":"2026-04-06T12:00:00Z"
+                }},
+                {"role":"assistant","messageId":8,"usage":{
+                    "model":"claude-sonnet-4-0","timestamp":"2026-04-07T12:00:00Z"
+                }},
+                {"role":"assistant","messageId":9,"usage":{
+                    "model":"claude-sonnet-4-0","timestamp":"2026-04-08T12:00:00Z"
+                }},
+                {"role":"assistant","messageId":10,"usage":{
+                    "model":"claude-sonnet-4-0","timestamp":"2026-04-09T12:00:00Z","inputTokens":0
+                }}
+            ]
+        });
+        write_amp_thread(&path, &thread.to_string());
+        let messages = parse_amp_file(&path);
+        let rows: Vec<_> = messages
+            .iter()
+            .map(|message| (message.timestamp, message.tokens.input))
+            .collect();
+        assert_eq!(
+            rows,
+            [
+                (timestamp_ms("2026-04-05T12:00:00Z"), 0),
+                (timestamp_ms("2026-04-06T12:00:00Z"), 17),
+                (timestamp_ms("2026-04-09T12:00:00Z"), 0),
+            ]
+        );
     }
 
     #[test]

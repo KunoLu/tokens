@@ -20,11 +20,11 @@
 //! messages, not the agent's, so a thread exported mid-turn would keep the
 //! rest of that turn out of the cache. `amp threads search author:me` returns
 //! only the most recently active threads, unlisted ones included, with an
-//! `updatedAt` that follows every message. A thread found by search is
-//! re-exported when that time changes; any other thread, when its listed time
-//! does. Outside the search window an agent-only change can therefore be
-//! missed if the list watermark is unchanged. Force re-exports discovered
-//! threads but cannot discover an old thread absent from both results.
+//! `updatedAt` that follows every message. An export uses the newer available
+//! watermark for each thread. Outside the search window an agent-only change
+//! can be missed if the list watermark is unchanged. Force re-exports
+//! discovered threads but cannot discover an old thread absent from both
+//! results.
 //!
 //! An export holds the requests of the thread's main agent only. Amp bills a
 //! thread's subagent (Task) and system-model requests (titles and the like) to
@@ -42,7 +42,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::Mutex;
 use std::time::Duration;
-use tokens_core::sessions::amp::{is_thread_id, AmpMessageUsage, AmpUsageLedger};
+use tokens_core::sessions::amp::{is_thread_id, project_cached_thread, AmpCacheProjectionError};
 
 mod process;
 
@@ -53,7 +53,7 @@ const LIST_TIMEOUT: Duration = Duration::from_secs(120);
 const EXPORT_TIMEOUT: Duration = Duration::from_secs(300);
 const MAX_STDOUT_MIB: usize = 32;
 const EXPORT_WORKERS: usize = 4;
-const STATE_VERSION: u32 = 1;
+const STATE_VERSION: u32 = 2;
 
 pub fn get_amp_cache_dir() -> PathBuf {
     crate::paths::get_config_dir().join("amp-cache")
@@ -68,20 +68,30 @@ fn state_path(cache_dir: &Path) -> PathBuf {
     cache_dir.join("state.json")
 }
 
-/// An absent state is a normal local-only install. An inaccessible or invalid
+fn initial_state_path(cache_dir: &Path) -> PathBuf {
+    cache_dir.join("initial-state.json")
+}
+
+/// Only a complete first sync publishes state.json. An inaccessible or invalid
 /// state must reach the validation path, never silently authorize replacement.
 pub fn has_amp_sync_state() -> bool {
-    !matches!(fs::symlink_metadata(state_path(&get_amp_cache_dir())),
-        Err(error) if error.kind() == ErrorKind::NotFound)
+    state_file_exists(&state_path(&get_amp_cache_dir()))
+}
+
+fn state_file_exists(path: &Path) -> bool {
+    !matches!(fs::symlink_metadata(path), Err(error) if error.kind() == ErrorKind::NotFound)
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct AmpSyncState {
     version: u32,
-    synced_at: DateTime<Utc>,
-    /// Thread id -> the update time the cached copy was exported at.
+    synced_at: Option<DateTime<Utc>>,
+    /// Thread id -> latest update time confirmed by a successful export.
     threads: BTreeMap<String, DateTime<Utc>>,
+    /// Thread id -> observed update still awaiting a successful export.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pending: BTreeMap<String, DateTime<Utc>>,
 }
 
 /// One entry of `amp threads list --json`.
@@ -99,29 +109,6 @@ struct ListedThread {
 struct SearchedThread {
     id: String,
     updated_at: DateTime<Utc>,
-}
-
-/// The parts of `amp threads export` kept in the cache; serde skips the rest
-/// of the payload without retaining it.
-#[derive(Serialize, Deserialize)]
-struct CachedThread {
-    id: String,
-    created: Option<i64>,
-    messages: Vec<CachedMessage>,
-    #[serde(
-        rename = "usageLedger",
-        default,
-        skip_serializing_if = "Option::is_none"
-    )]
-    usage_ledger: Option<AmpUsageLedger>,
-}
-
-#[derive(Serialize, Deserialize)]
-struct CachedMessage {
-    role: Option<String>,
-    #[serde(rename = "messageId")]
-    message_id: Option<i64>,
-    usage: Option<AmpMessageUsage>,
 }
 
 #[derive(Debug, Default, Serialize)]
@@ -185,19 +172,26 @@ pub fn run_amp_sync(force: bool, json: bool) -> Result<()> {
 /// A successful discovery cannot vouch for an older, now-unlisted thread.
 pub fn guard_replacement_cache(refreshed: bool) -> Result<Option<fs::File>> {
     let cache_dir = get_amp_cache_dir();
+    guard_replacement_cache_at(&cache_dir, refreshed)
+}
+
+fn guard_replacement_cache_at(cache_dir: &Path, refreshed: bool) -> Result<Option<fs::File>> {
     if !refreshed && !cache_dir.try_exists()? {
         // A legacy-only submit must not create any cloud sync files. The
         // caller checks that no first sync started while it scanned.
         return Ok(None);
     }
-    let lock = acquire_sync_lock(&cache_dir)?;
-    let state = load_state(&cache_dir)?;
+    let lock = acquire_sync_lock(cache_dir)?;
+    let state = load_state(cache_dir)?;
     let incomplete = || anyhow::anyhow!(t!("cli.submit.ampReplaceIncomplete"));
-    if state.is_some() != refreshed {
+    if state_file_exists(&initial_state_path(cache_dir))
+        || state.is_some() != refreshed
+        || state.as_ref().is_some_and(|state| !state.pending.is_empty())
+    {
         return Err(incomplete());
     }
     let mut expected = state.map_or_else(BTreeMap::new, |state| state.threads);
-    match fs::read_dir(threads_dir(&cache_dir)) {
+    match fs::read_dir(threads_dir(cache_dir)) {
         Ok(entries) => {
             for entry in entries {
                 let entry = entry?;
@@ -246,7 +240,7 @@ pub fn run_amp_status(json: bool) -> Result<()> {
         cache_dir: dir.display().to_string(),
         has_cache: state.is_some(),
         cached_threads,
-        last_synced_at: state.map(|state| state.synced_at),
+        last_synced_at: state.and_then(|state| state.synced_at),
     };
     if json {
         println!("{}", serde_json::to_string_pretty(&status)?);
@@ -317,32 +311,74 @@ fn sync_amp_cache_with(
     // Recheck opt-in under the same lock that guards discovery and publication.
     let _lock = acquire_sync_lock(cache_dir)?;
     let state = load_state(cache_dir)?;
-    if !allow_initial_sync && state.is_none() {
+    let initialized = state.is_some();
+    if !allow_initial_sync && !initialized {
         return Ok(SyncAmpResult::default());
     }
+    let initial_path = initial_state_path(cache_dir);
+    let working_path = if initialized {
+        // These two files cannot coexist after a normal publication.
+        anyhow::ensure!(
+            !state_file_exists(&initial_path),
+            t!("top.amp.invalidState")
+        );
+        state_path(cache_dir)
+    } else {
+        initial_path
+    };
+    let mut state = match state {
+        Some(state) => state,
+        None => read_state(&working_path, false)?.unwrap_or_else(|| AmpSyncState {
+            version: STATE_VERSION,
+            synced_at: None,
+            threads: BTreeMap::new(),
+            pending: BTreeMap::new(),
+        }),
+    };
+    state.version = STATE_VERSION;
     let amp = amp_binary().ok_or_else(|| anyhow::anyhow!(t!("top.amp.cliNotFound")))?;
     let amp = Amp::new(amp)?;
     let threads = find_threads(&amp)?;
 
-    let watermarks = state.map_or_else(BTreeMap::new, |state| state.threads);
     let dir = threads_dir(cache_dir);
     let thread_count = threads.len();
-    let pending: Vec<_> = threads
+    let exports: Vec<_> = threads
         .into_iter()
         .filter(|(id, updated)| {
             force
-                || watermarks.get(id) != Some(updated)
+                || state.threads.get(id).is_none_or(|known| updated > known)
+                || state.pending.get(id).is_some_and(|pending| updated >= pending)
                 || !fs::symlink_metadata(dir.join(format!("{id}.json")))
                     .is_ok_and(|metadata| metadata.is_file())
         })
         .collect();
 
+    // Publish intent before a worker can touch a cache file. Cancellation or
+    // a crash must leave evidence even if an unfinished thread falls out of discovery.
+    let mut recorded = false;
+    for (id, updated) in &exports {
+        match state.pending.get_mut(id) {
+            Some(pending) if *updated > *pending => {
+                *pending = *updated;
+                recorded = true;
+            }
+            Some(_) => {}
+            None => {
+                state.pending.insert(id.clone(), *updated);
+                recorded = true;
+            }
+        }
+    }
+    if recorded {
+        save_state(&working_path, &state)?;
+    }
+
     // A first sync exports every thread; a few at a time keeps it to minutes
     // without flooding ampcode.com.
-    let worker_count = EXPORT_WORKERS.min(pending.len());
-    let pending = Mutex::new(pending.into_iter());
+    let worker_count = EXPORT_WORKERS.min(exports.len());
+    let exports = Mutex::new(exports.into_iter());
     let progress = Mutex::new((
-        watermarks,
+        state,
         SyncAmpResult {
             threads: thread_count,
             ..SyncAmpResult::default()
@@ -354,13 +390,22 @@ fn sync_amp_cache_with(
                 if amp.processes.stopped() {
                     break;
                 }
-                let next = pending.lock().unwrap().next();
+                let next = exports.lock().unwrap().next();
                 let Some((id, updated)) = next else { break };
                 let outcome = export_thread(&amp, &dir, &id);
-                let (watermarks, result) = &mut *progress.lock().unwrap();
+                let (state, result) = &mut *progress.lock().unwrap();
                 match outcome {
                     Ok(()) => {
-                        watermarks.insert(id, updated);
+                        if state.pending.get(&id).is_some_and(|pending| updated >= *pending) {
+                            state.pending.remove(&id);
+                        }
+                        // A forced export or file repair with stale discovery
+                        // must not roll back the previous successful watermark.
+                        state
+                            .threads
+                            .entry(id)
+                            .and_modify(|known| *known = (*known).max(updated))
+                            .or_insert(updated);
                         result.exported += 1;
                     }
                     Err(error) => {
@@ -373,24 +418,26 @@ fn sync_amp_cache_with(
             });
         }
     });
+    let (mut state, mut result) = progress.into_inner().unwrap();
+    result.synced = !amp.processes.stopped() && (result.failed == 0 || result.exported != 0);
+    let complete = result.synced && state.pending.is_empty();
+    let record_sync = complete || (initialized && result.synced && result.exported != 0);
+    if record_sync {
+        state.synced_at = Some(Utc::now());
+    }
+    if record_sync || result.exported != 0 {
+        // Keep confirmed exports even after cancellation. Omitted discoveries
+        // and unfinished updates keep their previous entries.
+        save_state(&working_path, &state)?;
+    }
     anyhow::ensure!(
         !amp.processes.stopped(),
         tr!("top.amp.runFailed", command = "amp threads export")
     );
-    let (watermarks, mut result) = progress.into_inner().unwrap();
-    if result.failed > 0 && result.exported == 0 {
-        return Ok(result);
+    if complete && !initialized {
+        // Publish the opt-in key only after all known first-sync work succeeds.
+        fs::rename(&working_path, state_path(cache_dir)).context(t!("top.amp.writeStateFailed"))?;
     }
-    // Threads deleted on ampcode.com keep their cached usage and watermark.
-    save_state(
-        cache_dir,
-        &AmpSyncState {
-            version: STATE_VERSION,
-            synced_at: Utc::now(),
-            threads: watermarks,
-        },
-    )?;
-    result.synced = true;
     Ok(result)
 }
 
@@ -398,11 +445,12 @@ fn sync_amp_cache_with(
 /// change (see the module docs for why it comes from two commands).
 fn find_threads(amp: &Amp) -> Result<BTreeMap<String, DateTime<Utc>>> {
     let mut threads = list_threads(amp)?;
-    threads.extend(
-        search_recent_threads(amp)?
-            .into_iter()
-            .map(|thread| (thread.id, thread.updated_at)),
-    );
+    for thread in search_recent_threads(amp)? {
+        threads
+            .entry(thread.id)
+            .and_modify(|updated| *updated = (*updated).max(thread.updated_at))
+            .or_insert(thread.updated_at);
+    }
     Ok(threads)
 }
 
@@ -475,51 +523,10 @@ fn export_thread(amp: &Amp, dir: &Path, thread_id: &str) -> Result<()> {
 /// The export reduced to the fields the Amp parser reads, with only the
 /// messages that carry usage.
 fn usage_only_thread(thread_id: &str, export: &[u8]) -> Result<Vec<u8>> {
-    let mut thread: CachedThread = parse_output("export", export)?;
-    anyhow::ensure!(thread.id == thread_id, t!("top.amp.exportOfOtherThread"));
-    thread.messages.retain(|message| {
-        message.role.as_deref() == Some("assistant")
-            && message
-                .usage
-                .as_ref()
-                .is_some_and(|usage| usage.model.is_some())
-    });
-    for usage in thread
-        .messages
-        .iter()
-        .filter_map(|message| message.usage.as_ref())
-    {
-        validate_usage(usage.model.as_deref(), usage.timestamp.as_deref())?;
-    }
-    if let Some(events) = thread
-        .usage_ledger
-        .as_mut()
-        .and_then(|ledger| ledger.events.as_mut())
-    {
-        events.retain(|event| event.model.is_some());
-        for event in events {
-            validate_usage(event.model.as_deref(), event.timestamp.as_deref())?;
-        }
-    }
-    Ok(serde_json::to_vec(&thread)?)
-}
-
-fn validate_usage(model: Option<&str>, timestamp: Option<&str>) -> Result<()> {
-    // Accept new model IDs without accepting free-form text in the model field.
-    let valid_model = model.is_some_and(|id| {
-        id.len() <= 256
-            && id.as_bytes().first().is_some_and(u8::is_ascii_alphanumeric)
-            && !id.contains("://")
-            && id.bytes().all(|b| {
-                b.is_ascii_alphanumeric()
-                    || matches!(b, b'-' | b'_' | b'.' | b'/' | b':' | b'@' | b'+')
-            })
-    });
-    anyhow::ensure!(
-        valid_model && timestamp.is_none_or(|ts| DateTime::parse_from_rfc3339(ts).is_ok()),
-        unexpected_output("export")
-    );
-    Ok(())
+    project_cached_thread(thread_id, export).map_err(|error| match error {
+        AmpCacheProjectionError::OtherThread => anyhow::anyhow!(t!("top.amp.exportOfOtherThread")),
+        AmpCacheProjectionError::UnexpectedOutput => unexpected_output("export"),
+    })
 }
 
 fn parse_output<T: serde::de::DeserializeOwned>(operation: &str, output: &[u8]) -> Result<T> {
@@ -649,9 +656,12 @@ fn acquire_sync_lock(cache_dir: &Path) -> Result<fs::File> {
 }
 
 fn load_state(cache_dir: &Path) -> Result<Option<AmpSyncState>> {
-    let path = state_path(cache_dir);
+    read_state(&state_path(cache_dir), true)
+}
+
+fn read_state(path: &Path, committed: bool) -> Result<Option<AmpSyncState>> {
     let invalid = || anyhow::anyhow!(t!("top.amp.invalidState"));
-    match fs::symlink_metadata(&path) {
+    match fs::symlink_metadata(path) {
         Ok(metadata) if metadata.is_file() => {}
         Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
         _ => return Err(invalid()),
@@ -659,15 +669,22 @@ fn load_state(cache_dir: &Path) -> Result<Option<AmpSyncState>> {
     let bytes = fs::read(path).map_err(|_| invalid())?;
     let state: AmpSyncState = serde_json::from_slice(&bytes).map_err(|_| invalid())?;
     anyhow::ensure!(
-        state.version == STATE_VERSION && state.threads.keys().all(|id| is_thread_id(id)),
+        (state.version == STATE_VERSION
+            || (committed && state.version == 1 && state.pending.is_empty()))
+            && (!committed || state.synced_at.is_some())
+            && state
+                .threads
+                .keys()
+                .chain(state.pending.keys())
+                .all(|id| is_thread_id(id)),
         invalid()
     );
     Ok(Some(state))
 }
 
-fn save_state(cache_dir: &Path, state: &AmpSyncState) -> Result<()> {
+fn save_state(path: &Path, state: &AmpSyncState) -> Result<()> {
     let contents = serde_json::to_vec_pretty(state)?;
-    crate::commands::usage::helpers::atomic_write_secret(&state_path(cache_dir), &contents)
+    crate::commands::usage::helpers::atomic_write_secret(path, &contents)
         .context(t!("top.amp.writeStateFailed"))?;
     Ok(())
 }
@@ -675,6 +692,73 @@ fn save_state(cache_dir: &Path, state: &AmpSyncState) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    use serde_json::{json, Value};
+
+    #[cfg(unix)]
+    const FIRST: &str = "2025-01-02T00:00:00Z";
+    #[cfg(unix)]
+    const UPDATED: &str = "2025-01-03T00:00:00Z";
+
+    #[cfg(unix)]
+    struct SyntheticAmp(tempfile::TempDir);
+
+    #[cfg(unix)]
+    impl SyntheticAmp {
+        fn new() -> Self {
+            use std::os::unix::fs::PermissionsExt;
+
+            let fixture = Self(tempfile::tempdir().unwrap());
+            let amp = fixture.dir().join("amp");
+            fs::write(
+                &amp,
+                r#"#!/bin/sh
+root=${0%/*}
+case "$1 $2" in
+    'threads list'|'threads search') route=$2 ;;
+    'threads export')
+        route=$3
+        state="$root/state.json"
+        [ -f "$state" ] || state="$root/initial-state.json"
+        while IFS= read -r line || [ -n "$line" ]; do
+            printf '%s\n' "$line"
+        done <"$state" >"$root/$route.before" || exit 2
+        ;;
+    *) exit 2 ;;
+esac
+IFS= read -r response <"$root/$route.response" || exit 2
+printf '%s\n' "$response"
+"#,
+            )
+            .unwrap();
+            fs::set_permissions(amp, fs::Permissions::from_mode(0o700)).unwrap();
+            fixture.response("list", json!([]));
+            fixture.response("search", json!([]));
+            fixture
+        }
+
+        fn dir(&self) -> &Path {
+            self.0.path()
+        }
+
+        fn response(&self, route: &str, response: Value) {
+            fs::write(
+                self.dir().join(format!("{route}.response")),
+                format!("{response}\n"),
+            )
+            .unwrap();
+        }
+
+        fn read_json(&self, name: &str) -> Value {
+            serde_json::from_slice(&fs::read(self.dir().join(name)).unwrap()).unwrap()
+        }
+
+        fn sync(&self, force: bool, explicit: bool) -> SyncAmpResult {
+            sync_amp_cache_with(self.dir(), force, explicit, || Some(self.dir().join("amp")))
+                .unwrap()
+        }
+    }
 
     #[test]
     fn cached_thread_keeps_usage_and_ledger_without_conversation() {
@@ -802,10 +886,12 @@ mod tests {
         assert!(!result.synced);
         assert!(!path.exists());
         for state in [
-            r#"{"version":2,"syncedAt":"2026-11-19T05:20:21Z","threads":{}}"#,
+            r#"{"version":3,"syncedAt":"2026-11-19T05:20:21Z","threads":{}}"#,
             r#"{"version":1,"syncedAt":null,"threads":{}}"#,
             r#"{"version":1,"syncedAt":"2026-11-19T05:20:21Z","threads":{"T-1":"private-value"}}"#,
             r#"{"version":1,"syncedAt":"2026-11-19T05:20:21Z","threads":{"../private-value":"2026-11-19T05:20:21Z"}}"#,
+            r#"{"version":2,"syncedAt":null,"threads":{}}"#,
+            r#"{"version":2,"syncedAt":"2026-11-19T05:20:21Z","threads":{},"pending":{"../private-value":"2026-11-19T05:20:21Z"}}"#,
         ] {
             fs::write(&path, state).unwrap();
             for explicit in [false, true] {
@@ -817,11 +903,129 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn newer_list_watermark_wins_over_stale_search_with_upstream_v1_state() {
+        let amp = SyntheticAmp::new();
+        fs::write(
+            state_path(amp.dir()),
+            r#"{"version":1,"syncedAt":"2025-01-02T00:00:00+00:00","threads":{"T-1":"2025-01-02T00:00:00Z"}}"#,
+        )
+        .unwrap();
+        fs::create_dir(threads_dir(amp.dir())).unwrap();
+        fs::write(
+            threads_dir(amp.dir()).join("T-1.json"),
+            r#"{"id":"T-1","messages":[]}"#,
+        )
+        .unwrap();
+        amp.response("list", json!([{"id":"T-1","updated":UPDATED}]));
+        amp.response("search", json!([{"id":"T-1","updatedAt":FIRST}]));
+        amp.response("T-1", json!({"id":"T-1","messages":[]}));
+
+        let result = amp.sync(false, false);
+        assert!(result.synced);
+        assert_eq!(result.exported, 1);
+        assert_eq!(amp.read_json("state.json")["threads"]["T-1"], UPDATED);
+
+        amp.response("list", json!([{"id":"T-1","updated":FIRST}]));
+        assert_eq!(amp.sync(true, true).exported, 1);
+        assert_eq!(amp.read_json("state.json")["threads"]["T-1"], UPDATED);
+        assert_eq!(amp.sync(false, false).exported, 0);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn stranded_update_blocks_replacement_until_that_watermark_exports() {
+        let amp = SyntheticAmp::new();
+        amp.response("search", json!([{"id":"T-1","updatedAt":FIRST}]));
+        amp.response("T-1", json!({"id":"T-1","messages":[]}));
+        assert_eq!(amp.sync(false, true).exported, 1);
+        assert!(guard_replacement_cache_at(amp.dir(), true).is_ok());
+
+        amp.response("search", json!([{"id":"T-1","updatedAt":UPDATED}]));
+        fs::remove_file(amp.dir().join("T-1.response")).unwrap();
+        assert_eq!(amp.sync(false, false).failed, 1);
+        for name in ["T-1.before", "state.json"] {
+            let state = amp.read_json(name);
+            assert_eq!(state["threads"]["T-1"], FIRST);
+            assert_eq!(state["pending"]["T-1"], UPDATED);
+        }
+
+        amp.response("search", json!([{"id":"T-2","updatedAt":FIRST}]));
+        amp.response("T-2", json!({"id":"T-2","messages":[]}));
+        let result = amp.sync(true, true);
+        assert_eq!((result.exported, result.failed), (1, 0));
+        assert!(guard_replacement_cache_at(amp.dir(), true).is_err());
+
+        amp.response("search", json!([{"id":"T-1","updatedAt":FIRST}]));
+        amp.response("T-1", json!({"id":"T-1","messages":[]}));
+        assert_eq!(amp.sync(true, true).exported, 1);
+        assert_eq!(amp.read_json("state.json")["pending"]["T-1"], UPDATED);
+        assert!(guard_replacement_cache_at(amp.dir(), true).is_err());
+
+        amp.response("search", json!([{"id":"T-1","updatedAt":UPDATED}]));
+        assert_eq!(amp.sync(false, false).exported, 1);
+        let state = amp.read_json("state.json");
+        assert_eq!(state["threads"]["T-1"], UPDATED);
+        assert!(state.get("pending").is_none());
+        assert!(guard_replacement_cache_at(amp.dir(), true).is_ok());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn partial_first_sync_preserves_progress_without_enabling_refresh() {
+        let amp = SyntheticAmp::new();
+        amp.response(
+            "search",
+            json!([{"id":"T-1","updatedAt":FIRST}, {"id":"T-2","updatedAt":FIRST}]),
+        );
+        let result = amp.sync(false, true);
+        assert!(!result.synced);
+        assert_eq!((result.exported, result.failed), (0, 2));
+        assert_eq!(
+            amp.read_json("T-1.before")["pending"],
+            json!({"T-1":FIRST,"T-2":FIRST}),
+        );
+        assert!(!state_file_exists(&state_path(amp.dir())));
+        assert!(guard_replacement_cache_at(amp.dir(), false).is_err());
+
+        amp.response("T-1", json!({"id":"T-1","messages":[]}));
+        let result = amp.sync(false, true);
+        assert!(result.synced);
+        assert_eq!((result.exported, result.failed), (1, 1));
+        assert!(!state_file_exists(&state_path(amp.dir())));
+        let draft = amp.read_json("initial-state.json");
+        assert_eq!(draft["threads"], json!({"T-1":FIRST}));
+        assert_eq!(draft["pending"], json!({"T-2":FIRST}));
+        assert!(!sync_amp_cache_with(amp.dir(), true, false, || {
+            panic!("an incomplete first sync must not authorize a refresh")
+        })
+        .unwrap()
+        .synced);
+
+        amp.response("search", json!([{"id":"T-1","updatedAt":FIRST}]));
+        assert_eq!(amp.sync(false, true).exported, 0);
+        assert!(!state_file_exists(&state_path(amp.dir())));
+        assert!(guard_replacement_cache_at(amp.dir(), false).is_err());
+
+        amp.response("search", json!([{"id":"T-2","updatedAt":FIRST}]));
+        amp.response("T-2", json!({"id":"T-2","messages":[]}));
+        assert_eq!(amp.sync(false, true).exported, 1);
+        assert_eq!(
+            amp.read_json("state.json")["threads"],
+            json!({"T-1":FIRST,"T-2":FIRST}),
+        );
+        assert!(!state_file_exists(&initial_state_path(amp.dir())));
+        assert!(guard_replacement_cache_at(amp.dir(), true).is_ok());
+    }
+
     #[test]
     #[serial_test::serial]
-    fn concurrent_sync_cannot_reach_amp() {
+    fn replacement_guard_blocks_a_new_sync() {
         let dir = tempfile::tempdir().unwrap();
-        let _lock = acquire_sync_lock(dir.path()).unwrap();
+        let _guard = guard_replacement_cache_at(dir.path(), false)
+            .unwrap()
+            .unwrap();
         let error = sync_amp_cache_with(dir.path(), true, true, || {
             panic!("another writer holds the sync lock")
         })

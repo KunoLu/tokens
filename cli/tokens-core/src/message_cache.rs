@@ -1587,7 +1587,8 @@ fn parser_version(client: ClientId) -> u32 {
         // (`zai-org/GLM-5.3-Flash` -> `GLM-5.3-Flash`); both shipped together.
         // v3 keeps malformed trailing-slash model names rather than an empty id.
         // v4 falls back to the stem for blank IDs and ignores unmetered usage.
-        ClientId::Amp => 4,
+        // v5 preserves exact ledger timing and caches blank IDs separately from display stems.
+        ClientId::Amp => 5,
         // The remaining clients parse their own formats and have never
         // shipped a parser-only change that leaves byte-identical input
         // parsing differently, so all of them are at version 1. Repeating
@@ -4320,7 +4321,7 @@ mod tests {
 
     #[test]
     #[serial_test::serial]
-    fn test_amp_parser_version_invalidates_v3_warm_entries() {
+    fn test_amp_parser_version_invalidates_v4_warm_entries() {
         let home = TempDir::new().unwrap();
         let _cache_env = sandbox_cache_env(home.path());
         let source = home.path().join("T-reparse.json");
@@ -4330,14 +4331,14 @@ mod tests {
         )
         .unwrap();
         let current = CacheIdentity::for_client(ClientId::Amp);
-        assert_eq!(current.parser_version, 4);
+        assert_eq!(current.parser_version, 5);
         let stale = CacheIdentity {
             namespace: current.namespace,
-            parser_version: 3,
+            parser_version: 4,
         };
-        let mut messages = crate::sessions::amp::parse_amp_file(&source);
+        // The v4 source cache did not distinguish this display stem from a real ID.
+        let messages = crate::sessions::amp::parse_amp_file(&source);
         assert_eq!(messages[0].session_id, "T-reparse");
-        messages[0].session_id.clear();
         let entry = CachedSourceEntry::new(
             stale,
             &source,

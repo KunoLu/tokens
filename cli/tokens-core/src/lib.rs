@@ -2462,29 +2462,35 @@ fn parse_all_messages_streaming<S: MessageSink>(
         }
     }
 
-    let amp_identity = message_cache::CacheIdentity::for_client(ClientId::Amp);
-    let amp_outcomes: Vec<_> = scan_result
-        .get(ClientId::Amp)
-        .par_iter()
-        .map(|path| {
-            load_or_parse_source(
-                amp_identity,
-                path,
-                &source_cache,
-                pricing,
-                sessions::amp::parse_amp_file,
-            )
-        })
-        .collect();
-    for (outcome, selected) in
-        sessions::amp::mark_preferred_sources(amp_outcomes, |outcome| outcome.messages.as_slice())
-    {
-        if selected {
-            all_messages.extend(outcome.messages);
-        }
-        // Cache both winners and losers to reuse their parsed identity next time.
-        if let Some(entry) = outcome.cache_entry {
-            source_cache.insert(entry);
+    let amp_paths = scan_result.get(ClientId::Amp);
+    if !amp_paths.is_empty() {
+        let synced_root = scanner::amp_sync_cache_root(home_dir, use_env_roots);
+        let amp_identity = message_cache::CacheIdentity::for_client(ClientId::Amp);
+        let amp_outcomes: Vec<_> = amp_paths
+            .par_iter()
+            .map(|path| {
+                load_or_parse_source(
+                    amp_identity,
+                    path,
+                    &source_cache,
+                    pricing,
+                    sessions::amp::parse_amp_source,
+                )
+            })
+            .collect();
+        for (outcome, selected) in sessions::amp::mark_preferred_sources(
+            amp_paths,
+            &synced_root,
+            amp_outcomes,
+            |outcome| outcome.messages.as_mut_slice(),
+        ) {
+            if selected {
+                all_messages.extend(outcome.messages);
+            }
+            // Cache both winners and losers with the original parsed identity.
+            if let Some(entry) = outcome.cache_entry {
+                source_cache.insert(entry);
+            }
         }
     }
 
@@ -5604,18 +5610,26 @@ pub fn parse_local_clients(options: LocalParseOptions) -> Result<ParsedMessages,
     counts.set(ClientId::Gemini, gemini_count);
     messages.extend(gemini_msgs);
 
-    let amp_sources: Vec<_> = scan_result
-        .get(ClientId::Amp)
-        .par_iter()
-        .map(|path| sessions::amp::parse_amp_file(path))
-        .collect();
-    let before_amp = messages.len();
-    for (source, selected) in sessions::amp::mark_preferred_sources(amp_sources, Vec::as_slice) {
-        if selected {
-            messages.extend(source.iter().map(unified_to_parsed));
+    let amp_paths = scan_result.get(ClientId::Amp);
+    if !amp_paths.is_empty() {
+        let synced_root = scanner::amp_sync_cache_root(&home_dir, options.use_env_roots);
+        let amp_sources: Vec<_> = amp_paths
+            .par_iter()
+            .map(|path| sessions::amp::parse_amp_source(path))
+            .collect();
+        let before_amp = messages.len();
+        for (source, selected) in sessions::amp::mark_preferred_sources(
+            amp_paths,
+            &synced_root,
+            amp_sources,
+            Vec::as_mut_slice,
+        ) {
+            if selected {
+                messages.extend(source.iter().map(unified_to_parsed));
+            }
         }
+        counts.set(ClientId::Amp, (messages.len() - before_amp) as i32);
     }
-    counts.set(ClientId::Amp, (messages.len() - before_amp) as i32);
 
     let codebuff_msgs: Vec<ParsedMessage> = if include_codebuff {
         scan_result
@@ -18698,8 +18712,11 @@ mod tests {
         let _cache_env = redirect_cache_home(cache_home.path());
         let home = source_home.path().to_str().unwrap();
         let local = client_scan_root(source_home.path(), ClientId::Amp);
+        let local_a = local.join("a");
+        let local_b = local.join("b");
         let synced = scanner::amp_sync_cache_root(home, false);
-        std::fs::create_dir_all(&local).unwrap();
+        std::fs::create_dir_all(&local_a).unwrap();
+        std::fs::create_dir_all(&local_b).unwrap();
         std::fs::create_dir_all(&synced).unwrap();
 
         for (root, name, id, input) in [
@@ -18710,13 +18727,18 @@ mod tests {
             (&local, "T-legacy", Some("T-legacy"), 70),
             (&local, "T-no-id", None, 80),
             (&local, "T-fallback", Some(""), 901),
+            (&local_a, "T-fallback", None, 902),
+            (&local_b, "T-fallback", Some(" "), 903),
+            (&local_a, "T-same-stem", None, 81),
+            (&local_b, "T-same-stem", Some(""), 82),
+            (&local, "T-real-local-id", Some("T-same-stem"), 83),
             (&local, "T-broken", Some("T-broken"), 50),
-            (&local, "T-empty", Some("T-empty"), 75),
+            (&local, "T-empty", None, 75),
             (&local, "T-model-only", Some("T-model-only"), 77),
             (&synced, "T-synced-copy", Some("T-shared"), 20),
             (&synced, "T-same-name", Some("T-same-name"), 30),
             (&synced, "T-cloud", Some("T-cloud"), 40),
-            (&synced, "T-fallback-alias", Some("T-fallback"), 60),
+            (&synced, "T-fallback", Some("T-fallback"), 60),
         ] {
             let mut thread = serde_json::json!({
                 "created": 1_795_279_800_001_i64,
@@ -18772,6 +18794,9 @@ mod tests {
             ("T-model-only", 77),
             ("T-no-id", 80),
             ("T-same-name", 30),
+            ("T-same-stem", 81),
+            ("T-same-stem", 82),
+            ("T-same-stem", 83),
             ("T-shared", 20),
             ("T-shared", 21),
             ("legacy-thread", 10),
