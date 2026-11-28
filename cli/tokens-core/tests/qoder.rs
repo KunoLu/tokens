@@ -940,7 +940,9 @@ async fn test_qoder_damaged_input_never_inflates_totals() {
     );
 
     // November 8 at 00:00 UTC, deliberately outside the valid row's day.
-    std::fs::File::open(&path)
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(&path)
         .unwrap()
         .set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_794_096_000))
         .unwrap();
