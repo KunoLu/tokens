@@ -3,6 +3,8 @@
 //! Every fixture here is synthetic: a temp home with JSONL transcripts, segment
 //! logs and a real (tempfile) SQLite database. Nothing reads the developer's
 //! `~/.qoder`, and no test depends on Qoder being installed.
+//! Only tests of persistent caching need a child process with a temporary
+//! `TOKENS_CONFIG_DIR`; count-only and in-memory parses use the fixture home.
 //!
 //! The token assertions are exact on purpose. The IDE case pins the documented
 //! `prompt_tokens` / `cached_tokens` / `completion_tokens` relationship
@@ -14,6 +16,7 @@ mod common;
 use std::collections::HashMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use tokens_core::pricing::{litellm::ModelPricing, PricingService};
 use tokens_core::scanner::{scan_all_clients_with_scanner_settings, ScannerSettings};
@@ -25,6 +28,47 @@ use tokens_core::{
     parse_local_unified_messages_with_pricing_uncached, ClientId, LocalParseOptions, PathRoot,
     UnifiedMessage,
 };
+
+const QODER_TEST_CHILD: &str = "TOKENS_QODER_TEST_CHILD";
+
+fn is_qoder_test_child(test: &str) -> bool {
+    std::env::var(QODER_TEST_CHILD).ok().as_deref() == Some(test)
+}
+
+fn qoder_test_command(test: &str, home: &Path) -> Command {
+    let mut command = Command::new(std::env::current_exe().expect("locate Qoder test binary"));
+    command
+        .args(["--exact", test, "--format", "pretty"])
+        .env(QODER_TEST_CHILD, test)
+        .env("TOKENS_CONFIG_DIR", home.join("tokens-config"))
+        .env("HOME", home)
+        .env("XDG_CONFIG_HOME", home.join(".config"))
+        .env_remove("TOKENS_EXTRA_DIRS")
+        .env_remove("TOKENS_HEADLESS_DIR");
+    command
+}
+
+fn run_qoder_test_child(command: &mut Command) {
+    let output = command.output().expect("run isolated Qoder test");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    // libtest also exits successfully when an exact filter matches no tests.
+    assert!(
+        output.status.success() && stdout.contains("test result: ok. 1 passed;"),
+        "Qoder child {command:?} failed ({}):\n{stdout}\n{}",
+        output.status,
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+/// Run the named test in a child, then return true to stop the parent copy.
+fn rerun_with_isolated_cache(test: &str) -> bool {
+    if is_qoder_test_child(test) {
+        return false;
+    }
+    let profile = common::temp_home();
+    run_qoder_test_child(&mut qoder_test_command(test, profile.path()));
+    true
+}
 
 /// Parse a synthetic home with the uncached (in-memory) source cache.
 async fn parse_uncached(home: &Path) -> Vec<UnifiedMessage> {
@@ -268,12 +312,11 @@ async fn test_qoder_forked_session_replay_counts_once() {
 /// T07: subagent transcripts are counted, attributed to the agent, and never
 /// confused with the parent session's own requests.
 #[tokio::test]
-#[serial_test::serial]
 async fn test_qoder_subagent_is_counted_once_with_attribution() {
+    if rerun_with_isolated_cache("test_qoder_subagent_is_counted_once_with_attribution") {
+        return;
+    }
     let home = common::temp_home();
-    let cache = common::temp_home();
-    let mut env = EnvGuard::capture(&["TOKENS_CONFIG_DIR"]);
-    env.set("TOKENS_CONFIG_DIR", cache.path());
     let meta = home
         .path()
         .join(".qoder/projects/-repo/sess-main/subagents/agent-xyz.meta.json");
@@ -581,12 +624,11 @@ async fn test_qoder_anonymous_requests_are_scoped_to_their_file() {
 }
 
 #[tokio::test]
-#[serial_test::serial]
 async fn test_qoder_three_sources_merge_within_an_edition_before_pricing() {
+    if rerun_with_isolated_cache("test_qoder_three_sources_merge_within_an_edition_before_pricing") {
+        return;
+    }
     let home = common::temp_home();
-    let cache = common::temp_home();
-    let mut env = EnvGuard::capture(&["TOKENS_CONFIG_DIR"]);
-    env.set("TOKENS_CONFIG_DIR", cache.path());
 
     write_jsonl(
         &home.path().join(".qoder/projects/-repo/sess-cli.jsonl"),
@@ -793,14 +835,11 @@ async fn test_qoder_accepts_only_explicit_extra_local_databases() {
 /// `-wal` sidecar. A warm cache keyed on the database file alone would never
 /// see them.
 #[tokio::test]
-#[serial_test::serial]
 async fn test_qoder_ide_wal_writes_invalidate_the_source_cache() {
+    if rerun_with_isolated_cache("test_qoder_ide_wal_writes_invalidate_the_source_cache") {
+        return;
+    }
     let home = common::temp_home();
-    let cache_home = common::temp_home();
-    let mut env = EnvGuard::capture(&["TOKENS_CONFIG_DIR", "HOME", "XDG_CONFIG_HOME"]);
-    env.set("TOKENS_CONFIG_DIR", cache_home.path());
-    env.set("HOME", home.path());
-    env.set("XDG_CONFIG_HOME", home.path().join(".config"));
 
     let db = PathBuf::from(
         PathRoot::AppData.resolve_with_env_strategy(home.path().to_str().unwrap(), false),
@@ -861,14 +900,11 @@ async fn test_qoder_ide_wal_writes_invalidate_the_source_cache() {
 
 /// T22: rescanning the same home twice — warm cache and cold parse — agrees.
 #[tokio::test]
-#[serial_test::serial]
 async fn test_qoder_repeated_scans_are_stable() {
+    if rerun_with_isolated_cache("test_qoder_repeated_scans_are_stable") {
+        return;
+    }
     let home = common::temp_home();
-    let cache_home = common::temp_home();
-    let mut env = EnvGuard::capture(&["TOKENS_CONFIG_DIR", "HOME", "XDG_CONFIG_HOME"]);
-    env.set("TOKENS_CONFIG_DIR", cache_home.path());
-    env.set("HOME", home.path());
-    env.set("XDG_CONFIG_HOME", home.path().join(".config"));
 
     let transcript = home.path().join(".qoder/projects/-work-app/sess-1.jsonl");
     let segment = home
@@ -963,26 +999,21 @@ async fn test_qoder_damaged_input_never_inflates_totals() {
 
 /// T23: explicit CLI and IDE roots preserve edition even without path markers.
 #[tokio::test]
-#[serial_test::serial]
 async fn test_qoder_config_dir_overrides_are_honoured() {
+    const TEST: &str = "test_qoder_config_dir_overrides_are_honoured";
+    const EXPECTED_KEY: &str = "TOKENS_QODER_TEST_EXPECTED_KEY";
+    if is_qoder_test_child(TEST) {
+        let home = PathBuf::from(std::env::var_os("HOME").expect("fixture home"));
+        let expected_key = std::env::var(EXPECTED_KEY).expect("expected edition request key");
+        assert_qoder_override_scan(&home, &expected_key).await;
+        return;
+    }
+
     let home = common::temp_home();
-    let cache = common::temp_home();
     let intl = home.path().join("redirected-a");
     let cn = home.path().join("redirected-b");
     let intl_ide = intl.join("desktop");
     let cn_ide = cn.join("desktop/SharedClientCache");
-    let mut env = EnvGuard::capture(&[
-        "TOKENS_CONFIG_DIR",
-        "QODER_CONFIG_DIR",
-        "QODERCN_CONFIG_DIR",
-        "QODER_HOME",
-        "QODER_CN_HOME",
-    ]);
-    env.set("TOKENS_CONFIG_DIR", cache.path());
-    env.set("QODER_CONFIG_DIR", &intl);
-    env.set("QODERCN_CONFIG_DIR", &cn);
-    env.set("QODER_HOME", &intl_ide);
-    env.set("QODER_CN_HOME", &cn_ide);
 
     write_jsonl(
         &intl.join("projects/-repo/sess-intl.jsonl"),
@@ -1016,10 +1047,36 @@ async fn test_qoder_config_dir_overrides_are_honoured() {
         &[CN_ONE_REQUEST],
     );
 
-    let mut options = qoder_options(home.path());
+    // The second process scans the same files against the first process's cache.
+    // Only scanner-assigned editions change.
+    for (cli_roots, ide_roots, expected_key) in [
+        (
+            [&intl, &cn],
+            [&intl_ide, &cn_ide],
+            "qoder:qoder-cn:req:req-intl-1",
+        ),
+        (
+            [&cn, &intl],
+            [&cn_ide, &intl_ide],
+            "qoder:qoder:req:req-intl-1",
+        ),
+    ] {
+        run_qoder_test_child(
+            qoder_test_command(TEST, home.path())
+                .env("QODER_CONFIG_DIR", cli_roots[0])
+                .env("QODERCN_CONFIG_DIR", cli_roots[1])
+                .env("QODER_HOME", ide_roots[0])
+                .env("QODER_CN_HOME", ide_roots[1])
+                .env(EXPECTED_KEY, expected_key),
+        );
+    }
+}
+
+async fn assert_qoder_override_scan(home: &Path, expected_key: &str) {
+    let mut options = qoder_options(home);
     options.use_env_roots = true;
     let scan = scan_all_clients_with_scanner_settings(
-        home.path().to_str().unwrap(),
+        home.to_str().unwrap(),
         &["qoder".to_string()],
         true,
         &options.scanner_settings,
@@ -1027,33 +1084,24 @@ async fn test_qoder_config_dir_overrides_are_honoured() {
     assert_eq!(scan.get(ClientId::Qoder).len(), 4);
     assert_eq!(scan.qoder_ide_dbs.len(), 2);
 
-    let parse = || parse_local_unified_messages_with_pricing(options.clone(), None);
-    let first = parse().await.unwrap();
-    assert_eq!(first.len(), 4);
-    assert_eq!(buckets(&first), (900, 80, 1400, 100));
-    assert!(first.iter().any(|message| {
+    let messages = parse_local_unified_messages_with_pricing(options.clone(), None)
+        .await
+        .unwrap();
+    assert!(
+        tokens_core::paths::get_cache_dir().is_dir(),
+        "persistent parse must create the isolated cache"
+    );
+    assert_eq!(messages.len(), 4);
+    assert_eq!(buckets(&messages), (900, 80, 1400, 100));
+    assert!(messages.iter().any(|message| {
         message.model_id == "dfmodel"
-            && message.dedup_key.as_deref() == Some("qoder:qoder-cn:req:req-intl-1")
-            && message.tokens.output == 25
-    }));
-
-    // Same bytes and paths, but the scanner assigns the opposite editions now.
-    env.set("QODER_CONFIG_DIR", &cn);
-    env.set("QODERCN_CONFIG_DIR", &intl);
-    env.set("QODER_HOME", &cn_ide);
-    env.set("QODER_CN_HOME", &intl_ide);
-    let swapped = parse().await.unwrap();
-    assert_eq!(swapped.len(), 4);
-    assert_eq!(buckets(&swapped), buckets(&first));
-    assert!(swapped.iter().any(|message| {
-        message.model_id == "dfmodel"
-            && message.dedup_key.as_deref() == Some("qoder:qoder:req:req-intl-1")
+            && message.dedup_key.as_deref() == Some(expected_key)
             && message.tokens.output == 25
     }));
     let uncached = parse_local_unified_messages_with_pricing_uncached(options, None)
         .await
         .unwrap();
-    assert_eq!(swapped, uncached);
+    assert_eq!(messages, uncached);
 }
 
 /// A Qoder-only filter must not pick up other clients, and other clients must
@@ -1100,36 +1148,4 @@ async fn test_qoder_absent_installation_degrades_to_empty() {
     assert!(messages.is_empty());
     let parsed = parse_local_clients(qoder_options(home.path())).unwrap();
     assert_eq!(parsed.counts.get(ClientId::Qoder), 0);
-}
-
-/// Minimal env guard: `paths::test_env` is crate-private, and these tests are
-/// serialized so a process-wide environment change is safe.
-struct EnvGuard(Vec<(&'static str, Option<std::ffi::OsString>)>);
-
-impl EnvGuard {
-    fn capture(keys: &[&'static str]) -> Self {
-        Self(
-            keys.iter()
-                .map(|key| (*key, std::env::var_os(key)))
-                .collect(),
-        )
-    }
-
-    fn set(&mut self, key: &str, value: impl AsRef<std::ffi::OsStr>) {
-        // SAFETY: every test touching these variables holds `serial_test::serial`.
-        unsafe { std::env::set_var(key, value) };
-    }
-}
-
-impl Drop for EnvGuard {
-    fn drop(&mut self) {
-        for (key, previous) in self.0.drain(..) {
-            unsafe {
-                match previous {
-                    Some(value) => std::env::set_var(key, value),
-                    None => std::env::remove_var(key),
-                }
-            }
-        }
-    }
 }

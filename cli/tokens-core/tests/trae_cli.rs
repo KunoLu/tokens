@@ -183,13 +183,15 @@ fn forked_trae_rollout_uses_only_the_childs_usage_dialect() {
     let prefix = [
         r#"{"timestamp":"2026-09-01T10:00:04.000Z","type":"session_meta","payload":{"id":"019fcf70-2222-7000-8000-000000000001","forked_from_id":"019fcf70-1111-7000-8000-000000000001","thread_source":"user","model_provider":"trae"}}"#,
         HISTORY_MUTATION_ROLLOUT[0],
-        r#"{"timestamp":"2026-09-01T10:00:01.000Z","type":"turn_context","payload":{"turn_id":"019fcf70-1112-7000-8000-000000000001","model":"gpt-5-codex"}}"#,
+        r#"{"timestamp":"2026-09-01T10:00:01.000Z","type":"turn_context","payload":{"turn_id":"019fcf70-1112-7000-8000-000000000001","model":"gpt-5.4"}}"#,
         HISTORY_MUTATION_ROLLOUT[2],
         HISTORY_MUTATION_ROLLOUT[3],
         parent_snapshot,
+        r#"{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{}}}}"#,
         r#"{"timestamp":"2026-09-01T10:00:04.100Z","type":"turn_context","payload":{"turn_id":"019fcf70-2223-7000-8000-000000000001","model":"gpt-5-codex"}}"#,
         r#"{"timestamp":"2026-09-01T10:00:05.000Z","type":"event_msg","payload":{"type":"user_message","message":"Continue in the fork."}}"#,
         r#"{"timestamp":"2026-09-01T10:00:06.000Z","type":"token_usage_record","payload":{"response_id":"resp_child","usage":{"input_tokens":20,"output_tokens":2,"total_tokens":22}}}"#,
+        r#"{"type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{}}}}"#,
         trailing_snapshot.as_str(),
         HISTORY_MUTATION_ROLLOUT[3],
     ];
@@ -221,6 +223,7 @@ fn forked_trae_rollout_uses_only_the_childs_usage_dialect() {
         if let Some(key_prefix) = expected_key_prefix {
             assert_eq!(messages.len(), 1, "{name}");
             assert_eq!(messages[0].tokens.total(), 22, "{name}");
+            assert_eq!(messages[0].model_id, "gpt-5-codex", "{name}");
             assert!(messages[0].is_turn_start, "{name}");
             assert!(
                 messages[0]
@@ -232,6 +235,42 @@ fn forked_trae_rollout_uses_only_the_childs_usage_dialect() {
         } else {
             assert!(messages.is_empty(), "{name}");
         }
+    }
+}
+
+#[test]
+fn trae_usage_records_yield_only_to_a_usable_token_count() {
+    let home = common::temp_home();
+    for (name, info, expected) in [
+        ("null", "null", 112),
+        ("metadata-only", r#"{"model_context_window":272000}"#, 112),
+        (
+            "no-counters",
+            r#"{"last_token_usage":{},"total_token_usage":{"input_tokens":null}}"#,
+            112,
+        ),
+        (
+            "invalid-counters",
+            r#"{"last_token_usage":{"input_tokens":-1,"cache_write_input_tokens":"invalid"}}"#,
+            112,
+        ),
+        (
+            "explicit-zero",
+            r#"{"last_token_usage":{"input_tokens":0,"output_tokens":0,"total_tokens":0}}"#,
+            0,
+        ),
+    ] {
+        let path = home.path().join(format!("rollout-{name}.jsonl"));
+        let event = format!(
+            r#"{{"timestamp":"2026-09-01T10:00:02.500Z","type":"event_msg","payload":{{"type":"token_count","info":{info}}}}}"#
+        );
+        let mut lines = HISTORY_MUTATION_ROLLOUT.to_vec();
+        lines.insert(3, &event);
+        write_jsonl(&path, &lines);
+
+        let messages = parse_trae_cli_file(&path);
+        assert_eq!(messages.len(), usize::from(expected != 0), "{name}");
+        assert_eq!(total_tokens(&messages), expected, "{name}");
     }
 }
 

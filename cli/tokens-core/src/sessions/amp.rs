@@ -77,7 +77,10 @@ pub struct AmpThread {
 /// Amp names some models by their upstream org, such as
 /// `zai-org/GLM-5.3-Flash`; other clients report the same model without it.
 fn strip_org_prefix(model: &str) -> &str {
-    model.rsplit('/').next().unwrap_or(model)
+    match model.rsplit_once('/') {
+        Some((_, id)) if !id.is_empty() => id,
+        _ => model,
+    }
 }
 
 /// Get provider from model name
@@ -689,6 +692,11 @@ mod tests {
                             "inputTokens": 2,
                             "outputTokens": 1
                         }
+                    },
+                    {
+                        "role": "assistant",
+                        "messageId": 4,
+                        "usage": {"model": "org/", "timestamp": "2026-11-21T10:00:10Z", "inputTokens": 1}
                     }
                 ]
             })
@@ -696,9 +704,10 @@ mod tests {
         );
 
         let messages = parse_amp_file(&path);
-        assert_eq!(messages.len(), 2);
+        assert_eq!(messages.len(), 3);
         assert_eq!(messages[0].model_id, "GLM-5.3-Flash");
         assert_eq!(messages[1].model_id, "claude-opus-5-5");
+        assert_eq!(messages[2].model_id, "org/");
     }
 
     #[test]

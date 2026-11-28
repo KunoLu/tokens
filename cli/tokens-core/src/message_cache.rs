@@ -1168,7 +1168,8 @@ const SHARED_PARSER_FAMILIES: &[SharedParserFamily] = &[
             // +1 (#122): entry-identity-first keys, as for Pi above.
             (ClientId::CraftAgent, 2),
             // Compaction requests, billed cost and 1h writes are kwwk-specific.
-            (ClientId::Kwwk, 1),
+            // Stable compaction identities also change replayed usage.
+            (ClientId::Kwwk, 2),
             // Prime Agent's independent history: v1->v2 strips a
             // leading BOM and recovers records containing undecodable
             // bytes; its accounting scan also continues past those records
@@ -1184,7 +1185,8 @@ const SHARED_PARSER_FAMILIES: &[SharedParserFamily] = &[
             // values and matching-critical child timestamps while
             // preserving unrelated damaged usage extensions. Later bumps
             // reject wrong-typed child timestamps, including explicit null.
-            (ClientId::PrimeAgent, 5),
+            // Numeric entry timestamps are not Prime's ISO timestamp format.
+            (ClientId::PrimeAgent, 6),
         ],
     },
     SharedParserFamily {
@@ -1349,7 +1351,8 @@ fn parser_version(client: ClientId) -> u32 {
         // session present in both forms dedups (missuo/tokens#109, upstream
         // junhoyeo/tokscale#1423).
         // v13->v14 preserves the native cache-write bucket in rollout usage.
-        ClientId::Codex => 14,
+        // v15 ignores empty usage events when resolving fork baselines.
+        ClientId::Codex => 15,
         // v4->v5: jcode's assistant-message timestamp is now back-calculated
         // to the turn start (timestamp - tool_duration_ms) instead of using
         // the recorded (end-anchored) timestamp directly. Follow-up to #890.
@@ -1560,7 +1563,8 @@ fn parser_version(client: ClientId) -> u32 {
         // parses onto different days, so only this bump re-dates cached rows.
         // The same version also drops an upstream org prefix from the model
         // (`zai-org/GLM-5.3-Flash` -> `GLM-5.3-Flash`); both shipped together.
-        ClientId::Amp => 2,
+        // v3 keeps malformed trailing-slash model names rather than an empty id.
+        ClientId::Amp => 3,
         // The remaining clients parse their own formats and have never
         // shipped a parser-only change that leaves byte-identical input
         // parsing differently, so all of them are at version 1. Repeating
@@ -4016,7 +4020,7 @@ mod tests {
         // compaction usage, and v12->v13 decodes `.jsonl.zst` rollouts.
         // Each bump is what stops an existing cache from replaying the old
         // rows, so it has to be asserted rather than assumed.
-        assert_eq!(parser_version(ClientId::Codex), 14);
+        assert_eq!(parser_version(ClientId::Codex), 15);
         assert_eq!(parser_version(ClientId::Claude), 2);
     }
 
@@ -4155,7 +4159,7 @@ mod tests {
 
     #[test]
     fn test_lossy_jsonl_parser_versions_invalidate_v3_entries() {
-        assert_eq!(parser_version(ClientId::PrimeAgent), 8);
+        assert_eq!(parser_version(ClientId::PrimeAgent), 9);
         assert_eq!(parser_version(ClientId::Reasonix), 4);
     }
 
@@ -4169,7 +4173,7 @@ mod tests {
         // (the standard-lane members took a further +1 for #122, below),
         // plus the base 2 -> 3 speed bump.
         assert_eq!(parser_version(ClientId::Kimchi), 4);
-        assert_eq!(parser_version(ClientId::PrimeAgent), 8);
+        assert_eq!(parser_version(ClientId::PrimeAgent), 9);
     }
 
     /// #122: the standard cross-session lane (Pi, OMP, Senpi, Craft Agent)
@@ -4191,7 +4195,7 @@ mod tests {
     #[test]
     fn test_pi_format_speed_parser_version_invalidates_v2_entries() {
         assert_eq!(crate::sessions::pi::PI_FORMAT_PARSER_BASE_VERSION, 3);
-        assert_eq!(parser_version(ClientId::Kwwk), 4);
+        assert_eq!(parser_version(ClientId::Kwwk), 5);
     }
 
     #[test]
@@ -4292,9 +4296,8 @@ mod tests {
     }
 
     #[test]
-    fn test_amp_parser_version_invalidates_v1_entries() {
-        // v1->v2 dates message usage by `usage.timestamp`, not thread creation.
-        assert_eq!(parser_version(ClientId::Amp), 2);
+    fn test_amp_parser_version_invalidates_empty_model_ids() {
+        assert_eq!(parser_version(ClientId::Amp), 3);
     }
 
     #[test]
@@ -5177,8 +5180,8 @@ mod tests {
                     (ClientId::Omp, 2),
                     (ClientId::Senpi, 2),
                     (ClientId::CraftAgent, 2),
-                    (ClientId::Kwwk, 1),
-                    (ClientId::PrimeAgent, 5),
+                    (ClientId::Kwwk, 2),
+                    (ClientId::PrimeAgent, 6),
                 ],
             ),
             (

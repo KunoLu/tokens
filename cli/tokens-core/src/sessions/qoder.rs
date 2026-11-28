@@ -82,7 +82,8 @@ use std::path::{Path, PathBuf};
 ///
 /// - Version 1: initial implementation.
 /// - Version 2: edition-scoped source keys and gross-prompt merging.
-pub const QODER_PARSER_BASE_VERSION: u32 = 2;
+/// - Version 3: partial counters, request attribution and fragment timestamps.
+pub const QODER_PARSER_BASE_VERSION: u32 = 3;
 
 /// Public client id. Both editions report under it.
 pub const CLIENT_ID: &str = "qoder";
@@ -175,24 +176,26 @@ pub fn should_skip_qoder_file(path: &Path) -> bool {
 
 /// Routing slots. These name a router or a moving business slot, not a model.
 fn is_routing_slot(model: &str) -> bool {
-    let lower = model.trim().to_ascii_lowercase();
-    matches!(
-        lower.as_str(),
-        "auto"
-            | "ultimate"
-            | "performance"
-            | "efficient"
-            | "lite"
-            | "qmodel"
-            | "qfmodel"
-            | "dfmodel"
-            | "gfmodel"
-            | "kmodel"
-            | "gmodel"
-            | "mmodel"
-            | "q35model"
-    ) || lower.starts_with("qmodel_")
-        || lower.starts_with("qmodel-")
+    let model = model.trim();
+    [
+        "ultimate",
+        "performance",
+        "efficient",
+        "lite",
+        "qmodel",
+        "qfmodel",
+        "dfmodel",
+        "gfmodel",
+        "kmodel",
+        "gmodel",
+        "mmodel",
+        "q35model",
+    ]
+    .iter()
+    .any(|slot| model.eq_ignore_ascii_case(slot))
+        || model.get(.."qmodel_".len()).is_some_and(|prefix| {
+            prefix.eq_ignore_ascii_case("qmodel_") || prefix.eq_ignore_ascii_case("qmodel-")
+        })
 }
 
 fn is_synthetic_placeholder_model(model: &str) -> bool {
@@ -200,15 +203,39 @@ fn is_synthetic_placeholder_model(model: &str) -> bool {
     trimmed.is_empty() || trimmed.eq_ignore_ascii_case("<synthetic>")
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum ModelKind {
+    Unknown,
+    Auto,
+    Slot,
+    Named,
+}
+
+fn model_kind(model: &str) -> ModelKind {
+    if is_synthetic_placeholder_model(model) || model.eq_ignore_ascii_case(DEFAULT_MODEL) {
+        ModelKind::Unknown
+    } else if model.eq_ignore_ascii_case("auto") {
+        ModelKind::Auto
+    } else if is_routing_slot(model) {
+        ModelKind::Slot
+    } else {
+        ModelKind::Named
+    }
+}
+
+fn is_selected_model(raw_model: &str) -> bool {
+    model_kind(split_model_qualifier(raw_model).0) >= ModelKind::Slot
+}
+
 /// Split a client-qualified or vendor-qualified model into its bare id.
 ///
 /// `qoder/claude-sonnet-4-6` and `qoder-cn/deepseek-v3` are Qoder's own
 /// namespaces, not providers; `deepseek/chat/deepseek-v3` is
 /// `<provider>/<type>/<model>`.
-fn split_model_qualifier(model: &str) -> (String, Option<String>) {
+fn split_model_qualifier(model: &str) -> (&str, Option<&str>) {
     let trimmed = model.trim();
     let Some((head, _)) = trimmed.split_once('/') else {
-        return (trimmed.to_string(), None);
+        return (trimmed, None);
     };
     let client_namespace =
         head.eq_ignore_ascii_case("qoder") || head.eq_ignore_ascii_case("qoder-cn");
@@ -218,52 +245,121 @@ fn split_model_qualifier(model: &str) -> (String, Option<String>) {
         .map(str::trim)
         .filter(|bare| !bare.is_empty())
         .unwrap_or(trimmed);
-    if client_namespace {
-        (bare.to_string(), None)
-    } else {
-        (
-            bare.to_string(),
-            crate::provider_identity::canonical_provider(head),
-        )
-    }
+    (bare, (!client_namespace).then_some(head))
 }
 
-/// Resolve the recorded model string into `(model_id, provider_id)`.
-fn resolve_model_and_provider(
-    raw_model: &str,
-    explicit_provider: Option<&str>,
-) -> (String, String) {
-    let (bare, prefix_provider) = split_model_qualifier(raw_model);
-    if bare.is_empty() {
-        return (DEFAULT_MODEL.to_string(), QODER_PROVIDER.to_string());
+fn canonical_qoder_provider(provider: &str) -> Option<String> {
+    let provider = provider.trim();
+    if ["custom", QODER_PROVIDER, "qoder-cn"]
+        .iter()
+        .any(|placeholder| provider.eq_ignore_ascii_case(placeholder))
+    {
+        return None;
+    }
+    crate::provider_identity::canonical_provider(provider)
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum ProviderEvidence {
+    Runtime,
+    ModelPrefix,
+    Record,
+}
+
+struct RequestModel {
+    id: String,
+    kind: ModelKind,
+    reported: bool,
+    provider: Option<(ProviderEvidence, String)>,
+}
+
+impl RequestModel {
+    fn new(
+        raw_model: &str,
+        reported: bool,
+        explicit_provider: Option<&str>,
+        runtime_provider: Option<&str>,
+    ) -> Self {
+        let (id, prefix) = split_model_qualifier(raw_model);
+        let kind = model_kind(id);
+        let mut model = Self {
+            id: if kind == ModelKind::Unknown {
+                DEFAULT_MODEL.to_string()
+            } else {
+                id.to_string()
+            },
+            kind,
+            reported: reported && kind >= ModelKind::Slot,
+            provider: None,
+        };
+        model.observe_provider(explicit_provider, ProviderEvidence::Record);
+        model.observe_provider(prefix, ProviderEvidence::ModelPrefix);
+        if model.provider.is_none() && kind == ModelKind::Named {
+            model.provider =
+                runtime_provider.map(|provider| (ProviderEvidence::Runtime, provider.to_string()));
+        }
+        model
     }
 
-    // A routing slot has no evidence-backed vendor. Both the model id and the
-    // provider stay Qoder's own so no price table (including another client's
-    // `auto` row) can claim it.
-    if is_routing_slot(&bare) {
-        return (bare, QODER_PROVIDER.to_string());
+    fn observe_provider(&mut self, provider: Option<&str>, evidence: ProviderEvidence) {
+        if self.provider.as_ref().is_some_and(|(old, _)| *old >= evidence) {
+            return;
+        }
+        if let Some(provider) = provider.and_then(canonical_qoder_provider) {
+            self.provider = Some((evidence, provider));
+        }
     }
 
-    let explicit = explicit_provider
-        .map(str::trim)
-        .filter(|provider| !provider.is_empty())
-        .filter(|provider| {
-            !provider.eq_ignore_ascii_case("custom")
-                && !provider.eq_ignore_ascii_case(QODER_PROVIDER)
-                && !provider.eq_ignore_ascii_case("qoder-cn")
-        })
-        .and_then(crate::provider_identity::canonical_provider);
+    fn merge_fragment(&mut self, raw_model: Option<&str>, explicit_provider: Option<&str>) {
+        let mut prefix = None;
+        let mut prior_request_provider = None;
+        if let Some((id, qualifier)) = raw_model.map(split_model_qualifier) {
+            let same_model = self.id.eq_ignore_ascii_case(id);
+            let kind = if same_model {
+                self.kind
+            } else {
+                model_kind(id)
+            };
+            if same_model || kind > self.kind || (!self.reported && kind >= ModelKind::Slot) {
+                if !same_model {
+                    // Keep provider-only evidence only as a fallback. A provider
+                    // tied to the old model must not follow a different model.
+                    let old_provider = self.provider.take();
+                    if !self.reported {
+                        prior_request_provider = old_provider
+                            .filter(|(evidence, _)| *evidence == ProviderEvidence::Record);
+                    }
+                    self.id = id.to_string();
+                    self.kind = kind;
+                }
+                self.reported = kind >= ModelKind::Slot;
+                prefix = qualifier;
+            } else if kind >= ModelKind::Slot {
+                return;
+            }
+        }
+        self.observe_provider(explicit_provider, ProviderEvidence::Record);
+        self.observe_provider(prefix, ProviderEvidence::ModelPrefix);
+        if self.provider.is_none() {
+            self.provider = prior_request_provider;
+        }
+    }
 
-    let provider = explicit
-        .or(prefix_provider)
-        .or_else(|| {
-            crate::provider_identity::inferred_provider_from_model_delimited(&bare)
-                .map(str::to_string)
-        })
-        .unwrap_or_else(|| QODER_PROVIDER.to_string());
-
-    (bare, provider)
+    fn into_ids(self) -> (String, String) {
+        // Never price a router or an unknown model as if it were a vendor model.
+        let provider = if self.kind == ModelKind::Named {
+            self.provider.map(|(_, id)| id).or_else(|| {
+                crate::provider_identity::inferred_provider_from_model_delimited(&self.id)
+                    .map(str::to_string)
+            })
+        } else {
+            None
+        };
+        (
+            self.id,
+            provider.unwrap_or_else(|| QODER_PROVIDER.to_string()),
+        )
+    }
 }
 
 /// Token counters from one `usage` block, with cache reads inside gross input.
@@ -325,7 +421,8 @@ fn usage_from_value(usage: &Value) -> Option<QoderUsage> {
             "promptTokens",
             "promptTokenCount",
         ],
-    )?;
+    )
+    .unwrap_or(0);
     let output_raw = first_i64(
         usage,
         &[
@@ -392,13 +489,12 @@ fn cache_write_1h_from_value(usage: &Value, cache_write: i64) -> i64 {
     parsed.min(cache_write)
 }
 
-fn usage_request_id(usage: &Value) -> Option<String> {
+fn usage_request_id(usage: &Value) -> Option<&str> {
     ["request_id", "requestId"]
         .iter()
         .find_map(|key| usage.get(*key).and_then(Value::as_str))
         .map(str::trim)
         .filter(|id| !id.is_empty())
-        .map(str::to_string)
 }
 
 /// One assembled assistant turn.
@@ -410,33 +506,44 @@ struct Turn {
     agent: Option<String>,
     workspace_key: Option<String>,
     workspace_label: Option<String>,
-    model_id: String,
-    provider_id: String,
-    timestamp: i64,
-    last_timestamp: i64,
-    duration_ms: Option<i64>,
+    model: RequestModel,
+    prompt_timestamp: Option<i64>,
+    timestamp: Option<i64>,
+    last_timestamp: Option<i64>,
     is_turn_start: bool,
     usage: Option<QoderUsage>,
 }
 
 impl Turn {
-    fn into_message(self, source: QoderSource) -> Option<UnifiedMessage> {
+    fn observe_time(&mut self, timestamp: i64) {
+        self.timestamp = Some(self.timestamp.map_or(timestamp, |start| start.min(timestamp)));
+    }
+
+    fn into_message(self, source: QoderSource, fallback_timestamp: i64) -> Option<UnifiedMessage> {
         let usage = self.usage?;
         if usage.total() <= 0 {
             return None;
         }
+        let timestamp = self
+            .prompt_timestamp
+            .or(self.timestamp)
+            .unwrap_or(fallback_timestamp);
+        let (model_id, provider_id) = self.model.into_ids();
         let mut message = UnifiedMessage::new_with_agent(
             CLIENT_ID,
-            self.model_id,
-            self.provider_id,
+            model_id,
+            provider_id,
             self.session_id,
-            self.timestamp,
+            timestamp,
             usage.to_breakdown(),
             0.0,
             self.agent,
         );
         message.dedup_key = Some(source.dedup_key(format_args!("{}", self.key)));
-        message.duration_ms = self.duration_ms;
+        message.duration_ms = self
+            .last_timestamp
+            .and_then(|last| last.checked_sub(timestamp))
+            .filter(|span| *span > 0);
         message.is_turn_start = self.is_turn_start;
         message.cache_write_1h = usage.cache_write_1h;
         message.set_workspace(self.workspace_key, self.workspace_label);
@@ -573,9 +680,9 @@ pub fn parse_qoder_transcript_file(path: &Path, source: QoderSource) -> Vec<Unif
 
     // Session-wide model state.
     let mut runtime_model: Option<String> = None;
+    let mut runtime_provider: Option<String> = None;
     let mut last_business_model: Option<String> = None;
     let mut active_model: Option<String> = None;
-    let mut active_provider: Option<String> = None;
 
     // Per-turn state.
     let mut pending_turn_start = false;
@@ -596,16 +703,14 @@ pub fn parse_qoder_transcript_file(path: &Path, source: QoderSource) -> Vec<Unif
             .unwrap_or("");
         let message = value.get("message");
 
-        if session_id.is_none() {
-            let recorded = value
-                .get("sessionId")
-                .or_else(|| value.get("session_id"))
-                .and_then(Value::as_str)
-                .map(str::trim)
-                .filter(|id| !id.is_empty());
-            if let Some(recorded) = recorded {
-                session_id = Some(recorded.to_string());
-            }
+        if let Some(recorded) = value
+            .get("sessionId")
+            .or_else(|| value.get("session_id"))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|id| !id.is_empty() && session_id.as_deref() != Some(*id))
+        {
+            session_id = Some(recorded.to_string());
         }
 
         if let Some(cwd) = value
@@ -626,23 +731,22 @@ pub fn parse_qoder_transcript_file(path: &Path, source: QoderSource) -> Vec<Unif
                     .get("model")
                     .and_then(Value::as_str)
                     .map(str::trim)
-                    .filter(|model| {
-                        !is_synthetic_placeholder_model(model)
-                            && !model.eq_ignore_ascii_case("auto")
-                    })
+                    .filter(|model| is_selected_model(model))
                 {
-                    runtime_model = Some(model.to_string());
-                    active_model = Some(model.to_string());
-                    last_business_model = Some(model.to_string());
+                    if runtime_model.as_deref() != Some(model) {
+                        runtime_model = Some(model.to_string());
+                        runtime_provider = None;
+                    }
+                    last_business_model = None;
                 }
                 if let Some(provider) = value
                     .get("provider")
                     .or_else(|| value.get("providerId"))
                     .and_then(Value::as_str)
                     .map(str::trim)
-                    .filter(|provider| !provider.is_empty())
+                    .filter(|provider| !provider.is_empty() && runtime_model.is_some())
                 {
-                    active_provider = Some(provider.to_string());
+                    runtime_provider = canonical_qoder_provider(provider);
                 }
             }
             "user" => {
@@ -651,10 +755,9 @@ pub fn parse_qoder_transcript_file(path: &Path, source: QoderSource) -> Vec<Unif
                     .or_else(|| message.and_then(|message| message.get("businessModelKey")))
                     .and_then(Value::as_str)
                     .map(str::trim)
-                    .filter(|model| !model.is_empty() && !model.eq_ignore_ascii_case("auto"));
+                    .filter(|model| is_selected_model(model));
                 if let Some(business_model) = business_model {
                     last_business_model = Some(business_model.to_string());
-                    active_model = Some(business_model.to_string());
                 }
 
                 let content = message
@@ -694,27 +797,19 @@ pub fn parse_qoder_transcript_file(path: &Path, source: QoderSource) -> Vec<Unif
                     .or_else(|| message.and_then(|message| message.get("businessModelKey")))
                     .and_then(Value::as_str)
                     .map(str::trim)
-                    .filter(|model| !model.is_empty() && !model.eq_ignore_ascii_case("auto"));
+                    .filter(|model| is_selected_model(model));
 
                 if let Some(business_model) = fragment_business {
                     last_business_model = Some(business_model.to_string());
                 }
+                let reported_model = fragment_model.filter(|model| is_selected_model(model));
                 if let Some(model) =
-                    fragment_model.filter(|model| !model.eq_ignore_ascii_case("auto"))
+                    reported_model.filter(|model| active_model.as_deref() != Some(*model))
                 {
                     active_model = Some(model.to_string());
                 }
 
-                let raw_model = match fragment_model {
-                    Some(model) if !model.eq_ignore_ascii_case("auto") => model.to_string(),
-                    _ => fragment_business
-                        .or(last_business_model.as_deref())
-                        .or(runtime_model.as_deref())
-                        .or(active_model.as_deref())
-                        .or(fragment_model)
-                        .unwrap_or(DEFAULT_MODEL)
-                        .to_string(),
-                };
+                let fragment_selection = reported_model.or(fragment_business);
 
                 let explicit_provider = message
                     .and_then(|message| {
@@ -729,8 +824,7 @@ pub fn parse_qoder_transcript_file(path: &Path, source: QoderSource) -> Vec<Unif
                             .or_else(|| value.get("provider_id"))
                             .or_else(|| value.get("provider"))
                     })
-                    .and_then(Value::as_str)
-                    .or(active_provider.as_deref());
+                    .and_then(Value::as_str);
 
                 let usage_value = message
                     .and_then(|message| message.get("usage"))
@@ -749,11 +843,8 @@ pub fn parse_qoder_transcript_file(path: &Path, source: QoderSource) -> Vec<Unif
                     .get("requestId")
                     .or_else(|| value.get("request_id"))
                     .and_then(Value::as_str)
-                    .and_then(|id| {
-                        let id = id.trim();
-                        (!id.is_empty()).then_some(id)
-                    })
-                    .map(str::to_string)
+                    .map(str::trim)
+                    .filter(|id| !id.is_empty())
                     .or_else(|| usage_value.and_then(usage_request_id));
                 let uuid = value
                     .get("uuid")
@@ -761,29 +852,25 @@ pub fn parse_qoder_transcript_file(path: &Path, source: QoderSource) -> Vec<Unif
                     .map(str::trim)
                     .filter(|uuid| !uuid.is_empty());
 
-                let resolved_session = session_id
-                    .clone()
-                    .unwrap_or_else(|| fallback_session_id.clone());
-
                 let group_key = if let Some(message_id) = message_id {
                     format!("msg:{message_id}")
-                } else if let Some(request_id) = &request_id {
+                } else if let Some(request_id) = request_id {
                     format!("req:{request_id}")
                 } else if let Some(uuid) = uuid {
                     format!("uuid:{uuid}")
                 } else {
                     anonymous_key(path, &mut anonymous_path_hash, line_index)
                 };
-                let turn_key = match &request_id {
-                    Some(request_id) => format!("req:{request_id}"),
-                    None => group_key.clone(),
-                };
 
                 if let Some(existing) = index_by_key.get(&group_key).copied() {
                     let turn = &mut turns[existing];
-                    if request_id.is_some() {
-                        turn.key = turn_key.clone();
+                    if let Some(request_id) =
+                        request_id.filter(|id| turn.key.strip_prefix("req:") != Some(*id))
+                    {
+                        turn.key = format!("req:{request_id}");
                     }
+                    turn.model
+                        .merge_fragment(fragment_selection.or(fragment_model), explicit_provider);
                     if let Some(usage) = usage {
                         match &mut turn.usage {
                             Some(existing) => existing.merge_max(usage),
@@ -791,16 +878,16 @@ pub fn parse_qoder_transcript_file(path: &Path, source: QoderSource) -> Vec<Unif
                         }
                     }
                     if let Some(ts) = fragment_ts {
-                        turn.last_timestamp = turn.last_timestamp.max(ts);
-                        let span = turn.last_timestamp.saturating_sub(turn.timestamp);
-                        if span > 0 {
-                            turn.duration_ms = Some(span);
-                        }
+                        turn.observe_time(ts);
+                        turn.last_timestamp =
+                            Some(turn.last_timestamp.map_or(ts, |last| last.max(ts)));
                     }
                     pending_turn_start = false;
                     pending_prompt_ms = None;
                     return;
                 }
+
+                let resolved_session = session_id.as_deref().unwrap_or(&fallback_session_id);
 
                 let is_sidechain = value
                     .get("isSidechain")
@@ -815,43 +902,49 @@ pub fn parse_qoder_transcript_file(path: &Path, source: QoderSource) -> Vec<Unif
                 let (agent, effective_session) = match (&subagent, is_sidechain) {
                     (Some((name, id)), _) => {
                         let child_session = id
-                            .clone()
-                            .or_else(|| entry_agent_id.map(str::to_string))
+                            .as_deref()
+                            .or(entry_agent_id)
                             .map(|id| format!("{resolved_session}:agent:{id}"))
-                            .unwrap_or_else(|| resolved_session.clone());
+                            .unwrap_or_else(|| resolved_session.to_string());
                         (Some(name.clone()), child_session)
                     }
                     (None, true) => {
                         let child_session = entry_agent_id
                             .map(|id| format!("{resolved_session}:agent:{id}"))
-                            .unwrap_or_else(|| resolved_session.clone());
+                            .unwrap_or_else(|| resolved_session.to_string());
                         (Some(normalize_agent_name("qoder-subagent")), child_session)
                     }
-                    (None, false) => (None, resolved_session.clone()),
+                    (None, false) => (None, resolved_session.to_string()),
                 };
 
-                let timestamp = pending_prompt_ms
-                    .or(fragment_ts)
-                    .unwrap_or(fallback_timestamp);
-                let last_timestamp = fragment_ts.unwrap_or(timestamp);
-                let duration_ms = last_timestamp
-                    .checked_sub(timestamp)
-                    .filter(|span| *span > 0);
-                let (model_id, provider_id) =
-                    resolve_model_and_provider(&raw_model, explicit_provider);
-
-                index_by_key.insert(group_key.clone(), turns.len());
+                let raw_model = fragment_selection
+                    .or(last_business_model.as_deref())
+                    .or(runtime_model.as_deref())
+                    .or(active_model.as_deref())
+                    .or(fragment_model)
+                    .unwrap_or(DEFAULT_MODEL);
+                let scoped_provider = runtime_model
+                    .as_deref()
+                    .filter(|model| model.eq_ignore_ascii_case(raw_model))
+                    .and(runtime_provider.as_deref());
+                let model = RequestModel::new(
+                    raw_model,
+                    fragment_selection.is_some(),
+                    explicit_provider,
+                    scoped_provider,
+                );
+                let turn_key = request_id.map_or_else(|| group_key.clone(), |id| format!("req:{id}"));
+                index_by_key.insert(group_key, turns.len());
                 turns.push(Turn {
                     key: turn_key,
                     session_id: effective_session,
                     agent,
                     workspace_key: workspace.as_ref().map(|(key, _)| key.clone()),
                     workspace_label: workspace.as_ref().and_then(|(_, label)| label.clone()),
-                    model_id,
-                    provider_id,
-                    timestamp,
-                    last_timestamp,
-                    duration_ms,
+                    model,
+                    prompt_timestamp: pending_prompt_ms,
+                    timestamp: fragment_ts,
+                    last_timestamp: fragment_ts,
                     is_turn_start: pending_turn_start,
                     usage,
                 });
@@ -863,7 +956,7 @@ pub fn parse_qoder_transcript_file(path: &Path, source: QoderSource) -> Vec<Unif
         }
     });
 
-    let (messages, without_usage) = collect_measured_turns(turns, source);
+    let (messages, without_usage) = collect_measured_turns(turns, source, fallback_timestamp);
     if without_usage > 0 {
         // Not a fault: managed-model rows record credits and zero out (or omit)
         // every token counter. Saying so at debug level is the whole diagnostic
@@ -878,11 +971,15 @@ pub fn parse_qoder_transcript_file(path: &Path, source: QoderSource) -> Vec<Unif
 }
 
 /// Convert turns to messages, reporting how many had no recorded usage.
-fn collect_measured_turns(turns: Vec<Turn>, source: QoderSource) -> (Vec<UnifiedMessage>, usize) {
+fn collect_measured_turns(
+    turns: Vec<Turn>,
+    source: QoderSource,
+    fallback_timestamp: i64,
+) -> (Vec<UnifiedMessage>, usize) {
     let mut messages = Vec::with_capacity(turns.len());
     let mut without_usage = 0usize;
     for turn in turns {
-        match turn.into_message(source) {
+        match turn.into_message(source, fallback_timestamp) {
             Some(message) => messages.push(message),
             None => without_usage += 1,
         }
@@ -978,17 +1075,14 @@ pub fn parse_qoder_segment_file(path: &Path, source: QoderSource) -> Vec<Unified
         let timestamp = value
             .get("ts")
             .or_else(|| value.get("timestamp"))
-            .and_then(parse_timestamp_value)
-            .unwrap_or(fallback_timestamp);
+            .and_then(parse_timestamp_value);
 
         let raw_model = data
             .get("model")
             .and_then(Value::as_str)
             .map(str::trim)
-            .filter(|model| !is_synthetic_placeholder_model(model))
-            .unwrap_or(DEFAULT_MODEL);
+            .filter(|model| !is_synthetic_placeholder_model(model));
         let explicit_provider = data.get("provider").and_then(Value::as_str);
-        let (model_id, provider_id) = resolve_model_and_provider(raw_model, explicit_provider);
 
         if let Some(existing) = index_by_key.get(&event_key).copied() {
             let turn = &mut requests[existing];
@@ -997,8 +1091,10 @@ pub fn parse_qoder_segment_file(path: &Path, source: QoderSource) -> Vec<Unified
             } else {
                 turn.usage = Some(usage);
             }
-            turn.timestamp = turn.timestamp.min(timestamp);
-            turn.last_timestamp = turn.last_timestamp.max(timestamp);
+            turn.model.merge_fragment(raw_model, explicit_provider);
+            if let Some(timestamp) = timestamp {
+                turn.observe_time(timestamp);
+            }
             return;
         }
 
@@ -1011,17 +1107,21 @@ pub fn parse_qoder_segment_file(path: &Path, source: QoderSource) -> Vec<Unified
             agent: None,
             workspace_key: workspace.as_ref().map(|(key, _)| key.clone()),
             workspace_label: workspace.as_ref().and_then(|(_, label)| label.clone()),
-            model_id,
-            provider_id,
+            model: RequestModel::new(
+                raw_model.unwrap_or(DEFAULT_MODEL),
+                true,
+                explicit_provider,
+                None,
+            ),
+            prompt_timestamp: None,
             timestamp,
-            last_timestamp: timestamp,
-            duration_ms: None,
+            last_timestamp: None,
             is_turn_start: false,
             usage: Some(usage),
         });
     });
 
-    let (messages, without_usage) = collect_measured_turns(requests, source);
+    let (messages, without_usage) = collect_measured_turns(requests, source, fallback_timestamp);
     if without_usage > 0 {
         tracing::debug!(
             path = %path.display(),
@@ -1211,7 +1311,7 @@ fn ide_row_message(row: &IdeRow, source: QoderSource) -> Option<UnifiedMessage> 
         })
         .filter(|model| !is_synthetic_placeholder_model(model))
         .unwrap_or_else(|| DEFAULT_MODEL.to_string());
-    let (model_id, provider_id) = resolve_model_and_provider(&model_key, None);
+    let (model_id, provider_id) = RequestModel::new(&model_key, true, None, None).into_ids();
 
     let session_id = if row.session_id.trim().is_empty() {
         "unknown".to_string()
@@ -1340,9 +1440,10 @@ pub fn qoder_ide_db_candidates(
 /// appear across all three sources. The edition-scoped request key counts each
 /// request once regardless of the order files were scanned in.
 ///
-/// The surviving row keeps the earliest timestamp and its metadata. Merge
-/// gross prompt and cache reads separately before deriving net input. Callers
-/// price the resulting messages, never the individual observations.
+/// Keep the earliest timestamp and its session. Fill missing metadata, and
+/// upgrade placeholders with a model/provider pair from the same observation.
+/// Merge gross prompt and cache reads separately before deriving net input.
+/// Callers price the resulting messages, never the individual observations.
 pub fn collapse_qoder_messages(mut messages: Vec<UnifiedMessage>) -> Vec<UnifiedMessage> {
     messages.sort_unstable_by(|left, right| {
         left.dedup_key
@@ -1377,11 +1478,28 @@ pub fn collapse_qoder_messages(mut messages: Vec<UnifiedMessage>) -> Vec<Unified
         if existing.duration_ms.is_none() {
             existing.duration_ms = candidate.duration_ms;
         }
-        if existing.workspace_key.is_none() {
-            existing.workspace_key = candidate.workspace_key.take();
+        if candidate.workspace_key.is_some() {
+            if existing.workspace_key.is_none() {
+                existing.set_workspace(
+                    candidate.workspace_key.take(),
+                    candidate.workspace_label.take(),
+                );
+            } else if existing.workspace_key == candidate.workspace_key
+                && existing.workspace_label.is_none()
+            {
+                existing.workspace_label = candidate.workspace_label.take();
+            }
         }
-        if existing.workspace_label.is_none() {
-            existing.workspace_label = candidate.workspace_label.take();
+        let existing_kind = model_kind(&existing.model_id);
+        if model_kind(&candidate.model_id) > existing_kind {
+            existing.model_id = std::mem::take(&mut candidate.model_id);
+            existing.provider_id = std::mem::take(&mut candidate.provider_id);
+        } else if existing_kind == ModelKind::Named
+            && existing.model_id.eq_ignore_ascii_case(&candidate.model_id)
+            && existing.provider_id == QODER_PROVIDER
+            && candidate.provider_id != QODER_PROVIDER
+        {
+            existing.provider_id = std::mem::take(&mut candidate.provider_id);
         }
         if existing.agent.is_none() {
             existing.agent = candidate.agent.take();
@@ -1447,6 +1565,20 @@ mod tests {
     }
 
     #[test]
+    fn usage_keeps_measured_counters_without_prompt() {
+        let output = usage_from_value(&serde_json::json!({"output_tokens": 7})).unwrap();
+        assert_eq!((output.gross_input, output.output, output.total()), (0, 7, 7));
+
+        let write = usage_from_value(&serde_json::json!({
+            "cache_creation_input_tokens": 11,
+            "cache_creation": {"ephemeral_1h_input_tokens": 5}
+        }))
+        .unwrap();
+        assert_eq!((write.gross_input, write.cache_write_1h, write.total()), (0, 5, 11));
+        assert!(usage_from_value(&serde_json::json!({"cache_read_input_tokens": 20})).is_none());
+    }
+
+    #[test]
     fn usage_clamps_impossible_cache_and_1h_subsets() {
         let usage: Value = serde_json::from_str(
             r#"{"input_tokens":100,"output_tokens":10,"cache_read_input_tokens":500,
@@ -1465,6 +1597,7 @@ mod tests {
 
     #[test]
     fn routing_slots_never_borrow_a_vendor() {
+        let resolve = |model| RequestModel::new(model, true, None, None).into_ids();
         for slot in [
             "auto",
             "qmodel",
@@ -1473,21 +1606,18 @@ mod tests {
             "dfmodel",
             "gfmodel",
         ] {
-            assert_eq!(
-                resolve_model_and_provider(slot, None),
-                (slot.to_string(), QODER_PROVIDER.to_string())
-            );
+            assert_eq!(resolve(slot), (slot.to_string(), QODER_PROVIDER.to_string()));
         }
         assert_eq!(
-            resolve_model_and_provider("deepseek/chat/deepseek-v3", None),
+            resolve("deepseek/chat/deepseek-v3"),
             ("deepseek-v3".to_string(), "deepseek".to_string())
         );
         assert_eq!(
-            resolve_model_and_provider("qoder/claude-sonnet-4-6", None),
+            resolve("qoder/claude-sonnet-4-6"),
             ("claude-sonnet-4-6".to_string(), "anthropic".to_string())
         );
         assert_eq!(
-            resolve_model_and_provider("qoder-cn/qwen3-coder-plus", None),
+            resolve("qoder-cn/qwen3-coder-plus"),
             ("qwen3-coder-plus".to_string(), "qwen".to_string())
         );
     }
@@ -1526,6 +1656,41 @@ mod tests {
         assert!(message.is_turn_start);
         assert_eq!(message.workspace_key.as_deref(), Some("/work/app"));
         assert_eq!(message.workspace_label.as_deref(), Some("app"));
+        assert_eq!(message.dedup_key.as_deref(), Some("qoder:qoder:req:req_1"));
+    }
+
+    #[test]
+    fn fills_model_provider_and_real_time_from_late_fragments() {
+        let dir = TempDir::new().unwrap();
+        let path = write_transcript(
+            dir.path(),
+            "sess-late.jsonl",
+            &[
+                r#"{"type":"assistant","sessionId":"sess-late","message":{"id":"msg_1","model":"<synthetic>","usage":{"input_tokens":1200,"cache_read_input_tokens":800}}}"#,
+                r#"{"type":"assistant","timestamp":"2026-11-07T10:00:04Z","message":{"id":"msg_1","model":"auto","usage":{"output_tokens":40}}}"#,
+                r#"{"type":"assistant","timestamp":"2026-11-07T10:00:01Z","message":{"id":"msg_1","model":"claude-sonnet-4-6","usage":{"cache_creation_input_tokens":100,"cache_creation":{"ephemeral_1h_input_tokens":50}}}}"#,
+                r#"{"type":"assistant","timestamp":"2026-11-07T10:00:05Z","message":{"id":"msg_1","providerId":"openrouter","usage":{"output_tokens":45,"request_id":"req_1"}}}"#,
+            ],
+        );
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_794_132_000))
+            .unwrap();
+
+        let messages = parse_qoder_transcript_file(&path, QoderSource::International);
+        assert_eq!(messages.len(), 1);
+        let message = &messages[0];
+        assert_eq!(message.model_id, "claude-sonnet-4-6");
+        assert_eq!(message.provider_id, "openrouter");
+        assert_eq!(message.timestamp, 1_794_045_601_000);
+        assert_eq!(message.duration_ms, Some(4000));
+        assert_eq!(message.tokens.input, 400);
+        assert_eq!(message.tokens.cache_read, 800);
+        assert_eq!(message.tokens.output, 45);
+        assert_eq!(message.tokens.cache_write, 100);
+        assert_eq!(message.cache_write_1h, 50);
         assert_eq!(message.dedup_key.as_deref(), Some("qoder:qoder:req:req_1"));
     }
 
@@ -1577,6 +1742,67 @@ mod tests {
         assert_eq!(messages[1].model_id, "dfmodel");
         assert_eq!(messages[1].tokens.input, 20000);
         assert_eq!(messages[1].tokens.cache_read, 12000);
+    }
+
+    #[test]
+    fn runtime_provider_follows_only_its_model_and_yields_to_a_prefix() {
+        let dir = TempDir::new().unwrap();
+        let path = write_transcript(
+            dir.path(),
+            "sess-runtime.jsonl",
+            &[
+                r#"{"type":"runtime-config","model":"claude-sonnet-4-6","provider":"openrouter"}"#,
+                r#"{"type":"assistant","message":{"id":"m1","model":"auto","usage":{"input_tokens":100}}}"#,
+                r#"{"type":"assistant","message":{"id":"m2","model":"deepseek/chat/deepseek-v3","usage":{"input_tokens":100}}}"#,
+                r#"{"type":"assistant","message":{"id":"m3","model":"auto","usage":{"input_tokens":100}}}"#,
+                r#"{"type":"assistant","message":{"id":"m3","model":"gpt-4o","usage":{"output_tokens":2}}}"#,
+                r#"{"type":"runtime-config","model":"deepseek/chat/deepseek-v3","providerId":"openrouter"}"#,
+                r#"{"type":"assistant","message":{"id":"m4","model":"auto","usage":{"input_tokens":100}}}"#,
+                r#"{"type":"runtime-config","model":"qwen3-coder-plus"}"#,
+                r#"{"type":"assistant","message":{"id":"m5","model":"auto","usage":{"input_tokens":100}}}"#,
+            ],
+        );
+        let messages = parse_qoder_transcript_file(&path, QoderSource::International);
+        let models: Vec<_> = messages
+            .iter()
+            .map(|message| (message.model_id.as_str(), message.provider_id.as_str()))
+            .collect();
+        assert_eq!(
+            models,
+            [
+                ("claude-sonnet-4-6", "openrouter"),
+                ("deepseek-v3", "deepseek"),
+                ("gpt-4o", "openai"),
+                ("deepseek-v3", "deepseek"),
+                ("qwen3-coder-plus", "qwen"),
+            ],
+        );
+    }
+
+    #[test]
+    fn fork_replay_keeps_parent_session_and_attributes_new_requests_to_child() {
+        let dir = TempDir::new().unwrap();
+        let replayed = r#"{"type":"assistant","sessionId":"parent","timestamp":"2026-11-07T10:00:00Z","message":{"id":"m1","model":"qmodel","usage":{"input_tokens":100,"request_id":"r1"}}}"#;
+        let parent = write_transcript(dir.path(), "parent.jsonl", &[replayed]);
+        let child = write_transcript(
+            dir.path(),
+            "child.jsonl",
+            &[
+                replayed,
+                r#"{"type":"user","sessionId":"child","timestamp":"2026-11-07T10:01:00Z","message":{"role":"user","content":"continue"}}"#,
+                r#"{"type":"assistant","timestamp":"2026-11-07T10:01:01Z","message":{"id":"m2","model":"qmodel","usage":{"input_tokens":200,"request_id":"r2"}}}"#,
+            ],
+        );
+        let mut messages = parse_qoder_transcript_file(&child, QoderSource::International);
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0].session_id, "parent");
+        assert_eq!(messages[1].session_id, "child");
+        messages.extend(parse_qoder_transcript_file(&parent, QoderSource::International));
+        let collapsed = collapse_qoder_messages(messages);
+        assert_eq!(collapsed.len(), 2);
+        assert_eq!(collapsed[0].session_id, "parent");
+        assert_eq!(collapsed[1].session_id, "child");
+        assert_eq!(collapsed[0].tokens.total() + collapsed[1].tokens.total(), 300);
     }
 
     #[test]
@@ -1799,8 +2025,10 @@ mod tests {
             message.is_turn_start = true;
             message
         };
-        let first = build("s1", 1_000, 100);
-        let second = build("s2", 900, 120);
+        let mut first = build("s1", 1_000, 100);
+        first.set_workspace(Some("/work/app".into()), Some("app".into()));
+        let mut second = build("s2", 900, 120);
+        second.set_workspace(Some("/work/app".into()), None);
 
         let forward = collapse_qoder_messages(vec![first.clone(), second.clone()]);
         let reverse = collapse_qoder_messages(vec![second, first]);
@@ -1810,6 +2038,8 @@ mod tests {
         assert_eq!(forward[0].timestamp, reverse[0].timestamp);
         assert_eq!(forward[0].tokens.input, 120);
         assert_eq!(reverse[0].tokens.input, 120);
+        assert_eq!(forward[0].workspace_label.as_deref(), Some("app"));
+        assert_eq!(forward[0].workspace_label, reverse[0].workspace_label);
     }
 
     #[test]
@@ -1887,6 +2117,86 @@ mod tests {
              VALUES ('user-row', 'sess-ide', NULL, 'user', '{\"prompt_tokens\":999}', NULL, 1);",
         )
         .unwrap();
+    }
+
+    #[tokio::test]
+    async fn prices_one_enriched_request_without_mixing_workspace_metadata() {
+        use crate::pricing::{ModelPricing, PricingService};
+
+        let dir = TempDir::new().unwrap();
+        let home = dir.path();
+        let app_data =
+            crate::PathRoot::AppData.resolve_with_env_strategy(home.to_str().unwrap(), false);
+        create_ide_db(
+            &Path::new(&app_data).join("Qoder/SharedClientCache/cache/db/local.db"),
+            true,
+            &[(
+                1_794_045_600_000,
+                r#"{"prompt_tokens":1000,"cached_tokens":800,"completion_tokens":15}"#,
+                r#"{"model_key":"auto"}"#,
+                "shared",
+            )],
+        );
+        write_transcript(
+            home,
+            ".qoder/projects/-work-transcript-app/sess-cli.jsonl",
+            &[
+                r#"{"type":"assistant","sessionId":"sess-cli","cwd":"/work/transcript-app","timestamp":"2026-11-07T10:00:01Z","message":{"model":"gfmodel","usage":{"input_tokens":1200,"output_tokens":5,"request_id":"shared"}}}"#,
+            ],
+        );
+        write_transcript(
+            home,
+            ".qoder/logs/sessions/-work-segment-app/sess-cli/segments/run.jsonl",
+            &[
+                r#"{"type":"session.config.loaded","data":{"project_root":"/work/segment-app"}}"#,
+                r#"{"type":"model.response.completed","request_id":"shared","data":{"model":"auto","input_tokens":1100,"output_tokens":10}}"#,
+                r#"{"type":"model.response.completed","ts":"2026-11-07T10:00:02Z","request_id":"shared","data":{"model":"claude-sonnet-4-6","provider":"anthropic","output_tokens":40,"cache_creation_input_tokens":100,"cache_creation":{"ephemeral_1h_input_tokens":50}}}"#,
+            ],
+        );
+        let pricing = PricingService::new(
+            HashMap::from([(
+                "claude-sonnet-4-6".into(),
+                ModelPricing {
+                    input_cost_per_token: Some(0.001),
+                    output_cost_per_token: Some(0.002),
+                    cache_read_input_token_cost: Some(0.0005),
+                    cache_creation_input_token_cost: Some(0.00125),
+                    ..Default::default()
+                },
+            )]),
+            HashMap::new(),
+        );
+        let messages = crate::parse_local_unified_messages_with_pricing_uncached(
+            crate::LocalParseOptions {
+                home_dir: Some(home.to_str().unwrap().into()),
+                use_env_roots: false,
+                clients: Some(vec![CLIENT_ID.into()]),
+                scanner_settings: crate::scanner::ScannerSettings {
+                    bucket_timezone: Some("UTC".into()),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            Some(&pricing),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(messages.len(), 1);
+        let message = &messages[0];
+        assert_eq!(message.session_id, "sess-ide");
+        assert_eq!(message.timestamp, 1_794_045_600_000);
+        assert_eq!(message.workspace_key.as_deref(), Some("/work/ide-app"));
+        assert_eq!(message.workspace_label, None);
+        assert_eq!(message.model_id, "claude-sonnet-4-6");
+        assert_eq!(message.provider_id, "anthropic");
+        assert_eq!(message.tokens.input, 400);
+        assert_eq!(message.tokens.cache_read, 800);
+        assert_eq!(message.tokens.output, 40);
+        assert_eq!(message.tokens.cache_write, 100);
+        assert_eq!(message.cache_write_1h, 50);
+        assert_eq!(message.cost_source, crate::CostSource::Estimated);
+        assert!((message.cost - 1.0425).abs() < 1e-9);
     }
 
     #[test]

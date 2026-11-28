@@ -657,7 +657,7 @@ fn cursor_user_id_from_sub(sub: &str) -> Option<String> {
 fn is_cookie_safe_subject_part(part: &str) -> bool {
     !part.is_empty()
         && part.bytes().all(|byte| {
-            !byte.is_ascii_control() && !matches!(byte, b' ' | b'"' | b',' | b';' | b'\\' | b'|')
+            byte.is_ascii_graphic() && !matches!(byte, b'"' | b',' | b';' | b'\\' | b'|')
         })
 }
 
@@ -2606,6 +2606,7 @@ mod session_subject_tests {
     #[test]
     fn unsafe_or_empty_subjects_stay_unparseable() {
         assert_eq!(cursor_user_id_from_sub("github|12345678;evil"), None);
+        assert_eq!(cursor_user_id_from_sub("github|利用者"), None);
         assert_eq!(cursor_user_id_from_sub("github|id\r\nInjected"), None);
         assert_eq!(cursor_user_id_from_sub("github|"), None);
         assert_eq!(cursor_user_id_from_sub("a|b|c"), None);

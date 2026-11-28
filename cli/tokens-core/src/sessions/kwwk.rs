@@ -7,12 +7,15 @@
 //! `super::pi::parse_pi_format_file` parser reads kwwk's usage extensions only
 //! for this client.
 //!
-//! kwwk records use epoch milliseconds rather than RFC 3339 strings and
-//! carry no entry `id`, so assistant turns deduplicate on `message.responseId`.
+//! kwwk entries store an `Int64` timestamp in Unix milliseconds. They carry
+//! no entry `id`, so assistant turns deduplicate on `message.responseId`.
 //!
 //! A `compaction` record's top-level `usage` accounts for summary requests
 //! absent from the transcript. `replacementMessages` only projects prior
 //! context for replay and must not be counted again.
+//! The writer has no compaction response ID. Its marker identity uses the
+//! session ID, recorded time and occurrence at that time. Neither a rewrite
+//! of `replacementMessages` nor repair of an earlier entry changes this key.
 //!
 //! Layout: the kwwk CLI writes `~/.kwwk/sessions/<session-id>.jsonl`. Programs
 //! embedding kwwk can keep sessions anywhere; a bot running one agent per task
@@ -32,6 +35,8 @@ pub fn parse_kwwk_file(path: &Path) -> Vec<UnifiedMessage> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bincode::Options;
+    use std::collections::HashSet;
     use std::io::Write;
     use tempfile::NamedTempFile;
 
@@ -71,6 +76,36 @@ mod tests {
     }
 
     #[test]
+    fn kwwk_accepts_signed_integer_milliseconds_without_a_date_floor() {
+        let cases = [
+            ("-1", Some(-1)),
+            ("0", Some(0)),
+            ("1", Some(1)),
+            ("1795279700", Some(1_795_279_700)),
+            ("1795279700123", Some(1_795_279_700_123)),
+            ("1795279700123.5", None),
+            ("9223372036854775807", None),
+            ("18446744073709551615", None),
+            (r#""1795279700123""#, None),
+        ];
+        let mut file = session_file(&format!("{}\n", SESSION.lines().next().unwrap()));
+        for (id, (timestamp, _)) in cases.iter().enumerate() {
+            writeln!(
+                file,
+                r#"{{"type":"message","timestamp":{timestamp},"message":{{"role":"assistant","model":"claude-sonnet-5","responseId":"msg_{id}","usage":{{"input":3}}}}}}"#,
+            )
+            .unwrap();
+        }
+
+        let fallback = super::super::utils::file_modified_timestamp_ms(file.path());
+        let messages = parse_kwwk_file(file.path());
+        assert_eq!(messages.len(), cases.len());
+        for (message, (wire, timestamp)) in messages.iter().zip(cases) {
+            assert_eq!(message.timestamp, timestamp.unwrap_or(fallback), "{wire}");
+        }
+    }
+
+    #[test]
     fn kwwk_records_dedupe_on_response_id() {
         let file = session_file(SESSION);
         let messages = parse_kwwk_file(file.path());
@@ -105,6 +140,53 @@ mod tests {
     }
 
     #[test]
+    fn kwwk_compaction_dedup_survives_copy_and_projection_rewrite() {
+        let marker = r#"{"type":"compaction","timestamp":1795279800001,"messagesCompacted":2,"usage":{"input":8,"output":3},"replacementMessages":[{"role":"user","timestamp":1795279800000,"content":[{"type":"text","text":"before"}]}]}"#;
+        let file = session_file(&format!("{SESSION}corrupt entry\n{marker}\n{marker}\n"));
+        let messages = parse_kwwk_file(file.path());
+        assert_eq!(messages.len(), 4);
+        let mut seen = HashSet::new();
+        for message in &messages[2..] {
+            assert!(message.dedup_key.is_some());
+            assert!(crate::should_keep_deduped_message(&mut seen, message));
+        }
+
+        let rewritten = marker.replace("\"before\"", "\"after\"");
+        for (prefix, marker) in [("corrupt entry\n", marker), ("", rewritten.as_str())] {
+            let copy = session_file(&format!("{SESSION}{prefix}{marker}\n"));
+            let copied = parse_kwwk_file(copy.path());
+            assert_eq!(copied.len(), 3);
+            assert!(!crate::should_keep_deduped_message(&mut seen, &copied[2]));
+        }
+
+        let other = SESSION.replace(
+            "66ff7a63-f706-405b-ba34-e5b4b437f29c",
+            "17f34dfb-b30d-4dc4-970c-21e88b0df56e",
+        );
+        let file = session_file(&format!("{other}{marker}\n"));
+        let distinct = parse_kwwk_file(file.path());
+        assert_eq!(distinct.len(), 3);
+        assert!(crate::should_keep_deduped_message(&mut seen, &distinct[2]));
+    }
+
+    #[test]
+    fn kwwk_compaction_skips_empty_usage_and_damaged_counter_keys() {
+        let summaries = r#"{"type":"compaction","timestamp":1795279800001,"messagesCompacted":1,"replacementMessages":[],"usage":{}}
+{"type":"compaction","timestamp":1795279800002,"messagesCompacted":1,"replacementMessages":[],"usage":{"input":-1,"output":0,"cacheWrite":-10}}
+{"type":"compaction","timestamp":1795279800003,"messagesCompacted":1,"replacementMessages":[],"usage":{"in\uFFFDput":100,"output":5}}
+{"type":"compaction","timestamp":1795279800004,"messagesCompacted":1,"replacementMessages":[],"usage":{"future\uFFFD-field":100,"output":7,"cacheWrite":-10,"cacheWrite1h":5}}
+"#;
+        let file = session_file(&format!("{SESSION}{summaries}"));
+        let messages = parse_kwwk_file(file.path());
+
+        assert_eq!(messages.len(), 3);
+        let summary = &messages[2];
+        assert_eq!(summary.tokens.output, 7);
+        assert_eq!(summary.tokens.cache_write, 0);
+        assert_eq!(summary.cache_write_1h, 0);
+    }
+
+    #[test]
     fn kwwk_cache_retention_and_billed_cost_do_not_change_other_pi_clients() {
         let cases = [
             (
@@ -124,7 +206,7 @@ mod tests {
         for (id, (details, ..)) in cases.iter().enumerate() {
             writeln!(
                 file,
-                r#"{{"type":"message","timestamp":1795279700123,"message":{{"role":"assistant","model":"claude-sonnet-5","provider":"openrouter","responseId":"msg_{id}","usage":{{"input":3,"cacheWrite":10,{details}}}}}}}"#,
+                r#"{{"type":"message","timestamp":1795279700123,"message":{{"role":"assistant","model":"claude-sonnet-5","provider":"openrouter","responseId":"msg_{id}","usage":{{"input":3,"cacheWrite":10,"speed":"fast",{details}}}}}}}"#,
             )
             .unwrap();
         }
@@ -137,6 +219,9 @@ mod tests {
             assert_eq!(message.cost, cost);
             assert_eq!(message.has_authoritative_cost(), billed);
         }
+        let payload = bincode::options().serialize(&messages).unwrap();
+        let restored: Vec<UnifiedMessage> = bincode::options().deserialize(&payload).unwrap();
+        assert_eq!(restored, messages);
         let pi_messages = super::super::pi::parse_pi_file(file.path());
         assert_eq!(pi_messages.len(), cases.len());
         assert!(pi_messages.iter().all(|message| message.tokens.cache_write == 10

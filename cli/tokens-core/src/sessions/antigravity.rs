@@ -43,23 +43,27 @@ pub fn parse_antigravity_sources(paths: &[PathBuf]) -> Vec<UnifiedMessage> {
             let complete = super::antigravity_cli::scan_antigravity_conversation_db(
                 path,
                 "antigravity",
-                &mut |message, has_turn_timestamp| rows.push((message, has_turn_timestamp)),
+                &mut |message, has_turn_timestamp, gen_idx| {
+                    rows.push((message, has_turn_timestamp, gen_idx))
+                },
             );
-            (complete, rows)
+            (path.file_stem(), complete, rows)
         })
         .collect();
     let cache_messages: Vec<_> = cache_paths
         .par_iter()
         .flat_map(|path| parse_antigravity_file(path))
         .collect();
-    if db_scans.iter().all(|(_, rows)| rows.is_empty()) {
+    if db_scans.iter().all(|(_, _, rows)| rows.is_empty()) {
         return cache_messages;
     }
 
     let complete_db_sessions: HashSet<_> = db_scans
         .iter()
-        .filter(|(complete, _)| *complete)
-        .filter_map(|(_, rows)| rows.first().map(|(message, _)| message.session_id.clone()))
+        .filter(|(_, complete, _)| *complete)
+        .filter_map(|(_, _, rows)| {
+            rows.first().map(|(message, _, _)| message.session_id.clone())
+        })
         .collect();
 
     let mut cache_sessions = HashSet::new();
@@ -82,10 +86,12 @@ pub fn parse_antigravity_sources(paths: &[PathBuf]) -> Vec<UnifiedMessage> {
     // The same cascade could in principle be present under both the stable and
     // the Insiders data dir; keep the first copy of each response.
     let mut seen_response_ids: HashSet<String> = HashSet::new();
+    // A generation index identifies a row only within its own cascade.
+    let mut seen_generation_indices = HashSet::new();
     let mut messages = Vec::new();
-    for (complete, rows) in db_scans {
+    for (session_stem, complete, rows) in db_scans {
         if !complete {
-            let Some((first, _)) = rows.first() else {
+            let Some((first, _, _)) = rows.first() else {
                 continue;
             };
             let session = first.session_id.as_str();
@@ -93,7 +99,7 @@ pub fn parse_antigravity_sources(paths: &[PathBuf]) -> Vec<UnifiedMessage> {
                 continue;
             }
         }
-        for (mut message, has_turn_timestamp) in rows {
+        for (mut message, has_turn_timestamp, gen_idx) in rows {
             if let Some(id) = message.dedup_key.as_deref() {
                 if !seen_response_ids.insert(id.to_owned()) {
                     continue;
@@ -107,6 +113,11 @@ pub fn parse_antigravity_sources(paths: &[PathBuf]) -> Vec<UnifiedMessage> {
                         message.set_timestamp(timestamp);
                     }
                 }
+            } else if session_stem
+                .zip(gen_idx)
+                .is_some_and(|key| !seen_generation_indices.insert(key))
+            {
+                continue;
             }
             messages.push(message);
         }
@@ -247,8 +258,9 @@ mod tests {
     const CACHE_TIME: i64 = 1_711_200_000_000;
 
     fn write_cache(path: &Path, session_id: &str, rows: &[(&str, i64)]) {
+        let meta_time = CACHE_TIME - 1_000;
         let mut lines = format!(
-            "{{\"type\":\"session_meta\",\"sessionId\":\"{session_id}\",\"modelId\":\"gemini-3.1-pro\",\"timestamp\":null}}\n"
+            "{{\"type\":\"session_meta\",\"sessionId\":\"{session_id}\",\"modelId\":\"gemini-3.1-pro\",\"timestamp\":{meta_time}}}\n"
         );
         for (response_id, timestamp) in rows {
             lines.push_str(&format!(
@@ -396,6 +408,7 @@ mod tests {
                 build_row_with_gen9(&enc_len(4, &session_created), "explicit"),
                 build_row(model, None, "step"),
                 build_row(model, None, "no-match"),
+                build_row(model, None, "cache-no-time"),
             ],
         );
         {
@@ -423,19 +436,21 @@ mod tests {
                 ("explicit", CACHED_TURN + 1),
                 ("step", CACHED_TURN + 2),
                 ("cache-only", CACHED_TURN + 3),
+                ("cache-no-time", 0),
             ],
         );
         write_cache(&other_cache, "other", &[("no-match", CACHED_TURN + 4)]);
 
         let messages = parse_antigravity_sources(&[cache, db, other_cache]);
-        assert_eq!(messages.len(), 5);
-        let times: Vec<_> = messages[..4].iter().map(|m| m.timestamp).collect();
+        assert_eq!(messages.len(), 6);
+        let times: Vec<_> = messages[..5].iter().map(|m| m.timestamp).collect();
         assert_eq!(
             times,
             [
                 CACHED_TURN,
                 SESSION_SECONDS as i64 * 1_000,
                 STEP_SECONDS as i64 * 1_000,
+                SESSION_SECONDS as i64 * 1_000,
                 SESSION_SECONDS as i64 * 1_000,
             ]
         );
@@ -449,7 +464,7 @@ mod tests {
                 .format("%Y-%m-%d")
                 .to_string()
         );
-        assert_eq!(messages[4].session_id, "other");
+        assert_eq!(messages[5].session_id, "other");
     }
 
     #[test]
@@ -488,6 +503,33 @@ mod tests {
 
         let messages = parse_antigravity_sources(&[insiders.join("c.db"), stable.join("c.db")]);
         assert_eq!(messages.len(), 1);
+    }
+
+    #[test]
+    fn generations_without_response_ids_dedupe_by_cascade_and_index() {
+        let dir = tempfile::tempdir().unwrap();
+        let stable = dir.path().join("antigravity");
+        let insiders = dir.path().join("antigravity-insiders");
+        std::fs::create_dir(&stable).unwrap();
+        std::fs::create_dir(&insiders).unwrap();
+        let stable_db = stable.join("shared.db");
+        let insiders_db = insiders.join("shared.db");
+        let other_db = insiders.join("other.db");
+
+        let mut chat_model = enc_len(4, &enc_varint(9, 300));
+        chat_model.extend(enc_len(19, b"gemini-3-flash-a"));
+        let row = enc_len(1, &chat_model);
+        write_conversation(&stable_db, std::slice::from_ref(&row));
+        write_conversation(&other_db, std::slice::from_ref(&row));
+        // The second generation has identical usage but a different index.
+        write_conversation(&insiders_db, &[row.clone(), row]);
+
+        let messages = parse_antigravity_sources(&[stable_db, insiders_db, other_db]);
+        let sessions: Vec<_> = messages.iter().map(|m| m.session_id.as_str()).collect();
+        assert_eq!(sessions, ["shared", "shared", "other"]);
+        assert!(messages
+            .iter()
+            .all(|m| m.dedup_key.is_none() && m.tokens.output == 300));
     }
 
     #[test]

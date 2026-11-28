@@ -18,9 +18,10 @@ use super::utils::{file_modified_timestamp_ms, for_each_json_line_with_bytes, pa
 use super::{normalize_workspace_key, workspace_label_from_key, UnifiedMessage};
 use crate::provider_identity::inferred_provider_from_model;
 use crate::TokenBreakdown;
+use chrono::{DateTime, Datelike, Utc};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::ops::ControlFlow;
 use std::path::Path;
 
@@ -46,34 +47,61 @@ use std::path::Path;
 /// Cached rows from v2 have no speed evidence for those records.
 pub const PI_FORMAT_PARSER_BASE_VERSION: u32 = 3;
 
-/// Keep Pi's RFC 3339 strings and normalize kwwk's epoch milliseconds.
-fn decode_flexible_timestamp(value: serde_json::Value) -> Option<String> {
-    match value {
-        serde_json::Value::String(text) => Some(text),
-        serde_json::Value::Number(number) => number
-            .as_i64()
-            .or_else(|| number.as_f64().map(|f| f as i64))
-            .and_then(chrono::DateTime::<chrono::Utc>::from_timestamp_millis)
-            .map(|at| at.to_rfc3339_opts(chrono::SecondsFormat::Millis, true)),
-        _ => None,
-    }
+// Preserve the existing interpretation for Pi-format clients other than
+// kwwk and Prime. Neither of their timestamp contracts needs a float cast.
+fn legacy_numeric_timestamp(number: &serde_json::Number) -> Option<DateTime<Utc>> {
+    number
+        .as_i64()
+        .or_else(|| number.as_f64().map(|f| f as i64))
+        .and_then(DateTime::from_timestamp_millis)
 }
 
 fn deserialize_flexible_timestamp<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
-    Ok(Option::<serde_json::Value>::deserialize(deserializer)?.and_then(decode_flexible_timestamp))
+    Ok(match serde_json::Value::deserialize(deserializer)? {
+        serde_json::Value::String(text) => Some(text),
+        serde_json::Value::Number(number) => legacy_numeric_timestamp(&number)
+            .map(|at| at.to_rfc3339_opts(chrono::SecondsFormat::Millis, true)),
+        _ => None,
+    })
 }
 
-fn deserialize_entry_timestamp<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+/// Keep JSON numbers distinct from RFC 3339 strings until the client is known.
+#[derive(Debug, Default)]
+pub enum PiEntryTimestamp {
+    #[default]
+    Missing,
+    Text(String),
+    Number(serde_json::Number),
+    Invalid,
+}
+
+impl PiEntryTimestamp {
+    pub fn as_deref(&self) -> Option<&str> {
+        match self {
+            Self::Text(text) => Some(text),
+            _ => None,
+        }
+    }
+
+    fn text_millis(&self) -> Option<i64> {
+        DateTime::parse_from_rfc3339(self.as_deref()?)
+            .ok()
+            .map(|timestamp| timestamp.timestamp_millis())
+    }
+}
+
+fn deserialize_entry_timestamp<'de, D>(deserializer: D) -> Result<PiEntryTimestamp, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
-    // Use an invalid RFC 3339 string for present but undecodable values.
-    // Prime's child timestamp check must not mistake damage for legacy absence.
-    let value = serde_json::Value::deserialize(deserializer)?;
-    Ok(Some(decode_flexible_timestamp(value).unwrap_or_default()))
+    Ok(match serde_json::Value::deserialize(deserializer)? {
+        serde_json::Value::String(text) => PiEntryTimestamp::Text(text),
+        serde_json::Value::Number(number) => PiEntryTimestamp::Number(number),
+        _ => PiEntryTimestamp::Invalid,
+    })
 }
 
 /// Pi session header (first line of JSONL)
@@ -250,7 +278,7 @@ pub struct PiSessionEntry {
     #[allow(dead_code)]
     pub parent_id: Option<String>,
     #[serde(default, deserialize_with = "deserialize_entry_timestamp")]
-    pub timestamp: Option<String>,
+    pub timestamp: PiEntryTimestamp,
     pub message: Option<PiMessage>,
     pub name: Option<String>,
     #[serde(rename = "targetId")]
@@ -604,6 +632,7 @@ struct PiEmittedRecord<'a> {
     provider: Option<&'a str>,
     response_id: Option<&'a str>,
     usage: &'a PiUsage,
+    tokens: TokenBreakdown,
     recorded_model: &'a str,
 }
 
@@ -611,53 +640,68 @@ fn pi_emitted_record<'a>(
     entry: &'a PiSessionEntry,
     options: PiParseOptions,
     is_rlm_subagent: bool,
+    summary_usage: Option<&'a PiUsage>,
 ) -> Option<PiEmittedRecord<'a>> {
-    if entry.entry_type != "message" {
-        return None;
-    }
+    let (provider, response_id, usage, recorded_model) = if let Some(usage) = summary_usage {
+        // kwwk's marker carries a metadata snapshot and aggregate usage,
+        // not a summary response or its provider's response id.
+        let metadata = |key: &str| entry.extra_fields.get(key).and_then(serde_json::Value::as_str);
+        (
+            metadata("provider"),
+            None,
+            usage,
+            metadata("model")
+                .filter(|model| !model.trim().is_empty())
+                .unwrap_or("unknown"),
+        )
+    } else {
+        if entry.entry_type != "message" {
+            return None;
+        }
+        let message = entry.message.as_ref()?;
+        if message.role.as_deref() != Some("assistant") {
+            return None;
+        }
 
-    let message = entry.message.as_ref()?;
-    if message.role.as_deref() != Some("assistant") {
-        return None;
-    }
+        // Prefer the served model over the provider's routing alias. Blank
+        // or replacement-damaged responseModel must not hide a valid model.
+        let recorded_model = message
+            .response_model
+            .as_deref()
+            .filter(|served| !served.trim().is_empty() && !has_replacement_character(served))
+            .or(message.model.as_deref())?;
+        (
+            message.provider.as_deref(),
+            message.response_id.as_deref(),
+            message.usage.as_ref()?,
+            recorded_model,
+        )
+    };
 
-    // An RLM child's completion timestamp participates in matching its
-    // usage back to the parent attribution. Treating an invalid timestamp as
-    // missing makes that match impossible while still emitting the child,
-    // so the parent's aggregate and child would both be counted. Other Pi
-    // messages do not use this timestamp as a
-    // reconciliation join and remain recoverable.
+    // Prime records ISO strings on the entry, not the numeric timestamp of
+    // the nested message. An invalid child timestamp prevents matching to its
+    // parent's aggregate; emitting that child would count the usage twice.
     if options.lossy_line_reader
         && is_rlm_subagent
         && (entry.has_damaged_timestamp()
-            || entry
-                .timestamp
-                .as_deref()
-                .is_some_and(|timestamp| chrono::DateTime::parse_from_rfc3339(timestamp).is_err()))
+            || (!matches!(entry.timestamp, PiEntryTimestamp::Missing)
+                && entry.timestamp.text_millis().is_none()))
     {
         return None;
     }
 
-    let usage = message.usage.as_ref()?;
-    if options.lossy_line_reader && usage.has_damaged_key() {
+    if (summary_usage.is_some() || options.lossy_line_reader) && usage.has_damaged_key() {
         return None;
     }
-
-    // `responseModel` is what served the request; `model` is what the client
-    // asked for. When a reverse proxy sits in front, the latter is the proxy's
-    // own routing alias — not a model name, and not a name any pricing table
-    // can resolve. Prefer the served model, and fall back to the requested one
-    // when it is absent, blank, or replacement-damaged, so an unusable
-    // `responseModel` never costs the record its `model` as well.
-    let recorded_model = message
-        .response_model
-        .as_deref()
-        .filter(|served| !served.trim().is_empty() && !has_replacement_character(served))
-        .or(message.model.as_deref())?;
+    let tokens = usage.to_breakdown();
+    if summary_usage.is_some() && tokens.total() == 0 {
+        return None;
+    }
     Some(PiEmittedRecord {
-        provider: message.provider.as_deref(),
-        response_id: message.response_id.as_deref(),
+        provider,
+        response_id,
         usage,
+        tokens,
         recorded_model,
     })
 }
@@ -665,7 +709,7 @@ fn pi_emitted_record<'a>(
 /// [`pi_emitted_record`] under the preset RLM transcripts are parsed with, as a
 /// yes/no answer for a walk that already holds the emitted messages.
 pub(crate) fn rlm_entry_emits_message(entry: &PiSessionEntry, is_rlm_subagent: bool) -> bool {
-    pi_emitted_record(entry, PiParseOptions::prime_agent(), is_rlm_subagent).is_some()
+    pi_emitted_record(entry, PiParseOptions::prime_agent(), is_rlm_subagent, None).is_some()
 }
 
 fn parse_pi_format_file_inner(
@@ -690,6 +734,7 @@ fn parse_pi_format_file_inner(
     // A header this parser rejects discards the whole transcript, not one
     // record, so the sink stops the scan and nothing is returned.
     let mut malformed_transcript = false;
+    let mut compaction_occurrences = HashMap::new();
 
     for_each_json_line_with_bytes(path, &mut |line| {
         // Pi, Senpi and Kimchi keep the byte-strict record skipping of
@@ -779,7 +824,8 @@ fn parse_pi_format_file_inner(
             return ControlFlow::Continue(());
         }
 
-        let summary_usage = if is_kwwk && entry.entry_type == "compaction" {
+        let is_compaction = is_kwwk && entry.entry_type == "compaction";
+        let summary_usage = if is_compaction {
             entry
                 .extra_fields
                 .remove("usage")
@@ -787,29 +833,14 @@ fn parse_pi_format_file_inner(
         } else {
             None
         };
-        let emitted = if let Some(usage) = summary_usage.as_ref() {
-            // The only model/provider available here are the session metadata
-            // recorded alongside the summary usage.
-            let metadata = |key: &str| {
-                entry.extra_fields.get(key).and_then(serde_json::Value::as_str)
-            };
-            Some(PiEmittedRecord {
-                provider: metadata("provider"),
-                response_id: None,
-                usage,
-                recorded_model: metadata("model")
-                    .filter(|model| !model.trim().is_empty())
-                    .unwrap_or("unknown"),
-            })
-        } else {
-            pi_emitted_record(&entry, options, is_rlm_subagent)
-        };
         let Some(PiEmittedRecord {
             provider,
             response_id,
             usage,
+            tokens,
             recorded_model,
-        }) = emitted else {
+        }) = pi_emitted_record(&entry, options, is_rlm_subagent, summary_usage.as_ref())
+        else {
             observer.observe_entry(&entry, None);
             return ControlFlow::Continue(());
         };
@@ -837,11 +868,20 @@ fn parse_pi_format_file_inner(
                 .to_string(),
         };
 
-        let recorded_timestamp = entry
-            .timestamp
-            .as_deref()
-            .and_then(|timestamp| chrono::DateTime::parse_from_rfc3339(timestamp).ok())
-            .map(|timestamp| timestamp.timestamp_millis());
+        let recorded_timestamp = match &entry.timestamp {
+            // Swift writes signed Int64 epoch milliseconds. Small and negative
+            // integers are valid; a seconds-like magnitude is not a unit tag.
+            PiEntryTimestamp::Number(number) if is_kwwk => number
+                .as_i64()
+                .filter(|&millis| DateTime::from_timestamp_millis(millis).is_some()),
+            PiEntryTimestamp::Number(number) if !options.lossy_line_reader => {
+                legacy_numeric_timestamp(number)
+                    // Preserve the previous RFC 3339 roundtrip's year range.
+                    .filter(|at| (0..=9999).contains(&at.year()))
+                    .map(|at| at.timestamp_millis())
+            }
+            _ => entry.timestamp.text_millis(),
+        };
         let timestamp = recorded_timestamp.unwrap_or(fallback_timestamp);
 
         let mut unified = UnifiedMessage::new_with_agent(
@@ -850,7 +890,7 @@ fn parse_pi_format_file_inner(
             provider.as_str(),
             session_id.clone().unwrap_or_else(|| "unknown".to_string()),
             timestamp,
-            usage.to_breakdown(),
+            tokens,
             0.0,
             agent.clone(),
         );
@@ -859,7 +899,19 @@ fn parse_pi_format_file_inner(
             usage.apply_kwwk_usage_details(&mut unified);
         }
         if let Some(namespace) = dedup_namespace {
-            if options.cross_session_dedup {
+            if is_compaction {
+                // kwwk has no marker id. Use the session's recording time
+                // and occurrence at that time, not the physical line position:
+                // kwwk can rewrite the projection or remove a corrupt line.
+                let occurrence = compaction_occurrences.entry(recorded_timestamp).or_insert(0usize);
+                *occurrence += 1;
+                let id = &unified.session_id;
+                let key = match recorded_timestamp {
+                    Some(at) => format!("{namespace}:compaction:{id}:{at}:{occurrence}"),
+                    None => format!("{namespace}:compaction:{id}:missing:{occurrence}"),
+                };
+                unified.dedup_key = Some(key);
+            } else if options.cross_session_dedup {
                 let clean_response_key = response_id
                     .filter(|id| {
                         !id.trim().is_empty()
@@ -1112,9 +1164,10 @@ mod tests {
     }
 
     #[test]
-    fn prime_wrong_typed_child_timestamps_do_not_double_count_attributed_usage() {
+    fn prime_invalid_child_timestamps_do_not_double_count_attributed_usage() {
         use super::super::prime_agent::{
-            parse_prime_agent_file_with_accounting, reconcile_prime_agent_messages,
+            analyze_prime_agent_accounting, parse_prime_agent_file_with_accounting,
+            reconcile_prime_agent_messages,
         };
 
         let dir = tempfile::tempdir().unwrap();
@@ -1134,22 +1187,36 @@ mod tests {
 {"type":"message","id":"wrong-bool","timestamp":true,"message":{"role":"assistant","model":"claude-opus-5","usage":{"input":50}}}
 {"type":"message","id":"wrong-object","timestamp":{"seconds":1},"message":{"role":"assistant","model":"claude-opus-5","usage":{"input":50}}}
 {"type":"message","id":"wrong-null","timestamp":null,"message":{"role":"assistant","model":"claude-opus-5","usage":{"input":50}}}
+{"type":"message","id":"wrong-epoch","timestamp":0,"message":{"role":"assistant","model":"claude-opus-5","usage":{"input":50}}}
+{"type":"message","id":"wrong-negative","timestamp":-1,"message":{"role":"assistant","model":"claude-opus-5","usage":{"input":50}}}
+{"type":"message","id":"wrong-small","timestamp":1,"message":{"role":"assistant","model":"claude-opus-5","usage":{"input":50}}}
+{"type":"message","id":"wrong-seconds","timestamp":1786147202,"message":{"role":"assistant","model":"claude-opus-5","usage":{"input":50}}}
+{"type":"message","id":"wrong-millis","timestamp":1786147202000,"message":{"role":"assistant","model":"claude-opus-5","usage":{"input":50}}}
+{"type":"message","id":"wrong-fraction","timestamp":1786147202000.5,"message":{"role":"assistant","model":"claude-opus-5","usage":{"input":50}}}
 {"type":"message","id":"legacy","message":{"role":"assistant","model":"claude-opus-5","usage":{"input":3}}}
+{"type":"message","id":"iso-epoch","timestamp":"1970-01-01T00:00:00Z","message":{"role":"assistant","model":"claude-opus-5","timestamp":0,"usage":{"input":4}}}
 "#,
         )
         .unwrap();
 
         let (mut messages, parent_accounting) = parse_prime_agent_file_with_accounting(&parent);
         let (child_messages, child_accounting) = parse_prime_agent_file_with_accounting(&child);
+        let replayed_accounting = analyze_prime_agent_accounting(&child, &child_messages);
         messages.extend(child_messages);
-        let reconciled =
-            reconcile_prime_agent_messages(messages, &[parent_accounting, child_accounting]);
-        assert_eq!(reconciled.len(), 2);
-        assert_eq!(reconciled[0].tokens.input, 150);
-        assert_eq!(reconciled[1].tokens.input, 3);
-        // Ordinary Pi has no parent accounting and keeps all four usage rows.
+        for accounting in [child_accounting, replayed_accounting] {
+            let reconciled = reconcile_prime_agent_messages(
+                messages.clone(),
+                &[parent_accounting.clone(), accounting],
+            );
+            assert_eq!(reconciled.len(), 3);
+            assert_eq!(reconciled[0].tokens.input, 150);
+            assert_eq!(reconciled[1].tokens.input, 3);
+            assert_eq!(reconciled[2].tokens.input, 4);
+            assert_eq!(reconciled[2].timestamp, 0);
+        }
+        // Ordinary Pi keeps usage independently of Prime's accounting join.
         let pi_input: i64 = parse_pi_file(&child).iter().map(|row| row.tokens.input).sum();
-        assert_eq!(pi_input, 153);
+        assert_eq!(pi_input, 457);
     }
 
     #[test]

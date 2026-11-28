@@ -140,6 +140,19 @@ pub struct CodexTokenUsage {
     pub total_tokens: Option<i64>,
 }
 
+impl CodexTokenUsage {
+    fn has_counters(&self) -> bool {
+        matches!(self.input_tokens, Some(0..))
+            || matches!(self.output_tokens, Some(0..))
+            || matches!(self.cached_input_tokens, Some(0..))
+            || matches!(self.cache_read_input_tokens, Some(0..))
+            || matches!(self.cache_write_input_tokens, Some(0..))
+            || matches!(self.cache_creation_input_tokens, Some(0..))
+            || matches!(self.reasoning_output_tokens, Some(0..))
+            || matches!(self.total_tokens, Some(0..))
+    }
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct CodexTotals {
     input: i64,
@@ -500,7 +513,7 @@ fn codex_originator_is_openclaw(originator: Option<&str>) -> bool {
 #[derive(Debug, Clone)]
 pub(crate) struct ParsedCodexFile {
     pub messages: Vec<UnifiedMessage>,
-    /// A token_count outside inherited fork history, even if it emitted no usage.
+    /// A usable token_count outside inherited fork history, including explicit zeros.
     pub has_owned_token_count: bool,
     pub fallback_timestamp_indices: Vec<usize>,
     pub consumed_offset: u64,
@@ -834,7 +847,6 @@ fn parse_codex_reader<R: BufRead>(
                 // Process token_count events
                 if is_token_count {
                     let Some(info) = payload.info else {
-                        has_owned_token_count = true;
                         continue;
                     };
 
@@ -855,8 +867,19 @@ fn parse_codex_reader<R: BufRead>(
                     // Upstream totals are mutable snapshots (compaction, context-window
                     // capping can rewrite them), so we only use total_token_usage for
                     // dedup and monotonicity checks — never as a direct delta source.
-                    let total_usage = info.total_token_usage.as_ref().map(CodexTotals::from_usage);
-                    let last_usage = info.last_token_usage.as_ref().map(CodexTotals::from_usage);
+                    let total_snapshot = info
+                        .total_token_usage
+                        .as_ref()
+                        .filter(|usage| usage.has_counters());
+                    let last_snapshot = info
+                        .last_token_usage
+                        .as_ref()
+                        .filter(|usage| usage.has_counters());
+                    if total_snapshot.is_none() && last_snapshot.is_none() {
+                        continue;
+                    }
+                    let total_usage = total_snapshot.map(CodexTotals::from_usage);
+                    let last_usage = last_snapshot.map(CodexTotals::from_usage);
                     let compaction = state.pending_compaction.take().filter(|(_, _, compacted)| {
                         *compacted
                             && total_usage.is_some()
@@ -868,11 +891,8 @@ fn parse_codex_reader<R: BufRead>(
                     // token_count row after the first child turn_context,
                     // often with child-local timestamps. Keep the inherited
                     // baseline active until totals move beyond it.
-                    if forked_child_should_skip_inherited_snapshot(
-                        &state,
-                        info.total_token_usage.as_ref(),
-                        total_usage,
-                    ) {
+                    if forked_child_should_skip_inherited_snapshot(&state, total_snapshot, total_usage)
+                    {
                         continue;
                     }
                     has_owned_token_count = true;
@@ -1580,7 +1600,11 @@ fn reported_total_tokens(usage: &CodexTokenUsage) -> Option<i64> {
 }
 
 fn remember_forked_child_inherited_baseline(state: &mut CodexParseState, info: &CodexInfo) {
-    let Some(total_usage) = info.total_token_usage.as_ref() else {
+    let Some(total_usage) = info
+        .total_token_usage
+        .as_ref()
+        .filter(|usage| usage.has_counters())
+    else {
         return;
     };
 

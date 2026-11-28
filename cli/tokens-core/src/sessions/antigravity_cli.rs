@@ -82,17 +82,18 @@ pub fn parse_antigravity_cli_file(path: &Path) -> Vec<UnifiedMessage> {
 /// differs.
 pub fn parse_antigravity_conversation_db(path: &Path, client: &'static str) -> Vec<UnifiedMessage> {
     let mut messages = Vec::new();
-    scan_antigravity_conversation_db(path, client, &mut |message, _| messages.push(message));
+    scan_antigravity_conversation_db(path, client, &mut |message, _, _| messages.push(message));
     messages
 }
 
 /// Emit readable usage even if scanning fails. Return true only if the usage
 /// query reached EOF and decoded every SQLite row. Each emitted message carries
-/// whether its time came from a generation rather than the session or mtime.
+/// whether its time came from a generation rather than the session or mtime,
+/// plus the original SQLite generation index.
 pub(super) fn scan_antigravity_conversation_db(
     path: &Path,
     client: &'static str,
-    emit: &mut dyn FnMut(UnifiedMessage, bool),
+    emit: &mut dyn FnMut(UnifiedMessage, bool, Option<i64>),
 ) -> bool {
     let Some(conn) = open_readonly_sqlite_opt(path) else {
         return false;
@@ -152,7 +153,7 @@ pub(super) fn scan_antigravity_conversation_db(
             if meta.workspace_key.is_some() {
                 message.set_workspace(meta.workspace_key.clone(), meta.workspace_label.clone());
             }
-            emit(message, has_turn_timestamp);
+            emit(message, has_turn_timestamp, *gen_idx);
         }
     }
 
@@ -326,7 +327,7 @@ fn is_rejected_generation(blob: &[u8]) -> bool {
     }
     let Some(usage) = message_field(blob, 1).and_then(|chat_model| message_field(chat_model, 4))
     else {
-        return false;
+        return true;
     };
     non_empty_string_field(usage, 11).is_none()
         && [5, 9, 10]
@@ -1242,11 +1243,14 @@ pub(super) mod tests {
     fn rejected_generations_are_not_model_evidence() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("rejected-model-evidence.db");
+        let mut rejected_without_usage = enc_len(1, &enc_len(19, b"gemini-3.1-pro"));
+        rejected_without_usage.extend(enc_len(5, b"PERMISSION_DENIED (code 403)"));
         write_conversation(
             &path,
             &[
                 build_row(None, None, "continuation"),
                 build_failed_row("PERMISSION_DENIED (code 403)"),
+                rejected_without_usage,
                 build_row(Some("gemini-3-flash-a"), Some("Gemini 3.5 Flash (High)"), "served"),
             ],
         );

@@ -16,9 +16,10 @@
 //!
 //! Newer TRAE CLI rollouts carry the transcript in `history_mutation` records
 //! and per-response usage in `token_usage_record.payload.usage`. A
-//! `token_count` event owned by the thread takes precedence. Like Codex, TRAE
-//! can report inclusive input; its `total_tokens` also identifies disjoint
-//! cache buckets when recorded separately.
+//! usable `token_count` snapshot owned by the thread takes precedence, even
+//! when it explicitly reports zero usage. Like Codex, TRAE can report inclusive
+//! input; its `total_tokens` also identifies disjoint cache buckets when
+//! recorded separately.
 //!
 //! Sources: the store layout and both rollout dialects follow the TraeX
 //! readers in kenn-io/agentsview (`internal/parser/traex.go`, `types.go`,
@@ -122,8 +123,8 @@ fn history_mutation_has_human_turn(payload: &Value) -> bool {
     })
 }
 
-/// Read per-response usage after the Codex pass found no owned `token_count`.
-/// Replayed snapshots do not establish the child's usage dialect.
+/// Read per-response usage after the Codex pass found no owned usage snapshot.
+/// Replayed or usage-free events do not establish the child's usage dialect.
 fn parse_token_usage_records(path: &Path) -> Vec<UnifiedMessage> {
     let is_archive = is_zst_path(path);
     let Some(mut reader) = open_rollout(path, is_archive) else {
