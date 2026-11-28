@@ -2283,7 +2283,9 @@ fn scan_all_clients_with_env_strategy_inner(
                 PathBuf::from(join_native(&root, "logs/sessions")),
                 "qoder-segments",
             );
-            result.qoder_config_roots.push((PathBuf::from(root), source));
+            let root = PathBuf::from(root);
+            let root = crate::sessions::qoder::absolute_source_path(&root).unwrap_or(root);
+            result.qoder_config_roots.push((root, source));
         }
         // A user may place one edition's root inside the other's.
         result
@@ -2884,6 +2886,7 @@ fn scan_all_clients_with_env_strategy_inner(
         let mut candidates =
             crate::sessions::qoder::qoder_ide_db_candidates(Path::new(&app_data), use_env_roots);
         candidates.extend(extra_qoder_dbs.into_iter().map(|path| {
+            let path = crate::sessions::qoder::absolute_source_path(&path).unwrap_or(path);
             let source = result.qoder_source(&path);
             (path, source)
         }));

@@ -97,7 +97,8 @@ use std::path::{Path, PathBuf};
 /// - Version 5: independent provider evidence and complete Qoder observation snapshots.
 /// - Version 6: reject incomplete JSONL prefixes and unverified SQLite cache entries.
 /// - Version 7: share the absolute JSONL path between parsing and caching.
-pub const QODER_PARSER_BASE_VERSION: u32 = 7;
+/// - Version 8: determine edition and anonymous identity from one lexical path.
+pub const QODER_PARSER_BASE_VERSION: u32 = 8;
 
 /// Public client id. Both editions report under it.
 pub const CLIENT_ID: &str = "qoder";
@@ -1619,6 +1620,12 @@ pub fn qoder_ide_db_candidates(
     candidates
 }
 
+/// Normalize `.` and separators without resolving symlinks; the spelling of
+/// a link determines workspace inference and sibling metadata discovery.
+pub(crate) fn absolute_source_path(path: &Path) -> std::io::Result<PathBuf> {
+    std::path::absolute(path).map(|absolute| absolute.components().collect())
+}
+
 /// Parse and deduplicate all Qoder sources before emitting report messages.
 pub(crate) fn parse_qoder_lane(
     scan: &ScanResult,
@@ -1632,33 +1639,23 @@ pub(crate) fn parse_qoder_lane(
     if paths.is_empty() && scan.qoder_ide_dbs.is_empty() {
         return Vec::new();
     }
-    let sources = paths
-        .par_iter()
-        .map(|path| (path.as_path(), scan.qoder_source(path)))
-        .chain(
-            scan.qoder_ide_dbs
-                .par_iter()
-                .map(|(path, source)| (path.as_path(), *source)),
-        );
-    let observations = sources
-        .flat_map_iter(|(path, source)| {
-            if is_qoder_ide_db(path) {
-                return match &cache {
-                    Some(cache) => cache.load_or_scan_ide(path, source),
-                    None => scan_qoder_ide_db(path, source).messages,
-                };
-            }
-            // Use one path for the cache key, sidecar fingerprint and parse.
-            // Canonicalization would lose the link's project and sidecar paths.
-            let Ok(absolute) = std::path::absolute(path) else {
-                return scan_qoder_jsonl_file(path, source).0;
-            };
-            match &cache {
-                Some(cache) => cache.load_or_parse(&absolute, source, scan_qoder_jsonl_file),
-                None => scan_qoder_jsonl_file(&absolute, source).0,
-            }
-        })
-        .collect();
+    let jsonl = paths.par_iter().flat_map_iter(|path| {
+        let Ok(absolute) = absolute_source_path(path) else {
+            return scan_qoder_jsonl_file(path, scan.qoder_source(path)).0;
+        };
+        let source = scan.qoder_source(&absolute);
+        match &cache {
+            Some(cache) => cache.load_or_parse(&absolute, source, scan_qoder_jsonl_file),
+            None => scan_qoder_jsonl_file(&absolute, source).0,
+        }
+    });
+    let ide = scan.qoder_ide_dbs.par_iter().flat_map_iter(|(path, source)| {
+        match &cache {
+            Some(cache) => cache.load_or_scan_ide(path, *source),
+            None => scan_qoder_ide_db(path, *source).messages,
+        }
+    });
+    let observations = jsonl.chain(ide).collect();
     collapse_qoder_messages(observations)
 }
 

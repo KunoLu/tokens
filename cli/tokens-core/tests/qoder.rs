@@ -1120,12 +1120,22 @@ async fn test_qoder_jsonl_relative_and_absolute_cache_paths_agree() {
     const TEST: &str = "test_qoder_jsonl_relative_and_absolute_cache_paths_agree";
     if !is_qoder_test_child(TEST) {
         let profile = common::temp_home();
-        let projects = profile.path().join(".qoder/projects");
-        std::fs::create_dir_all(&projects).unwrap();
-        run_qoder_test_child(qoder_test_command(TEST, profile.path()).current_dir(projects));
+        for edition in [".qoder", ".qoder-cn"] {
+            let projects = profile.path().join(edition).join("projects");
+            std::fs::create_dir_all(&projects).unwrap();
+            run_qoder_test_child(qoder_test_command(TEST, profile.path()).current_dir(projects));
+        }
         return;
     }
     let projects = std::env::current_dir().unwrap();
+    let cn = projects.parent().unwrap().ends_with(".qoder-cn");
+    let namespace = if cn { "qoder-cn" } else { "qoder" };
+    let entries = || {
+        let directory = qoder_observation_dir().with_file_name(namespace);
+        std::fs::read_dir(directory).into_iter().flatten()
+            .map(|entry| entry.unwrap().path())
+            .filter(|path| path.extension().is_some_and(|ext| ext == "bin"))
+    };
     let home = common::temp_home();
     let options_for = |root| {
         let mut options = qoder_options(home.path());
@@ -1146,11 +1156,11 @@ async fn test_qoder_jsonl_relative_and_absolute_cache_paths_agree() {
         )
         .unwrap();
 
-        let options = [options_for(PathBuf::from(slug)), options_for(absolute)];
+        let options = [options_for(PathBuf::from(".").join(slug)), options_for(absolute)];
         let scan =
             |index: usize| parse_local_unified_messages_with_pricing(options[index].clone(), None);
         let cold = scan(first).await.unwrap();
-        let shards: Vec<_> = qoder_observation_entries().collect();
+        let shards: Vec<_> = entries().collect();
         assert_eq!(shards.len(), 2 * (case + 1));
         let mark = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
         for shard in &shards {
@@ -1169,6 +1179,9 @@ async fn test_qoder_jsonl_relative_and_absolute_cache_paths_agree() {
         let expected = uncached(1).await.unwrap();
         assert_eq!(expected.len(), 2);
         assert_eq!(total_tokens(&expected), 34);
+        for message in &expected {
+            assert!(message.dedup_key.as_deref().unwrap().starts_with(&format!("qoder:{namespace}:")));
+        }
         assert!(expected
             .iter()
             .all(|message| message.workspace_key.as_deref() == Some(slug)));
@@ -1178,7 +1191,7 @@ async fn test_qoder_jsonl_relative_and_absolute_cache_paths_agree() {
         assert_eq!(warm, expected);
         assert_eq!(cold, expected);
         assert_eq!(uncached(0).await.unwrap(), expected);
-        assert_eq!(qoder_observation_entries().count(), shards.len());
+        assert_eq!(entries().count(), shards.len());
         assert!(shards
             .iter()
             .all(|shard| shard.metadata().unwrap().modified().unwrap() == mark));
