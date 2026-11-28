@@ -913,6 +913,24 @@ const VERBATIM_PREFIX_UTF16: [u16; 4] = [
     BACKSLASH_UTF16,
 ];
 
+#[cfg(windows)]
+fn windows_identity_units(units: impl Iterator<Item = u16> + Clone) -> impl Iterator<Item = u16> {
+    let verbatim = units.clone().take(4).eq(VERBATIM_PREFIX_UTF16);
+    units.map(move |unit| {
+        if !verbatim && unit == FORWARD_SLASH_UTF16 { BACKSLASH_UTF16 } else { unit }
+    })
+}
+
+#[cfg(windows)]
+pub(crate) fn windows_path_digest(path: &Path) -> Sha256 {
+    use std::os::windows::ffi::OsStrExt;
+    let mut hasher = Sha256::new();
+    for unit in windows_identity_units(path.as_os_str().encode_wide()) {
+        hasher.update(unit.to_le_bytes());
+    }
+    hasher
+}
+
 /// The stored spelling is kept verbatim so [`CachedPath::to_path_buf`] hands
 /// back exactly the path that was cached, but *identity* — equality, hashing
 /// and the shard digest — folds `/` into `\` first. See [`CachedPath::
@@ -964,14 +982,7 @@ impl CachedPath {
     /// so folding case could merge two real files. Separator folding has no such
     /// exception outside the verbatim namespace, which is why only it is safe.
     fn identity_units(&self) -> impl Iterator<Item = u16> + '_ {
-        let verbatim = self.0.starts_with(&VERBATIM_PREFIX_UTF16);
-        self.0.iter().map(move |unit| {
-            if !verbatim && *unit == FORWARD_SLASH_UTF16 {
-                BACKSLASH_UTF16
-            } else {
-                *unit
-            }
-        })
+        windows_identity_units(self.0.iter().copied())
     }
 
     fn update_digest(&self, hasher: &mut Sha256) {
@@ -1361,7 +1372,8 @@ fn parser_version(client: ClientId) -> u32 {
         // preserves replay identity independently of cumulative baselines.
         // v18 scopes snapshot identity across sessions and rollout copies.
         // v19 preserves response and turn identity across late model attribution.
-        ClientId::Codex => 19,
+        // v20 uses cache-equivalent Windows path separators for anonymous rollouts.
+        ClientId::Codex => 20,
         // v4->v5: jcode's assistant-message timestamp is now back-calculated
         // to the turn start (timestamp - tool_duration_ms) instead of using
         // the recorded (end-anchored) timestamp directly. Follow-up to #890.
@@ -4029,7 +4041,7 @@ mod tests {
         // compaction usage, and v12->v13 decodes `.jsonl.zst` rollouts.
         // Each bump is what stops an existing cache from replaying the old
         // rows, so it has to be asserted rather than assumed.
-        assert_eq!(parser_version(ClientId::Codex), 19);
+        assert_eq!(parser_version(ClientId::Codex), 20);
         assert_eq!(parser_version(ClientId::Claude), 2);
     }
 

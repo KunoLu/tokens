@@ -535,6 +535,9 @@ pub(crate) fn rollout_response_key(client: &str, owner: &str, response_id: &str)
 /// Anonymous rollouts in different directories are not proven copies. A
 /// plain file and its `.zst` variant use the same uncompressed path here.
 pub(crate) fn rollout_path_scope(uncompressed_path: &Path) -> String {
+    #[cfg(windows)]
+    let hash = crate::message_cache::windows_path_digest(uncompressed_path).finalize();
+    #[cfg(not(windows))]
     let hash = Sha256::digest(uncompressed_path.as_os_str().as_encoded_bytes());
     format!("file-{hash:x}")
 }
@@ -2863,6 +2866,15 @@ mod tests {
         let parsed = parse_codex_file_incremental(file.path(), 0, CodexParseState::default());
         assert!(parsed.messages.is_empty());
         assert_eq!(parsed.state.turn_coverage, CodexTurnCoverage::default());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn anonymous_rollout_scope_uses_windows_path_identity() {
+        let scope = |p: &str| rollout_path_scope(Path::new(p));
+        assert_eq!(scope(r"C:\home/.codex/sessions\a.jsonl"), scope(r"C:\home\.codex\sessions\a.jsonl"));
+        assert_ne!(scope(r"C:\a\session.jsonl"), scope(r"C:\b\session.jsonl"));
+        assert_ne!(scope(r"\\?\C:\a/b.jsonl"), scope(r"\\?\C:\a\b.jsonl"));
     }
 
     #[test]
