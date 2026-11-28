@@ -24,6 +24,7 @@
 - [20261127-v107-submission](20261127-v107-submission/task.md)
 - [20261127-v107-web-ui-docs](20261127-v107-web-ui-docs/task.md)
 - [20261128-v107-amp-sync](20261128-v107-amp-sync/task.md)
+- [20261128-v107-release-backfill](20261128-v107-release-backfill/task.md)
 - [20261128-v107-release-prep](20261128-v107-release-prep/task.md)
 - [brand-sweep](archive/2026-Q3/brand-sweep/task.md)
 - [prod-docker-assets](archive/2026-Q3/prod-docker-assets/task.md)
